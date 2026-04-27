@@ -11,6 +11,7 @@ export default function DashboardShell({
   viewer,
   title,
   showBackButton = false,
+  backHref = "",
   children,
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -23,6 +24,7 @@ export default function DashboardShell({
           navigation={navigation}
           viewer={viewer}
           showBackButton={showBackButton}
+          backHref={backHref}
           mobileOpen={mobileOpen}
           onClose={() => setMobileOpen(false)}
         />

@@ -16,6 +16,7 @@ export default function ProjectShell({
       viewer={viewer}
       title={title}
       showBackButton
+      backHref={`/${roleBase}/projects`}
     >
       {children}
     </DashboardShell>

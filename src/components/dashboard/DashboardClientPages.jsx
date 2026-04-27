@@ -729,11 +729,30 @@ function openEditClient() {
   
 async function saveClientChanges(e) {
   e.preventDefault();
-  await fetch("/api/project/client", {
+  setEditError("");
+  setEditMessage("");
+  const res = await fetch("/api/project", {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(clientForm),
+    body: JSON.stringify({
+      id: project.id,
+      name: project.name || "",
+      location: project.location || "",
+      clientName: clientForm.clientName || "",
+      clientContact: clientForm.clientContact || "",
+      clientEmail: clientForm.clientEmail || "",
+      clientAddress: clientForm.clientAddress || "",
+      startDate: project.start_date || "",
+      endDate: project.end_date || "",
+      contractValue: Number(project.contract_value || 0),
+    }),
   });
+  const json = await res.json().catch(() => null);
+  if (!res.ok) {
+    setEditError(json?.error || "client_update_failed");
+    return;
+  }
+  setEditMessage("Client info updated");
   setEditClientOpen(false);
   window.location.reload();
 }
@@ -746,8 +765,16 @@ async function saveClientChanges(e) {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        ...editForm,
-        contractValue: Number(editForm.contractValue || 0),
+        id: project.id,
+        name: projectForm.name || "",
+        location: projectForm.location || "",
+        clientName: project.client?.name || "",
+        clientContact: project.client?.contact || "",
+        clientEmail: project.client?.email || "",
+        clientAddress: project.client?.address || "",
+        startDate: projectForm.startDate || "",
+        endDate: projectForm.endDate || "",
+        contractValue: Number(projectForm.contractValue || 0),
       }),
     });
     const json = await res.json().catch(() => null);
@@ -755,8 +782,8 @@ async function saveClientChanges(e) {
       setEditError(json?.error || "project_update_failed");
       return;
     }
-    setEditMessage("Client info updated");
-    setEditOpen(false);
+    setEditMessage("Project info updated");
+    setEditProjectOpen(false);
     window.location.reload();
   }
 

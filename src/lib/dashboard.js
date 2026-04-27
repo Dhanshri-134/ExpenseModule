@@ -40,19 +40,19 @@ export const DASHBOARD_NAVIGATION = {
     },
     { href: "/owner/staff", label: "Staff", icon: TeamIcon, match: /^\/owner\/staff$/ },
     { href: "/owner/tasks", label: "Tasks", icon: InsightsIcon, match: /^\/owner\/tasks$/ },
-    { href: "/owner/settings", label: "Settings", icon: SettingsIcon, match: /^\/owner\/settings$/ },
+    // { href: "/owner/settings", label: "Settings", icon: SettingsIcon, match: /^\/owner\/settings$/ },
   ],
   manager: [
     { href: "/manager", label: "Overview", icon: DashboardIcon, match: /^\/manager$/ },
     { href: "/manager/projects", label: "Projects", icon: ProjectsIcon, match: /^\/manager\/projects/ },
     { href: "/manager/tasks", label: "Tasks", icon: InsightsIcon, match: /^\/manager\/tasks$/ },
-    { href: "/manager/settings", label: "Settings", icon: SettingsIcon, match: /^\/manager\/settings$/ },
+    // { href: "/manager/settings", label: "Settings", icon: SettingsIcon, match: /^\/manager\/settings$/ },
   ],
   employee: [
     { href: "/employee", label: "Overview", icon: DashboardIcon, match: /^\/employee$/ },
     { href: "/employee/projects", label: "Projects", icon: ProjectsIcon, match: /^\/employee\/projects$/ },
     { href: "/employee/tasks", label: "Tasks", icon: InsightsIcon, match: /^\/employee\/tasks$/ },
-    { href: "/employee/settings", label: "Settings", icon: SettingsIcon, match: /^\/employee\/settings$/ },
+    // { href: "/employee/settings", label: "Settings", icon: SettingsIcon, match: /^\/employee\/settings$/ },
   ],
 };
 
