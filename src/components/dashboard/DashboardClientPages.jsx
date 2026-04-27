@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/router";
 import { useEffect, useMemo, useState } from "react";
 import Modal from "@/components/dashboard/Modal";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 function cardClass(extra = "") {
   return `rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.08)] ${extra}`.trim();
@@ -22,6 +24,15 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString();
+}
+
+function getProjectErrorMessage(error) {
+  if (!error) return "";
+  if (error === "forbidden") return "You do not have access to this project.";
+  if (error === "invalid_project_id") return "This project link is invalid.";
+  if (error === "unauthenticated") return "Your session has expired. Please sign in again.";
+  if (error === "project_not_found") return "Project not found.";
+  return "Unable to load this project right now.";
 }
 
 function getProjectDefaultId(projects) {
@@ -51,6 +62,14 @@ function getProjectAssignmentSummary(item, projectId = "") {
 function getTaskAssigneeLabel(item, projectId = "") {
   const projectSummary = getProjectAssignmentSummary(item, projectId);
   return `${getStaffOptionLabel(item)} | ${roleName(item.role)} | ${projectSummary}`;
+}
+
+function getApproverOptions(staffData, projectId, role) {
+  const source = role === "manager" ? staffData.managers ?? [] : staffData.employees ?? [];
+  return source.filter((item) => {
+    if (!projectId) return true;
+    return (item.project_assignments ?? []).some((assignment) => assignment.project_id === projectId);
+  });
 }
 
 function LabeledField({ label, children }) {
@@ -336,6 +355,7 @@ function UpdatesCard({ logs }) {
 }
 
 export function DashboardOverview({ roleBase, canManageStaff = false }) {
+  const router = useRouter();
   const dashboard = useApi("/api/dashboard");
   const projects = useApi("/api/projects");
   const staff = useApi("/api/staff");
@@ -356,7 +376,7 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
       <SectionHeader title="Overview" />
 
       <section className="grid gap-4 md:grid-cols-3">
-        <button type="button" className={cardClass("text-left")} onClick={() => setModalType("projects")}>
+        <button type="button" className={cardClass("text-left")} onClick={() => router.push(`/${roleBase}/projects`)}>
           <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">Projects</div>
           <div className="mt-2 text-3xl font-extrabold">{summary?.projects?.total ?? 0}</div>
           <div className="mt-3 grid gap-1 text-sm text-[color:var(--acm-muted-fg)]">
@@ -373,7 +393,7 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
             <div>Employees: {summary?.staff?.employees ?? 0}</div>
           </div>
         </button>
-        <button type="button" className={cardClass("text-left")} onClick={() => setModalType("tasks")}>
+        <button type="button" className={cardClass("text-left")} onClick={() => router.push(`/${roleBase}/tasks`)}>
           <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">Tasks</div>
           <div className="mt-2 text-3xl font-extrabold">
             {roleBase === "owner" ? taskSummary.todayAssigned ?? 0 : taskSummary.myTasks?.total ?? 0}
@@ -657,6 +677,7 @@ export function ProjectDashboardView({ projectId, roleBase, ownerMode = false, s
   const updates = useApi(`/api/activity-logs?projectId=${projectId}`);
   const [selectedItem, setSelectedItem] = useState(null);
   const [selectedType, setSelectedType] = useState("");
+  const [selectedStaffGroup, setSelectedStaffGroup] = useState("");
   const [editProjectOpen, setEditProjectOpen] = useState(false);
 const [editClientOpen, setEditClientOpen] = useState(false);
   const [editMessage, setEditMessage] = useState("");
@@ -680,6 +701,7 @@ const [clientForm, setClientForm] = useState({
 
   const project = detail.data?.project;
   if (detail.loading) return <div className={cardClass()}>Loading project dashboard...</div>;
+  if (detail.error) return <div className={cardClass()}>{getProjectErrorMessage(detail.error)}</div>;
   if (!project) return <div className={cardClass()}>Project not found.</div>;
 
   function openEditProject() {
@@ -780,14 +802,14 @@ async function saveClientChanges(e) {
               <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{project.location || "-"}</div>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
+              <button type="button" onClick={() => setSelectedStaffGroup("managers")} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3 text-left">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">Managers</div>
                 <div className="mt-1 text-xl font-bold">{project.managers.length}</div>
-              </div>
-              <div className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
+              </button>
+              <button type="button" onClick={() => setSelectedStaffGroup("employees")} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3 text-left">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">Employees</div>
                 <div className="mt-1 text-xl font-bold">{project.employees.length}</div>
-              </div>
+              </button>
               <div className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">Tasks</div>
                 <div className="mt-1 text-xl font-bold">{project.tasks.length}</div>
@@ -902,6 +924,35 @@ async function saveClientChanges(e) {
         }}
       />
 
+      <Modal
+        open={Boolean(selectedStaffGroup)}
+        title={selectedStaffGroup === "managers" ? "Project Managers" : "Project Employees"}
+        onClose={() => setSelectedStaffGroup("")}
+      >
+        <div className="space-y-3">
+          {(selectedStaffGroup === "managers" ? project.managers : project.employees).map((entry) => (
+            <button
+              key={entry.user_id}
+              type="button"
+              onClick={() => {
+                setSelectedStaffGroup("");
+                setSelectedItem(entry);
+                setSelectedType("staff");
+              }}
+              className="w-full rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3 text-left"
+            >
+              <div className="font-semibold">{entry.staff?.name || entry.staff?.user_code || "Staff"}</div>
+              <div className="text-sm text-[color:var(--acm-muted-fg)]">
+                {entry.staff?.user_code || "-"} | Hourly Rate: {entry.hourly_rate ?? 0}
+              </div>
+            </button>
+          ))}
+          {!(selectedStaffGroup === "managers" ? project.managers : project.employees).length ? (
+            <div className="text-sm text-[color:var(--acm-muted-fg)]">No staff assigned in this group yet.</div>
+          ) : null}
+        </div>
+      </Modal>
+
      <Modal open={editClientOpen} title="Edit Client Info" onClose={() => setEditClientOpen(false)}>
   <form onSubmit={saveClientChanges} className="grid gap-3">
     <LabeledField label="Client Name">
@@ -972,6 +1023,9 @@ export function StaffManagerPage({
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [selectedProfile, setSelectedProfile] = useState(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyItems, setHistoryItems] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [editingStaff, setEditingStaff] = useState(null);
   const [taskTarget, setTaskTarget] = useState(null);
   const [form, setForm] = useState({
@@ -996,6 +1050,7 @@ export function StaffManagerPage({
     startDate: "",
     endDate: "",
     approvalRole: "manager",
+    approverUserId: "",
   });
 
   const staffData = useMemo(() => staff.data?.staff ?? { managers: [], employees: [] }, [staff.data]);
@@ -1004,6 +1059,7 @@ export function StaffManagerPage({
   const defaultProjectId = fixedProjectId || getProjectDefaultId(availableProjects);
   const selectedProjectId = form.projectId || defaultProjectId;
   const selectedAssignmentProjectId = assignForm.projectId || defaultProjectId;
+  const availableTaskApprovers = getApproverOptions(staffData, taskForm.projectId || fixedProjectId || "", taskForm.approvalRole);
   const visibleStaffData = useMemo(() => {
     if (!fixedProjectId) return staffData;
 
@@ -1136,6 +1192,21 @@ export function StaffManagerPage({
     setEditOpen(true);
   }
 
+  async function openHistory(item) {
+    setHistoryOpen(true);
+    setHistoryLoading(true);
+    setHistoryItems([]);
+    const res = await fetch(`/api/activity-logs?userId=${item.user_id}`);
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(json?.error || "history_fetch_failed");
+      setHistoryLoading(false);
+      return;
+    }
+    setHistoryItems(json?.logs ?? []);
+    setHistoryLoading(false);
+  }
+
   function openAssignTask(item) {
     const fallbackProjectId = fixedProjectId || item.project_assignments?.[0]?.project_id || item.created_in_project_id || "";
     setTaskTarget(item);
@@ -1147,6 +1218,7 @@ export function StaffManagerPage({
       startDate: "",
       endDate: "",
       approvalRole: "manager",
+      approverUserId: "",
     });
     setTaskOpen(true);
   }
@@ -1245,8 +1317,17 @@ export function StaffManagerPage({
         onClose={() => setSelectedProfile(null)}
         onSendEmail={ownerMode && selectedProfile ? () => onSendEmail(selectedProfile.user_id) : null}
         actions={
-          selectedProfile && canManageThisStaff(selectedProfile) ? (
+          selectedProfile ? (
             <>
+              <button
+                type="button"
+                onClick={() => openHistory(selectedProfile)}
+                className="acm-btn acm-btn-secondary h-10 px-4"
+              >
+                History
+              </button>
+              {canManageThisStaff(selectedProfile) ? (
+                <>
               <button
                 type="button"
                 onClick={() => {
@@ -1267,10 +1348,27 @@ export function StaffManagerPage({
               >
                 Delete
               </button>
+                </>
+              ) : null}
             </>
           ) : null
         }
       />
+
+      <Modal open={historyOpen} title="Staff Ledger" onClose={() => setHistoryOpen(false)}>
+        <div className="space-y-3">
+          {historyLoading ? <div className="text-sm text-[color:var(--acm-muted-fg)]">Loading staff history...</div> : null}
+          {!historyLoading && !historyItems.length ? <div className="text-sm text-[color:var(--acm-muted-fg)]">No staff history recorded yet.</div> : null}
+          {historyItems.map((item) => (
+            <div key={item.id} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
+              <div className="font-semibold">{item.message}</div>
+              <div className="mt-1 text-xs text-[color:var(--acm-muted-fg)]">
+                {new Date(item.created_at).toLocaleString()}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Modal>
 
       <Modal open={open} title="Create Staff" onClose={() => setOpen(false)}>
         <form onSubmit={createStaff} className="grid gap-3">
@@ -1343,6 +1441,14 @@ export function StaffManagerPage({
             <option value="manager">Manager Approval</option>
             <option value="employee">Employee Approval</option>
           </select>
+          <select className={fieldClass()} value={taskForm.approverUserId} onChange={(e) => setTaskForm((prev) => ({ ...prev, approverUserId: e.target.value }))}>
+            <option value="">Select Approving Person</option>
+            {availableTaskApprovers.map((item) => (
+              <option key={item.user_id} value={item.user_id}>
+                {getTaskAssigneeLabel(item, taskForm.projectId || fixedProjectId || "")}
+              </option>
+            ))}
+          </select>
           <button type="submit" className="acm-btn acm-btn-primary">Assign Task</button>
         </form>
       </Modal>
@@ -1358,6 +1464,7 @@ function buildTaskDetails(task) {
     { label: "Start Date", value: formatDate(task?.start_date) },
     { label: "End Date", value: formatDate(task?.end_date) },
     { label: "Approval Role", value: task?.approval_role || "-" },
+    { label: "Approving Person", value: task?.approver?.name || task?.approver?.user_code || "-" },
     {
       label: "Assignments",
       value:
@@ -1408,6 +1515,7 @@ export function TasksManagerPage({
     startDate: "",
     endDate: "",
     approvalRole: "manager",
+    approverUserId: "",
   });
   const [submitForm, setSubmitForm] = useState({
     workDescription: "",
@@ -1429,6 +1537,7 @@ export function TasksManagerPage({
     if (!activeProjectId) return true;
     return (item.project_assignments ?? []).some((assignment) => assignment.project_id === activeProjectId);
   });
+  const availableApprovers = getApproverOptions(staff.data?.staff ?? { managers: [], employees: [] }, activeProjectId, form.approvalRole);
 
   const taskGroups = tasks.data ?? { tasks: [], assignedTasks: [], approvedByMe: [] };
   const visibleTasks =
@@ -1449,6 +1558,7 @@ export function TasksManagerPage({
       startDate: "",
       endDate: "",
       approvalRole: "manager",
+      approverUserId: "",
     });
     setOpen(true);
   }
@@ -1464,6 +1574,7 @@ export function TasksManagerPage({
       startDate: task.start_date || "",
       endDate: task.end_date || "",
       approvalRole: task.approval_role || "manager",
+      approverUserId: task.approver_user_id || "",
     });
     setOpen(true);
   }
@@ -1661,6 +1772,14 @@ export function TasksManagerPage({
             <option value="manager">Manager Approval</option>
             <option value="employee">Employee Approval</option>
           </select>
+          <select className={fieldClass()} value={form.approverUserId} onChange={(e) => setForm((prev) => ({ ...prev, approverUserId: e.target.value }))}>
+            <option value="">Select Approving Person</option>
+            {availableApprovers.map((item) => (
+              <option key={item.user_id} value={item.user_id}>
+                {getTaskAssigneeLabel(item, activeProjectId)}
+              </option>
+            ))}
+          </select>
           <select
             multiple
             className={fieldClass()}
@@ -1723,6 +1842,112 @@ export function TasksManagerPage({
           <button type="submit" className="acm-btn acm-btn-primary">Save Review</button>
         </form>
       </Modal>
+    </>
+  );
+}
+
+export function SettingsPage() {
+  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+  const settings = useApi("/api/settings");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [profileForm, setProfileForm] = useState(null);
+  const [passwordForm, setPasswordForm] = useState({
+    password: "",
+    confirmPassword: "",
+  });
+  const resolvedProfileForm = profileForm ?? {
+    name: settings.data?.profile?.name || "",
+    email: settings.data?.profile?.email || "",
+    mobile: settings.data?.profile?.mobile || "",
+    address: settings.data?.profile?.address || "",
+  };
+
+  async function saveProfile(e) {
+    e.preventDefault();
+    setError("");
+    setMessage("");
+    const res = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(resolvedProfileForm),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(json?.error || "settings_update_failed");
+      return;
+    }
+    setMessage("Personal details updated.");
+  }
+
+  async function changePassword(e) {
+    e.preventDefault();
+    setError("");
+    setMessage("");
+    if (!supabase) {
+      setError("supabase_not_configured");
+      return;
+    }
+    if (!passwordForm.password || passwordForm.password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    if (passwordForm.password !== passwordForm.confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    const { error: updateError } = await supabase.auth.updateUser({ password: passwordForm.password });
+    if (updateError) {
+      setError(updateError.message || "password_update_failed");
+      return;
+    }
+
+    setPasswordForm({ password: "", confirmPassword: "" });
+    setMessage("Credentials updated.");
+  }
+
+  return (
+    <>
+      <SectionHeader title="Settings" />
+      <InlineMessage error={settings.error || error} message={message} />
+
+      <section className="grid gap-4 xl:grid-cols-2">
+        <div className={cardClass()}>
+          <SectionHeader title="Personal Details" />
+          <form onSubmit={saveProfile} className="grid gap-3">
+            <LabeledField label="Name">
+              <input className={fieldClass()} value={resolvedProfileForm.name} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), name: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Email">
+              <input className={fieldClass()} type="email" value={resolvedProfileForm.email} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), email: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Mobile">
+              <input className={fieldClass()} value={resolvedProfileForm.mobile} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), mobile: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Address">
+              <textarea className={fieldClass()} rows={4} value={resolvedProfileForm.address} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), address: e.target.value }))} />
+            </LabeledField>
+            <button type="submit" className="acm-btn acm-btn-primary">Save Details</button>
+          </form>
+        </div>
+
+        <div className={cardClass()}>
+          <SectionHeader title="Change Credentials" />
+          <div className="mb-3 text-sm text-[color:var(--acm-muted-fg)]">
+            Update your password for future logins.
+          </div>
+          <form onSubmit={changePassword} className="grid gap-3">
+            <LabeledField label="New Password">
+              <input className={fieldClass()} type="password" value={passwordForm.password} onChange={(e) => setPasswordForm((prev) => ({ ...prev, password: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Confirm Password">
+              <input className={fieldClass()} type="password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))} />
+            </LabeledField>
+            <button type="submit" className="acm-btn acm-btn-primary">Update Credentials</button>
+          </form>
+        </div>
+      </section>
     </>
   );
 }

@@ -48,7 +48,14 @@ export async function getRequestContext(req, res) {
   }
 
   const role = membership.role;
-  const projectIds = (projectAssignments ?? []).map((item) => item.project_id);
+  const projectIds = [
+    ...new Set(
+      [
+        ...(projectAssignments ?? []).map((item) => item.project_id),
+        membership.created_in_project_id,
+      ].filter(Boolean)
+    ),
+  ];
 
   return {
     ok: true,

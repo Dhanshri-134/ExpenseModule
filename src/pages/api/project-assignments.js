@@ -68,6 +68,7 @@ export default async function handler(req, res) {
       type: "project_assignment",
       user_id: payload.userId,
       role: payload.role,
+      hourly_rate: payload.hourlyRate,
     },
   });
 

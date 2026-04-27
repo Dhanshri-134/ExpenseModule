@@ -3,6 +3,7 @@ import { canCreateStaff, getRequestContext } from "@/lib/server/authz";
 import { upsertDemoCredential, readDemoCredentials } from "@/lib/server/demoCredentials";
 import { sendError, sendOk } from "@/lib/server/responses";
 import { createAuthUser } from "@/lib/server/users";
+import { insertActivityLog } from "@/lib/server/taskWorkflow";
 
 const CreateStaffSchema = z.object({
   name: z.string().min(1),
@@ -225,6 +226,20 @@ export default async function handler(req, res) {
       if (assignmentError) return sendError(res, 500, "project_assignment_failed", assignmentError.message);
     }
 
+    await insertActivityLog(ctx.admin, {
+      company_id: ctx.company.id,
+      project_id: payload.projectId ?? null,
+      actor_user_id: ctx.user.id,
+      message: `${payload.name} created as ${payload.role}`,
+      metadata: {
+        type: "staff_create",
+        user_id: user.id,
+        role: payload.role,
+        hourly_rate: payload.hourlyRate,
+        project_id: payload.projectId ?? null,
+      },
+    });
+
     upsertDemoCredential({
       userId: user.id,
       companyId: ctx.company.id,
@@ -273,6 +288,18 @@ export default async function handler(req, res) {
 
     if (membershipError) return sendError(res, 500, "staff_update_failed", membershipError.message);
 
+    await insertActivityLog(ctx.admin, {
+      company_id: ctx.company.id,
+      actor_user_id: ctx.user.id,
+      message: `${payload.name} profile updated`,
+      metadata: {
+        type: "staff_update",
+        user_id: payload.userId,
+        hourly_rate: payload.hourlyRate,
+        mobile: payload.mobile ?? "",
+      },
+    });
+
     return sendOk(res, { updated: true });
   }
 
@@ -283,8 +310,26 @@ export default async function handler(req, res) {
     const allowed = await canManageExistingStaff(ctx, parsed.data.userId);
     if (!allowed) return sendError(res, 403, "forbidden");
 
+    const { data: deletingStaff } = await ctx.admin
+      .from("company_users")
+      .select("user_id, user_code, role")
+      .eq("company_id", ctx.company.id)
+      .eq("user_id", parsed.data.userId)
+      .maybeSingle();
+
     const { error } = await ctx.admin.auth.admin.deleteUser(parsed.data.userId);
     if (error) return sendError(res, 500, "staff_delete_failed", error.message);
+
+    await insertActivityLog(ctx.admin, {
+      company_id: ctx.company.id,
+      actor_user_id: ctx.user.id,
+      message: `${deletingStaff?.user_code || "Staff"} deleted`,
+      metadata: {
+        type: "staff_delete",
+        user_id: parsed.data.userId,
+        role: deletingStaff?.role || null,
+      },
+    });
 
     return sendOk(res, { deleted: true });
   }
