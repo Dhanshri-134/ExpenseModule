@@ -1,0 +1,1728 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import Modal from "@/components/dashboard/Modal";
+
+function cardClass(extra = "") {
+  return `rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.08)] ${extra}`.trim();
+}
+
+function fieldClass() {
+  return "acm-input mt-0";
+}
+
+function roleName(role) {
+  if (!role) return "Staff";
+  return role.charAt(0).toUpperCase() + role.slice(1);
+}
+
+function formatDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString();
+}
+
+function getProjectDefaultId(projects) {
+  return projects?.[0]?.id || "";
+}
+
+function getStaffOptionLabel(item) {
+  if (!item) return "";
+  const primary = item.name || item.user_code || "User";
+  return item.user_code && item.user_code !== primary ? `${primary} (${item.user_code})` : primary;
+}
+
+function getProjectNames(item, projectId = "") {
+  const assignments = item?.project_assignments ?? [];
+  const scopedAssignments = projectId
+    ? assignments.filter((assignment) => assignment.project_id === projectId)
+    : assignments;
+  return [...new Set(scopedAssignments.map((assignment) => assignment.project?.name).filter(Boolean))];
+}
+
+function getProjectAssignmentSummary(item, projectId = "") {
+  const names = getProjectNames(item, projectId);
+  if (names.length) return names.join(", ");
+  return item?.created_project?.name || "-";
+}
+
+function getTaskAssigneeLabel(item, projectId = "") {
+  const projectSummary = getProjectAssignmentSummary(item, projectId);
+  return `${getStaffOptionLabel(item)} | ${roleName(item.role)} | ${projectSummary}`;
+}
+
+function LabeledField({ label, children }) {
+  return (
+    <label className="relative block pt-3">
+      <span className="absolute left-3 top-0 z-10 bg-[color:var(--acm-surface)] px-2 text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function FieldGroup({ title, children }) {
+  return (
+    <fieldset className="rounded-[20px] border border-[color:var(--acm-border)] p-4">
+      <legend className="px-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">{title}</legend>
+      <div className="grid gap-3">{children}</div>
+    </fieldset>
+  );
+}
+
+function useApi(url) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    async function load() {
+      setLoading(true);
+      const res = await fetch(url);
+      const json = await res.json().catch(() => null);
+      if (!active) return;
+      if (!res.ok) {
+        setError(json?.error || "request_failed");
+        setLoading(false);
+        return;
+      }
+      setData(json);
+      setError("");
+      setLoading(false);
+    }
+
+    load();
+    return () => {
+      active = false;
+    };
+  }, [url]);
+
+  return { data, loading, error, setData };
+}
+
+function InlineMessage({ error, message }) {
+  if (error) {
+    return (
+      <div className="rounded-xl border border-rose-500/25 bg-rose-500/8 px-4 py-3 text-sm text-rose-500">
+        {error}
+      </div>
+    );
+  }
+
+  if (message) {
+    return (
+      <div className="rounded-xl border border-[color:var(--acm-accent-border)] bg-[color:var(--acm-accent-soft)] px-4 py-3 text-sm text-[color:var(--acm-accent-strong)]">
+        {message}
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function SectionHeader({ title, action }) {
+  return (
+    <div className="mb-4 flex items-center justify-between gap-3">
+      <div className="text-xl font-bold text-[color:var(--acm-fg)]">{title}</div>
+      {action}
+    </div>
+  );
+}
+
+function DetailRow({ label, value }) {
+  return (
+    <div className="grid grid-cols-[120px_1fr] gap-3 border-b border-[color:var(--acm-border)] py-2 text-sm last:border-b-0">
+      <div className="font-semibold text-[color:var(--acm-muted-fg)]">{label}</div>
+      <div className="text-[color:var(--acm-fg)]">{value || "-"}</div>
+    </div>
+  );
+}
+
+function ProfileModal({ open, title, details, onClose, onSendEmail, actions }) {
+  return (
+    <Modal open={open} title={title} onClose={onClose}>
+      <div className="space-y-2">
+        {details.map((detail) => (
+          <DetailRow key={`${detail.label}-${detail.value}`} label={detail.label} value={detail.value} />
+        ))}
+      </div>
+      {onSendEmail || actions ? (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {onSendEmail ? (
+            <button type="button" onClick={onSendEmail} className="acm-btn acm-btn-primary h-10 px-4">
+              Send Email
+            </button>
+          ) : null}
+          {actions}
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
+async function sendCredentialEmail(userId) {
+  const res = await fetch("/api/send-credentials", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ userId }),
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(json?.error || "send_credentials_failed");
+  if (json?.delivery?.mailto) {
+    window.location.href = json.delivery.mailto;
+  }
+  return json;
+}
+
+function ProjectCard({ roleBase, project, onView, onEdit, onDelete, canManage }) {
+  return (
+    <div className={cardClass()}>
+      <div className="font-bold text-[color:var(--acm-fg)]">{project.name}</div>
+      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{project.job_number}</div>
+      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{project.client?.name || "-"}</div>
+      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{project.location || "-"}</div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Link href={`/${roleBase}/project/${project.id}/overview`} className="acm-btn acm-btn-primary h-10 px-4">
+          Open Project Dashboard
+        </Link>
+        <button type="button" onClick={() => onView(project)} className="acm-btn acm-btn-secondary h-10 px-4">
+          View More
+        </button>
+        {canManage ? (
+          <>
+            <button type="button" onClick={() => onEdit(project)} className="acm-btn acm-btn-secondary h-10 px-4">
+              Edit
+            </button>
+            <button type="button" onClick={() => onDelete(project)} className="acm-btn acm-btn-secondary h-10 px-4">
+              Delete
+            </button>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function StaffCard({ item, onOpenProfile, onAssignTask, canAssignTask }) {
+  return (
+    <div className={cardClass()}>
+      <div className="font-bold">{item.name || item.user_code}</div>
+      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{item.user_code}</div>
+      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{item.email}</div>
+      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{roleName(item.role)}</div>
+      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">
+        Projects: {getProjectAssignmentSummary(item)}
+      </div>
+      <div className="mt-4">
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => onOpenProfile(item)} className="acm-btn acm-btn-secondary h-10 px-4">
+            View More
+          </button>
+          {canAssignTask ? (
+            <button type="button" onClick={() => onAssignTask(item)} className="acm-btn acm-btn-primary h-10 px-4">
+              Assign Task
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AssignmentPill({ assignment }) {
+  return (
+    <div className="rounded-[16px] border border-[color:var(--acm-border)] px-3 py-2 text-sm">
+      <div className="font-semibold">{assignment.assignee?.name || assignment.assignee?.user_code || "Assignee"}</div>
+      <div className="text-[color:var(--acm-muted-fg)]">
+        {assignment.assignee?.user_code || assignment.role} | {assignment.status}
+      </div>
+      {assignment.latest_approval?.approved_by ? (
+        <div className="mt-1 text-xs text-[color:var(--acm-muted-fg)]">
+          Approved By: {assignment.latest_approval.approved_by.name || assignment.latest_approval.approved_by.user_code} ({assignment.latest_approval.approved_by_role})
+        </div>
+      ) : null}
+      {assignment.latest_approval?.comment ? (
+        <div className="mt-1 text-xs text-[color:var(--acm-muted-fg)]">Review: {assignment.latest_approval.comment}</div>
+      ) : null}
+    </div>
+  );
+}
+
+function TaskCard({ task, onView, onEdit, onDelete, onSubmit, onReview, canManageTask }) {
+  const reviewableAssignments = (task.assignments ?? []).filter((assignment) => assignment.status === "submitted");
+
+  return (
+    <div className={cardClass()}>
+      <div className="font-bold">{task.title}</div>
+      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">
+        {task.project?.name || "-"} | {formatDate(task.start_date)} to {formatDate(task.end_date)}
+      </div>
+      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">Approval Role: {task.approval_role}</div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        {(task.assignments ?? []).map((assignment) => (
+          <AssignmentPill key={assignment.id} assignment={assignment} />
+        ))}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button type="button" onClick={() => onView(task)} className="acm-btn acm-btn-secondary h-10 px-4">
+          View More
+        </button>
+        {canManageTask ? (
+          <>
+            <button type="button" onClick={() => onEdit(task)} className="acm-btn acm-btn-secondary h-10 px-4">
+              Edit
+            </button>
+            <button type="button" onClick={() => onDelete(task)} className="acm-btn acm-btn-secondary h-10 px-4">
+              Delete
+            </button>
+          </>
+        ) : null}
+        {(task.my_assignments ?? []).map((assignment) =>
+          ["assigned", "rejected"].includes(assignment.status) ? (
+            <button
+              key={assignment.id}
+              type="button"
+              onClick={() => onSubmit(assignment)}
+              className="acm-btn acm-btn-primary h-10 px-4"
+            >
+              {assignment.status === "rejected" ? "Resubmit Task" : "Submit Task"}
+            </button>
+          ) : null
+        )}
+        {task.can_approve
+          ? reviewableAssignments.map((assignment) => (
+              <button
+                key={`review-${assignment.id}`}
+                type="button"
+                onClick={() => onReview(task, assignment)}
+                className="acm-btn acm-btn-primary h-10 px-4"
+              >
+                Review {assignment.assignee?.user_code || assignment.assignee?.name}
+              </button>
+            ))
+          : null}
+      </div>
+    </div>
+  );
+}
+
+function UpdatesCard({ logs }) {
+  return (
+    <div className={cardClass()}>
+      <SectionHeader title="Recent Updates" />
+      <div className="space-y-3">
+        {(logs ?? []).length ? (
+          logs.map((log) => (
+            <div key={log.id} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
+              <div className="font-semibold">{log.message}</div>
+              <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">
+                {log.actor?.name || log.actor?.user_code || "System"} | {formatDate(log.created_at)}
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="text-sm text-[color:var(--acm-muted-fg)]">No updates yet.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function DashboardOverview({ roleBase, canManageStaff = false }) {
+  const dashboard = useApi("/api/dashboard");
+  const projects = useApi("/api/projects");
+  const staff = useApi("/api/staff");
+  const tasks = useApi("/api/tasks");
+  const [modalType, setModalType] = useState("");
+
+  const summary = dashboard.data?.summary;
+  const projectList = projects.data?.projects ?? [];
+  const staffList = [
+    ...(canManageStaff ? staff.data?.staff?.managers ?? [] : []),
+    ...(staff.data?.staff?.employees ?? []),
+  ];
+  const taskList = tasks.data?.tasks ?? [];
+  const taskSummary = summary?.tasks ?? {};
+
+  return (
+    <>
+      <SectionHeader title="Overview" />
+
+      <section className="grid gap-4 md:grid-cols-3">
+        <button type="button" className={cardClass("text-left")} onClick={() => setModalType("projects")}>
+          <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">Projects</div>
+          <div className="mt-2 text-3xl font-extrabold">{summary?.projects?.total ?? 0}</div>
+          <div className="mt-3 grid gap-1 text-sm text-[color:var(--acm-muted-fg)]">
+            <div>Live: {summary?.projects?.live ?? 0}</div>
+            <div>Complete: {summary?.projects?.complete ?? 0}</div>
+            <div>On Hold: {summary?.projects?.onhold ?? 0}</div>
+          </div>
+        </button>
+        <button type="button" className={cardClass("text-left")} onClick={() => setModalType("staff")}>
+          <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">Staff</div>
+          <div className="mt-2 text-3xl font-extrabold">{staffList.length}</div>
+          <div className="mt-3 grid gap-1 text-sm text-[color:var(--acm-muted-fg)]">
+            <div>Managers: {summary?.staff?.managers ?? 0}</div>
+            <div>Employees: {summary?.staff?.employees ?? 0}</div>
+          </div>
+        </button>
+        <button type="button" className={cardClass("text-left")} onClick={() => setModalType("tasks")}>
+          <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">Tasks</div>
+          <div className="mt-2 text-3xl font-extrabold">
+            {roleBase === "owner" ? taskSummary.todayAssigned ?? 0 : taskSummary.myTasks?.total ?? 0}
+          </div>
+          <div className="mt-3 grid gap-1 text-sm text-[color:var(--acm-muted-fg)]">
+            {roleBase === "owner" ? (
+              <>
+                <div>Today&apos;s Assigned: {taskSummary.todayAssigned ?? 0}</div>
+                <div>Completed: {taskSummary.completed ?? 0}</div>
+              </>
+            ) : (
+              <>
+                <div>My Tasks Completed: {taskSummary.myTasks?.completed ?? 0}</div>
+                <div>Approved: {taskSummary.approvingTasks?.approved ?? 0}</div>
+                <div>To Be Approved: {taskSummary.approvingTasks?.toBeApproved ?? 0}</div>
+                {roleBase === "manager" ? (
+                  <>
+                    <div>Assigned: {taskSummary.assignedTasks?.assigned ?? 0}</div>
+                    <div>Assigned Completed: {taskSummary.assignedTasks?.completed ?? 0}</div>
+                  </>
+                ) : null}
+              </>
+            )}
+          </div>
+        </button>
+      </section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-2">
+        <div className={cardClass()}>
+          <SectionHeader title="Projects" action={<Link href={`/${roleBase}/projects`} className="text-sm font-semibold text-[color:var(--acm-accent)]">Open</Link>} />
+          <div className="space-y-3">
+            {projectList.slice(0, 3).map((project) => (
+              <div key={project.id} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
+                <div className="font-semibold">{project.name}</div>
+                <div className="text-sm text-[color:var(--acm-muted-fg)]">{project.job_number}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className={cardClass()}>
+          <SectionHeader title="Tasks" action={<Link href={`/${roleBase}/tasks`} className="text-sm font-semibold text-[color:var(--acm-accent)]">Open</Link>} />
+          <div className="space-y-3">
+            {taskList.slice(0, 3).map((task) => (
+              <div key={task.id} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
+                <div className="font-semibold">{task.title}</div>
+                <div className="text-sm text-[color:var(--acm-muted-fg)]">{task.project?.name || "-"}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <Modal open={modalType === "projects"} title="Projects" onClose={() => setModalType("")}>
+        <div className="space-y-3">
+          {projectList.map((project) => (
+            <div key={project.id} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
+              <div className="font-semibold">{project.name}</div>
+              <div className="text-sm text-[color:var(--acm-muted-fg)]">{project.job_number}</div>
+            </div>
+          ))}
+        </div>
+      </Modal>
+
+      <Modal open={modalType === "staff"} title="Staff" onClose={() => setModalType("")}>
+        <div className="space-y-3">
+          {staffList.map((item) => (
+            <div key={item.user_id} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
+              <div className="font-semibold">{item.name || item.user_code}</div>
+              <div className="text-sm text-[color:var(--acm-muted-fg)]">{item.user_code}</div>
+            </div>
+          ))}
+        </div>
+      </Modal>
+
+      <Modal open={modalType === "tasks"} title="Tasks" onClose={() => setModalType("")}>
+        <div className="space-y-3">
+          {taskList.map((task) => (
+            <div key={task.id} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
+              <div className="font-semibold">{task.title}</div>
+              <div className="text-sm text-[color:var(--acm-muted-fg)]">{task.project?.name || "-"}</div>
+            </div>
+          ))}
+        </div>
+      </Modal>
+    </>
+  );
+}
+
+export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
+  const projects = useApi("/api/projects");
+  const [open, setOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState(null);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [profileProject, setProfileProject] = useState(null);
+  const [form, setForm] = useState({
+    id: "",
+    name: "",
+    location: "",
+    clientName: "",
+    clientContact: "",
+    clientEmail: "",
+    clientAddress: "",
+    startDate: "",
+    endDate: "",
+    contractValue: "",
+  });
+
+  const projectList = projects.data?.projects ?? [];
+
+  function openCreate() {
+    setEditingProject(null);
+    setForm({
+      id: "",
+      name: "",
+      location: "",
+      clientName: "",
+      clientContact: "",
+      clientEmail: "",
+      clientAddress: "",
+      startDate: "",
+      endDate: "",
+      contractValue: "",
+    });
+    setOpen(true);
+  }
+
+  function openEdit(project) {
+    setEditingProject(project);
+    setForm({
+      id: project.id,
+      name: project.name || "",
+      location: project.location || "",
+      clientName: project.client?.name || "",
+      clientContact: project.client?.contact || "",
+      clientEmail: project.client?.email || "",
+      clientAddress: project.client?.address || "",
+      startDate: project.start_date || "",
+      endDate: project.end_date || "",
+      contractValue: project.contract_value || "",
+    });
+    setOpen(true);
+  }
+
+  async function saveProject(e) {
+    e.preventDefault();
+    setError("");
+    setMessage("");
+
+    const res = await fetch(editingProject ? "/api/project" : "/api/projects", {
+      method: editingProject ? "PUT" : "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...form,
+        contractValue: Number(form.contractValue || 0),
+      }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(json?.error || "project_save_failed");
+      return;
+    }
+
+    setMessage(editingProject ? "Project updated" : `Created ${json.project.job_number}`);
+    setOpen(false);
+    window.location.reload();
+  }
+
+  async function deleteProject(project) {
+    if (!window.confirm(`Delete project ${project.name}?`)) return;
+    setError("");
+    setMessage("");
+    const res = await fetch("/api/project", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: project.id }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(json?.error || "project_delete_failed");
+      return;
+    }
+    setMessage(`${project.name} deleted`);
+    window.location.reload();
+  }
+
+  return (
+    <>
+      <SectionHeader
+        title="Projects"
+        action={
+          canCreateProject ? (
+            <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
+              Create Project
+            </button>
+          ) : null
+        }
+      />
+
+      <InlineMessage error={projects.error || error} message={message} />
+
+      <section className="mt-4 grid gap-4 md:grid-cols-2">
+        {projectList.map((project) => (
+          <ProjectCard
+            key={project.id}
+            roleBase={roleBase}
+            project={project}
+            onView={setProfileProject}
+            onEdit={openEdit}
+            onDelete={deleteProject}
+            canManage={canCreateProject}
+          />
+        ))}
+      </section>
+
+      <ProfileModal
+        open={Boolean(profileProject)}
+        title="Project Profile"
+        details={
+          profileProject
+            ? [
+                { label: "Job Number", value: profileProject.job_number },
+                { label: "Project", value: profileProject.name },
+                { label: "Client", value: profileProject.client?.name || "-" },
+                { label: "Client Contact", value: profileProject.client?.contact || "-" },
+                { label: "Client Email", value: profileProject.client?.email || "-" },
+                { label: "Client Address", value: profileProject.client?.address || "-" },
+                { label: "Location", value: profileProject.location || "-" },
+                { label: "Start Date", value: formatDate(profileProject.start_date) },
+                { label: "End Date", value: formatDate(profileProject.end_date) },
+                { label: "Estimate Budget", value: `$${profileProject.contract_value}` },
+              ]
+            : []
+        }
+        onClose={() => setProfileProject(null)}
+      />
+
+      <Modal open={open} title={editingProject ? "Edit Project" : "Create Project"} onClose={() => setOpen(false)}>
+        <form onSubmit={saveProject} className="grid gap-3">
+          <FieldGroup title="Client Info">
+            <LabeledField label="Client Name">
+              <input className={fieldClass()} value={form.clientName} onChange={(e) => setForm((prev) => ({ ...prev, clientName: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Client Contact">
+              <input className={fieldClass()} value={form.clientContact} onChange={(e) => setForm((prev) => ({ ...prev, clientContact: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Client Email">
+              <input className={fieldClass()} type="email" value={form.clientEmail} onChange={(e) => setForm((prev) => ({ ...prev, clientEmail: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Client Address">
+              <textarea className={fieldClass()} rows={3} value={form.clientAddress} onChange={(e) => setForm((prev) => ({ ...prev, clientAddress: e.target.value }))} />
+            </LabeledField>
+          </FieldGroup>
+
+          <FieldGroup title="Project Info">
+            <LabeledField label="Project Name">
+              <input className={fieldClass()} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Location">
+              <input className={fieldClass()} value={form.location} onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Start Date">
+              <input className={fieldClass()} type="date" value={form.startDate} onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="End Date">
+              <input className={fieldClass()} type="date" value={form.endDate} onChange={(e) => setForm((prev) => ({ ...prev, endDate: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Estimate Budget">
+              <input className={fieldClass()} inputMode="decimal" value={form.contractValue} onChange={(e) => setForm((prev) => ({ ...prev, contractValue: e.target.value }))} />
+            </LabeledField>
+          </FieldGroup>
+          <button type="submit" className="acm-btn acm-btn-primary">Save</button>
+        </form>
+      </Modal>
+    </>
+  );
+}
+
+export function ProjectDashboardView({ projectId, roleBase, ownerMode = false, section = "overview", currentUserId = "" }) {
+  const detail = useApi(`/api/project?id=${projectId}`);
+  const updates = useApi(`/api/activity-logs?projectId=${projectId}`);
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [selectedType, setSelectedType] = useState("");
+  const [editProjectOpen, setEditProjectOpen] = useState(false);
+const [editClientOpen, setEditClientOpen] = useState(false);
+  const [editMessage, setEditMessage] = useState("");
+  const [editError, setEditError] = useState("");
+  const [projectForm, setProjectForm] = useState({
+  id: "",
+  name: "",
+  location: "",
+  startDate: "",
+  endDate: "",
+  contractValue: "",
+});
+
+const [clientForm, setClientForm] = useState({
+  id: "",
+  clientName: "",
+  clientContact: "",
+  clientEmail: "",
+  clientAddress: "",
+});
+
+  const project = detail.data?.project;
+  if (detail.loading) return <div className={cardClass()}>Loading project dashboard...</div>;
+  if (!project) return <div className={cardClass()}>Project not found.</div>;
+
+  function openEditProject() {
+  setProjectForm({
+    id: project.id,
+    name: project.name || "",
+    location: project.location || "",
+    startDate: project.start_date || "",
+    endDate: project.end_date || "",
+    contractValue: project.contract_value || "",
+  });
+  setEditProjectOpen(true);
+}
+
+function openEditClient() {
+  setClientForm({
+    id: project.id,
+    clientName: project.client?.name || "",
+    clientContact: project.client?.contact || "",
+    clientEmail: project.client?.email || "",
+    clientAddress: project.client?.address || "",
+  });
+  setEditClientOpen(true);
+}
+  
+async function saveClientChanges(e) {
+  e.preventDefault();
+  await fetch("/api/project/client", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(clientForm),
+  });
+  setEditClientOpen(false);
+  window.location.reload();
+}
+
+  async function saveProjectChanges(e) {
+    e.preventDefault();
+    setEditError("");
+    setEditMessage("");
+    const res = await fetch("/api/project", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...editForm,
+        contractValue: Number(editForm.contractValue || 0),
+      }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      setEditError(json?.error || "project_update_failed");
+      return;
+    }
+    setEditMessage("Client info updated");
+    setEditOpen(false);
+    window.location.reload();
+  }
+
+  const profileDetails =
+    selectedType === "client"
+      ? [
+          { label: "Client", value: project.client?.name },
+          { label: "Contact", value: project.client?.contact },
+          { label: "Email", value: project.client?.email },
+          { label: "Address", value: project.client?.address },
+        ]
+      : selectedType === "task"
+        ? [
+            { label: "Task", value: selectedItem?.title },
+            { label: "Description", value: selectedItem?.description || "-" },
+            { label: "Dates", value: `${formatDate(selectedItem?.start_date)} to ${formatDate(selectedItem?.end_date)}` },
+            { label: "Approval Role", value: selectedItem?.approval_role || "-" },
+            {
+              label: "Assignments",
+              value:
+                (selectedItem?.assignments ?? [])
+                  .map((assignment) => `${assignment.assignee?.name || assignment.assignee?.user_code} (${assignment.status})`)
+                  .join(", ") || "-",
+            },
+          ]
+        : [
+            { label: "User Code", value: selectedItem?.staff?.user_code || selectedItem?.user_code },
+            { label: "Name", value: selectedItem?.staff?.name || selectedItem?.name },
+            { label: "Email", value: selectedItem?.staff?.email || selectedItem?.email },
+            { label: "Mobile", value: selectedItem?.staff?.mobile || selectedItem?.mobile },
+            { label: "Role", value: selectedItem?.staff?.role || selectedItem?.role || "-" },
+          ];
+
+  return (
+    <>
+      <InlineMessage error={editError} message={editMessage} />
+      <section className="grid gap-4">
+        <div className={cardClass()}>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="text-2xl font-bold">{project.name}</div>
+              <div className="mt-2 text-sm text-[color:var(--acm-muted-fg)]">{project.job_number}</div>
+              <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{project.location || "-"}</div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
+                <div className="text-xs text-[color:var(--acm-muted-fg)]">Managers</div>
+                <div className="mt-1 text-xl font-bold">{project.managers.length}</div>
+              </div>
+              <div className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
+                <div className="text-xs text-[color:var(--acm-muted-fg)]">Employees</div>
+                <div className="mt-1 text-xl font-bold">{project.employees.length}</div>
+              </div>
+              <div className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
+                <div className="text-xs text-[color:var(--acm-muted-fg)]">Tasks</div>
+                <div className="mt-1 text-xl font-bold">{project.tasks.length}</div>
+              </div>
+              <div className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
+                <div className="text-xs text-[color:var(--acm-muted-fg)]">Estimate Budget</div>
+                <div className="mt-1 text-xl font-bold">${project.contract_value}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {section === "overview" ? (
+          <div className="grid gap-4 xl:grid-cols-2">
+            <div className={cardClass()}>
+              <SectionHeader
+                title="Project Info"
+                action={
+                  ownerMode ? (
+                    <button type="button" onClick={openEditProject} className="acm-btn acm-btn-secondary h-10 px-4">
+                      Edit Project Info
+                    </button>
+                  ) : null
+                }
+              />
+              <div className="space-y-2">
+                <DetailRow label="Project" value={project.name} />
+                <DetailRow label="Job Number" value={project.job_number} />
+                <DetailRow label="Location" value={project.location} />
+                <DetailRow label="Start Date" value={formatDate(project.start_date)} />
+                <DetailRow label="End Date" value={formatDate(project.end_date)} />
+                <DetailRow label="Estimate Budget" value={`$${project.contract_value}`} />
+              </div>
+            </div>
+
+            <div className={cardClass()}>
+              <SectionHeader
+                title="Client Info"
+                action={
+  <div className="flex gap-3 items-center">
+    <button
+      type="button"
+      onClick={() => setSelectedType("client")}
+      className="acm-btn acm-btn-secondary h-10 px-4"
+    >
+      Open Profile
+    </button>
+
+    {ownerMode && (
+      <>
+        <button
+          type="button"
+          onClick={openEditClient}
+          className="acm-btn acm-btn-secondary h-10 px-4"
+        >
+          Edit Client
+        </button>
+
+       
+      </>
+    )}
+  </div>
+}
+              />
+              <div className="space-y-2">
+                <DetailRow label="Client" value={project.client?.name} />
+                <DetailRow label="Contact" value={project.client?.contact} />
+                <DetailRow label="Email" value={project.client?.email} />
+                <DetailRow label="Address" value={project.client?.address} />
+              </div>
+            </div>
+
+            <div className="xl:col-span-2">
+              <UpdatesCard logs={(updates.data?.logs ?? []).slice(0, 8)} />
+            </div>
+          </div>
+        ) : null}
+
+        {section === "staff" ? (
+          <StaffManagerPage
+            allowManagerCreation={ownerMode}
+            managerProjectOnly={roleBase === "manager"}
+            ownerMode={ownerMode}
+            fixedProjectId={projectId}
+            readOnly={roleBase === "employee"}
+            canAssignManagers={ownerMode}
+            currentUserId={currentUserId}
+          />
+        ) : null}
+
+        {section === "tasks" ? (
+          <TasksManagerPage
+            roleBase={roleBase}
+            canAssignManagers={roleBase === "owner"}
+            canCreateTask={roleBase !== "employee"}
+            fixedProjectId={projectId}
+            currentUserId={currentUserId}
+          />
+        ) : null}
+
+        {section === "reports" ? <div className={cardClass()}>Reports will be configured here.</div> : null}
+        {section === "expenses" ? <div className={cardClass()}>Expenses will be configured here.</div> : null}
+      </section>
+
+      <ProfileModal
+        open={Boolean(selectedItem || selectedType === "client")}
+        title={selectedType === "client" ? "Client Profile" : selectedType === "task" ? "Task Profile" : "User Profile"}
+        details={profileDetails}
+        onClose={() => {
+          setSelectedItem(null);
+          setSelectedType("");
+        }}
+      />
+
+     <Modal open={editClientOpen} title="Edit Client Info" onClose={() => setEditClientOpen(false)}>
+  <form onSubmit={saveClientChanges} className="grid gap-3">
+    <LabeledField label="Client Name">
+      <input className={fieldClass()} value={clientForm.clientName} onChange={(e) => setClientForm(p => ({ ...p, clientName: e.target.value }))} />
+    </LabeledField>
+
+    <LabeledField label="Contact">
+      <input className={fieldClass()} value={clientForm.clientContact} onChange={(e) => setClientForm(p => ({ ...p, clientContact: e.target.value }))} />
+    </LabeledField>
+
+    <LabeledField label="Email">
+      <input type="email" className={fieldClass()} value={clientForm.clientEmail} onChange={(e) => setClientForm(p => ({ ...p, clientEmail: e.target.value }))} />
+    </LabeledField>
+
+    <LabeledField label="Address">
+      <textarea className={fieldClass()} value={clientForm.clientAddress} onChange={(e) => setClientForm(p => ({ ...p, clientAddress: e.target.value }))} />
+    </LabeledField>
+
+    <button type="submit" className="acm-btn acm-btn-primary">Save</button>
+  </form>
+</Modal>
+<Modal open={editProjectOpen} title="Edit Project Info" onClose={() => setEditProjectOpen(false)}>
+  <form onSubmit={saveProjectChanges} className="grid gap-3">
+    <LabeledField label="Project Name">
+      <input className={fieldClass()} value={projectForm.name} onChange={(e) => setProjectForm(p => ({ ...p, name: e.target.value }))} />
+    </LabeledField>
+
+    <LabeledField label="Location">
+      <input className={fieldClass()} value={projectForm.location} onChange={(e) => setProjectForm(p => ({ ...p, location: e.target.value }))} />
+    </LabeledField>
+
+    <LabeledField label="Start Date">
+      <input type="date" className={fieldClass()} value={projectForm.startDate} onChange={(e) => setProjectForm(p => ({ ...p, startDate: e.target.value }))} />
+    </LabeledField>
+
+    <LabeledField label="End Date">
+      <input type="date" className={fieldClass()} value={projectForm.endDate} onChange={(e) => setProjectForm(p => ({ ...p, endDate: e.target.value }))} />
+    </LabeledField>
+
+    <LabeledField label="Budget">
+      <input className={fieldClass()} value={projectForm.contractValue} onChange={(e) => setProjectForm(p => ({ ...p, contractValue: e.target.value }))} />
+    </LabeledField>
+
+    <button type="submit" className="acm-btn acm-btn-primary">Save</button>
+  </form>
+</Modal>
+
+
+    </>
+  );
+}
+export function StaffManagerPage({
+  allowManagerCreation,
+  managerProjectOnly = false,
+  ownerMode = false,
+  fixedProjectId = "",
+  readOnly = false,
+  canAssignManagers = false,
+  currentUserId = "",
+}) {
+  const staff = useApi("/api/staff");
+  const projects = useApi("/api/projects");
+  const [tab, setTab] = useState("managers");
+  const [open, setOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [taskOpen, setTaskOpen] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [selectedProfile, setSelectedProfile] = useState(null);
+  const [editingStaff, setEditingStaff] = useState(null);
+  const [taskTarget, setTaskTarget] = useState(null);
+  const [form, setForm] = useState({
+    name: "",
+    role: "employee",
+    email: "",
+    mobile: "",
+    hourlyRate: "",
+    projectId: "",
+  });
+  const [assignForm, setAssignForm] = useState({
+    userId: "",
+    projectId: "",
+    role: allowManagerCreation ? "manager" : "employee",
+    hourlyRate: "",
+  });
+  const [taskForm, setTaskForm] = useState({
+    projectId: fixedProjectId || "",
+    assigneeUserIds: [],
+    title: "",
+    description: "",
+    startDate: "",
+    endDate: "",
+    approvalRole: "manager",
+  });
+
+  const staffData = useMemo(() => staff.data?.staff ?? { managers: [], employees: [] }, [staff.data]);
+  const projectList = projects.data?.projects ?? [];
+  const availableProjects = fixedProjectId ? projectList.filter((project) => project.id === fixedProjectId) : projectList;
+  const defaultProjectId = fixedProjectId || getProjectDefaultId(availableProjects);
+  const selectedProjectId = form.projectId || defaultProjectId;
+  const selectedAssignmentProjectId = assignForm.projectId || defaultProjectId;
+  const visibleStaffData = useMemo(() => {
+    if (!fixedProjectId) return staffData;
+
+    const inProject = (item) =>
+      item?.created_in_project_id === fixedProjectId ||
+      (item?.project_assignments ?? []).some((assignment) => assignment.project_id === fixedProjectId);
+
+    return {
+      managers: staffData.managers.filter(inProject),
+      employees: staffData.employees.filter(inProject),
+    };
+  }, [fixedProjectId, staffData]);
+
+  function canManageThisStaff(item) {
+    return !readOnly && (ownerMode ? item.role !== "owner" : item.role === "employee" && item.user_id !== currentUserId);
+  }
+
+  function canAssignToThisStaff(item) {
+    return !readOnly && (item.role === "employee" || (item.role === "manager" && canAssignManagers));
+  }
+
+  async function createStaff(e) {
+    e.preventDefault();
+    setError("");
+    setMessage("");
+    const res = await fetch("/api/staff", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...form,
+        hourlyRate: Number(form.hourlyRate || 0),
+        projectId: selectedProjectId || null,
+      }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(json?.error || "staff_create_failed");
+      return;
+    }
+    setMessage(`${json.staff.user_code} created`);
+    setOpen(false);
+    window.location.reload();
+  }
+
+  async function updateStaff(e) {
+    e.preventDefault();
+    if (!editingStaff) return;
+    setError("");
+    setMessage("");
+    const res = await fetch("/api/staff", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        userId: editingStaff.user_id,
+        name: editingStaff.name,
+        email: editingStaff.email,
+        mobile: editingStaff.mobile,
+        hourlyRate: Number(editingStaff.hourly_rate || 0),
+      }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(json?.error || "staff_update_failed");
+      return;
+    }
+    setMessage("Staff updated");
+    setEditOpen(false);
+    window.location.reload();
+  }
+
+  async function assignProject(e) {
+    e.preventDefault();
+    setError("");
+    setMessage("");
+    const res = await fetch("/api/project-assignments", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...assignForm,
+        projectId: selectedAssignmentProjectId,
+        hourlyRate: Number(assignForm.hourlyRate || 0),
+      }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(json?.error || "assignment_failed");
+      return;
+    }
+    setMessage(json?.message || "Project assigned");
+    setAssignOpen(false);
+    window.location.reload();
+  }
+
+  async function deleteStaff(item) {
+    if (!window.confirm(`Delete ${item.name || item.user_code}?`)) return;
+    setError("");
+    setMessage("");
+    const res = await fetch("/api/staff", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: item.user_id }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(json?.error || "staff_delete_failed");
+      return;
+    }
+    setMessage("Staff deleted");
+    window.location.reload();
+  }
+
+  async function onSendEmail(userId) {
+    try {
+      const result = await sendCredentialEmail(userId);
+      const mode = result.delivery?.mode;
+      setMessage(
+        mode === "supabase-reset"
+          ? "Password reset email sent from Supabase."
+          : result.delivery?.sent
+            ? "Credentials email sent."
+            : "Mail client opened with credentials."
+      );
+    } catch (err) {
+      setError(err.message || "Unable to send email");
+    }
+  }
+
+  function openEditStaff(item) {
+    setEditingStaff({ ...item });
+    setEditOpen(true);
+  }
+
+  function openAssignTask(item) {
+    const fallbackProjectId = fixedProjectId || item.project_assignments?.[0]?.project_id || item.created_in_project_id || "";
+    setTaskTarget(item);
+    setTaskForm({
+      projectId: fallbackProjectId,
+      assigneeUserIds: [item.user_id],
+      title: "",
+      description: "",
+      startDate: "",
+      endDate: "",
+      approvalRole: "manager",
+    });
+    setTaskOpen(true);
+  }
+
+  async function assignTaskFromStaffList(e) {
+    e.preventDefault();
+    setError("");
+    setMessage("");
+    const res = await fetch("/api/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(taskForm),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(json?.error || "task_create_failed");
+      return;
+    }
+    setMessage("Task created");
+    setTaskOpen(false);
+    window.location.reload();
+  }
+
+  return (
+    <>
+      <SectionHeader
+        title="Staff"
+        action={
+          readOnly ? null : (
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setAssignOpen(true)} className="acm-btn acm-btn-secondary h-10 px-4">
+                Assign Project
+              </button>
+              <button type="button" onClick={() => setOpen(true)} className="acm-btn acm-btn-primary h-10 px-4">
+                Create
+              </button>
+            </div>
+          )
+        }
+      />
+
+      <div className="mb-4 flex gap-2">
+        <button type="button" onClick={() => setTab("managers")} className={`acm-btn ${tab === "managers" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>
+          Managers
+        </button>
+        <button type="button" onClick={() => setTab("employees")} className={`acm-btn ${tab === "employees" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>
+          Employees
+        </button>
+      </div>
+
+      <InlineMessage error={staff.error || error} message={message} />
+
+      <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {(visibleStaffData[tab] ?? []).map((item) => (
+          (() => {
+            return (
+          <StaffCard
+            key={item.user_id}
+            item={item}
+            onOpenProfile={setSelectedProfile}
+            onEdit={openEditStaff}
+            onDelete={deleteStaff}
+            onAssignTask={openAssignTask}
+            canEdit={canManageThisStaff}
+            canDelete={canManageThisStaff}
+            canAssignTask={canAssignToThisStaff}
+          />
+            );
+          })()
+        ))}
+      </section>
+
+      <ProfileModal
+        open={Boolean(selectedProfile)}
+        title="User Profile"
+        details={
+          selectedProfile
+            ? [
+                { label: "User Code", value: selectedProfile.user_code },
+                { label: "Name", value: selectedProfile.name },
+                { label: "Email", value: selectedProfile.email },
+                { label: "Mobile", value: selectedProfile.mobile },
+                { label: "Role", value: roleName(selectedProfile.role) },
+                { label: "Project", value: getProjectAssignmentSummary(selectedProfile, fixedProjectId) },
+                {
+                  label: "Assigned Projects",
+                  value:
+                    (selectedProfile.project_assignments ?? [])
+                      .map((assignment) => assignment.project?.name || assignment.project_id)
+                      .join(", ") || "-",
+                },
+                ...(ownerMode ? [{ label: "Password", value: selectedProfile.password || "-" }] : []),
+              ]
+            : []
+        }
+        onClose={() => setSelectedProfile(null)}
+        onSendEmail={ownerMode && selectedProfile ? () => onSendEmail(selectedProfile.user_id) : null}
+        actions={
+          selectedProfile && canManageThisStaff(selectedProfile) ? (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedProfile(null);
+                  openEditStaff(selectedProfile);
+                }}
+                className="acm-btn acm-btn-secondary h-10 px-4"
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedProfile(null);
+                  deleteStaff(selectedProfile);
+                }}
+                className="acm-btn acm-btn-secondary h-10 px-4"
+              >
+                Delete
+              </button>
+            </>
+          ) : null
+        }
+      />
+
+      <Modal open={open} title="Create Staff" onClose={() => setOpen(false)}>
+        <form onSubmit={createStaff} className="grid gap-3">
+          <input className={fieldClass()} placeholder="Name" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+          <select className={fieldClass()} value={form.role} onChange={(e) => setForm((prev) => ({ ...prev, role: e.target.value }))}>
+            {allowManagerCreation ? <option value="manager">Manager</option> : null}
+            <option value="employee">Employee</option>
+          </select>
+          <input className={fieldClass()} placeholder="Email" value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
+          <input className={fieldClass()} placeholder="Mobile" value={form.mobile} onChange={(e) => setForm((prev) => ({ ...prev, mobile: e.target.value }))} />
+          <input className={fieldClass()} inputMode="decimal" placeholder="Hourly Rate" value={form.hourlyRate} onChange={(e) => setForm((prev) => ({ ...prev, hourlyRate: e.target.value }))} />
+          <select className={fieldClass()} value={selectedProjectId} onChange={(e) => setForm((prev) => ({ ...prev, projectId: e.target.value }))} disabled={Boolean(fixedProjectId)}>
+            <option value="">Assigned Project</option>
+            {availableProjects.map((project) => (
+              <option key={project.id} value={project.id}>{project.name}</option>
+            ))}
+          </select>
+          {managerProjectOnly ? <div className="text-sm text-[color:var(--acm-muted-fg)]">Manager can create employees only inside an assigned project.</div> : null}
+          <button type="submit" className="acm-btn acm-btn-primary">Save</button>
+        </form>
+      </Modal>
+
+      <Modal open={assignOpen} title="Assign Project" onClose={() => setAssignOpen(false)}>
+        <form onSubmit={assignProject} className="grid gap-3">
+          <select className={fieldClass()} value={assignForm.userId} onChange={(e) => setAssignForm((prev) => ({ ...prev, userId: e.target.value }))}>
+            <option value="">Select Staff</option>
+            {[...staffData.managers, ...staffData.employees].map((item) => (
+              <option key={item.user_id} value={item.user_id}>{getStaffOptionLabel(item)}</option>
+            ))}
+          </select>
+          <select className={fieldClass()} value={selectedAssignmentProjectId} onChange={(e) => setAssignForm((prev) => ({ ...prev, projectId: e.target.value }))} disabled={Boolean(fixedProjectId)}>
+            <option value="">Select Project</option>
+            {availableProjects.map((project) => (
+              <option key={project.id} value={project.id}>{project.name}</option>
+            ))}
+          </select>
+          <select className={fieldClass()} value={assignForm.role} onChange={(e) => setAssignForm((prev) => ({ ...prev, role: e.target.value }))}>
+            {allowManagerCreation ? <option value="manager">Manager</option> : null}
+            <option value="employee">Employee</option>
+          </select>
+          <input className={fieldClass()} inputMode="decimal" placeholder="Hourly Rate" value={assignForm.hourlyRate} onChange={(e) => setAssignForm((prev) => ({ ...prev, hourlyRate: e.target.value }))} />
+          <button type="submit" className="acm-btn acm-btn-primary">Assign</button>
+        </form>
+      </Modal>
+
+      <Modal open={editOpen} title="Edit Staff" onClose={() => setEditOpen(false)}>
+        <form onSubmit={updateStaff} className="grid gap-3">
+          <input className={fieldClass()} placeholder="Name" value={editingStaff?.name || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, name: e.target.value }))} />
+          <input className={fieldClass()} placeholder="Email" value={editingStaff?.email || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, email: e.target.value }))} />
+          <input className={fieldClass()} placeholder="Mobile" value={editingStaff?.mobile || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, mobile: e.target.value }))} />
+          <input className={fieldClass()} inputMode="decimal" placeholder="Hourly Rate" value={editingStaff?.hourly_rate || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, hourly_rate: e.target.value }))} />
+          <button type="submit" className="acm-btn acm-btn-primary">Save</button>
+        </form>
+      </Modal>
+
+      <Modal open={taskOpen} title="Assign Task" onClose={() => setTaskOpen(false)}>
+        <form onSubmit={assignTaskFromStaffList} className="grid gap-3">
+          <select className={fieldClass()} value={taskForm.projectId} onChange={(e) => setTaskForm((prev) => ({ ...prev, projectId: e.target.value }))} disabled={Boolean(fixedProjectId)}>
+            <option value="">Project</option>
+            {availableProjects.map((project) => (
+              <option key={project.id} value={project.id}>{project.name}</option>
+            ))}
+          </select>
+          <input className={fieldClass()} value={taskTarget ? getStaffOptionLabel(taskTarget) : ""} disabled />
+          <input className={fieldClass()} placeholder="Task title" value={taskForm.title} onChange={(e) => setTaskForm((prev) => ({ ...prev, title: e.target.value }))} />
+          <textarea className={fieldClass()} placeholder="Description" value={taskForm.description} onChange={(e) => setTaskForm((prev) => ({ ...prev, description: e.target.value }))} />
+          <input className={fieldClass()} type="date" value={taskForm.startDate} onChange={(e) => setTaskForm((prev) => ({ ...prev, startDate: e.target.value }))} />
+          <input className={fieldClass()} type="date" value={taskForm.endDate} onChange={(e) => setTaskForm((prev) => ({ ...prev, endDate: e.target.value }))} />
+          <select className={fieldClass()} value={taskForm.approvalRole} onChange={(e) => setTaskForm((prev) => ({ ...prev, approvalRole: e.target.value }))}>
+            <option value="manager">Manager Approval</option>
+            <option value="employee">Employee Approval</option>
+          </select>
+          <button type="submit" className="acm-btn acm-btn-primary">Assign Task</button>
+        </form>
+      </Modal>
+    </>
+  );
+}
+
+function buildTaskDetails(task) {
+  return [
+    { label: "Task", value: task?.title },
+    { label: "Project", value: task?.project?.name || "-" },
+    { label: "Description", value: task?.description || "-" },
+    { label: "Start Date", value: formatDate(task?.start_date) },
+    { label: "End Date", value: formatDate(task?.end_date) },
+    { label: "Approval Role", value: task?.approval_role || "-" },
+    {
+      label: "Assignments",
+      value:
+        (task?.assignments ?? [])
+          .map((assignment) => `${assignment.assignee?.name || assignment.assignee?.user_code} (${assignment.status})`)
+          .join(", ") || "-",
+    },
+    {
+      label: "Approved By",
+      value:
+        (task?.assignments ?? [])
+          .map((assignment) =>
+            assignment.latest_approval?.approved_by
+              ? `${assignment.latest_approval.approved_by.name || assignment.latest_approval.approved_by.user_code} (${assignment.latest_approval.approved_by_role})`
+              : null
+          )
+          .filter(Boolean)
+          .join(", ") || "-",
+    },
+  ];
+}
+
+export function TasksManagerPage({
+  roleBase = "owner",
+  canAssignManagers = false,
+  canCreateTask = false,
+  fixedProjectId = "",
+  currentUserId = "",
+}) {
+  const tasks = useApi(fixedProjectId ? `/api/tasks?projectId=${fixedProjectId}` : "/api/tasks");
+  const projects = useApi("/api/projects");
+  const staff = useApi("/api/staff");
+  const [tab, setTab] = useState("assigned");
+  const [open, setOpen] = useState(false);
+  const [submitOpen, setSubmitOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState(null);
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [selectedAssignment, setSelectedAssignment] = useState(null);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [form, setForm] = useState({
+    id: "",
+    projectId: fixedProjectId || "",
+    assigneeUserIds: [],
+    title: "",
+    description: "",
+    startDate: "",
+    endDate: "",
+    approvalRole: "manager",
+  });
+  const [submitForm, setSubmitForm] = useState({
+    workDescription: "",
+    photos: [],
+    blocker: "",
+  });
+  const [reviewForm, setReviewForm] = useState({
+    action: "approved",
+    comment: "",
+  });
+
+  const managers = staff.data?.staff?.managers ?? [];
+  const employees = staff.data?.staff?.employees ?? [];
+  const projectList = projects.data?.projects ?? [];
+  const availableProjects = fixedProjectId ? projectList.filter((project) => project.id === fixedProjectId) : projectList;
+  const activeProjectId = form.projectId || fixedProjectId || getProjectDefaultId(availableProjects);
+  const candidateAssignees = canAssignManagers ? [...managers, ...employees] : employees;
+  const availableAssignees = candidateAssignees.filter((item) => {
+    if (!activeProjectId) return true;
+    return (item.project_assignments ?? []).some((assignment) => assignment.project_id === activeProjectId);
+  });
+
+  const taskGroups = tasks.data ?? { tasks: [], assignedTasks: [], approvedByMe: [] };
+  const visibleTasks =
+    roleBase === "owner"
+      ? taskGroups.tasks
+      : tab === "approved"
+        ? taskGroups.approvedByMe
+        : taskGroups.assignedTasks;
+
+  function openCreate() {
+    setEditingTask(null);
+    setForm({
+      id: "",
+      projectId: fixedProjectId || "",
+      assigneeUserIds: [],
+      title: "",
+      description: "",
+      startDate: "",
+      endDate: "",
+      approvalRole: "manager",
+    });
+    setOpen(true);
+  }
+
+  function openEdit(task) {
+    setEditingTask(task);
+    setForm({
+      id: task.id,
+      projectId: task.project_id,
+      assigneeUserIds: (task.assignments ?? []).map((assignment) => assignment.user_id),
+      title: task.title || "",
+      description: task.description || "",
+      startDate: task.start_date || "",
+      endDate: task.end_date || "",
+      approvalRole: task.approval_role || "manager",
+    });
+    setOpen(true);
+  }
+
+  async function saveTask(e) {
+    e.preventDefault();
+    setError("");
+    setMessage("");
+
+    const res = await fetch("/api/tasks", {
+      method: editingTask ? "PUT" : "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...form,
+        projectId: activeProjectId,
+      }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(json?.error || "task_save_failed");
+      return;
+    }
+    setMessage(editingTask ? "Task updated" : "Task created");
+    setOpen(false);
+    window.location.reload();
+  }
+
+  async function deleteTask(task) {
+    if (!window.confirm(`Delete task ${task.title}?`)) return;
+    setError("");
+    setMessage("");
+    const res = await fetch("/api/tasks", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: task.id }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(json?.error || "task_delete_failed");
+      return;
+    }
+    setMessage(`${task.title} deleted`);
+    window.location.reload();
+  }
+
+  function openSubmit(assignment) {
+    setSelectedAssignment(assignment);
+    setSubmitForm({
+      workDescription: "",
+      photos: [],
+      blocker: "",
+    });
+    setSubmitOpen(true);
+  }
+
+  async function handlePhotoInput(files) {
+    const nextPhotos = await Promise.all(
+      Array.from(files).map(
+        (file) =>
+          new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+            reader.onerror = () => reject(new Error(`Unable to read ${file.name}`));
+            reader.readAsDataURL(file);
+          })
+      )
+    );
+    setSubmitForm((prev) => ({ ...prev, photos: nextPhotos }));
+  }
+
+  async function submitTask(e) {
+    e.preventDefault();
+    if (!selectedAssignment) return;
+    setError("");
+    setMessage("");
+    const res = await fetch("/api/task-submissions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        taskAssignmentId: selectedAssignment.id,
+        workDescription: submitForm.workDescription,
+        photos: submitForm.photos,
+        blocker: submitForm.blocker || null,
+      }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(json?.error || "task_submission_failed");
+      return;
+    }
+    setMessage("Task submitted");
+    setSubmitOpen(false);
+    window.location.reload();
+  }
+
+  function openReview(task, assignment) {
+    setSelectedTask(task);
+    setSelectedAssignment(assignment);
+    setReviewForm({ action: "approved", comment: "" });
+    setReviewOpen(true);
+  }
+
+  async function submitReview(e) {
+    e.preventDefault();
+    if (!selectedAssignment) return;
+    setError("");
+    setMessage("");
+    const res = await fetch("/api/task-approvals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        taskAssignmentId: selectedAssignment.id,
+        action: reviewForm.action,
+        comment: reviewForm.comment || null,
+      }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(json?.error || "task_review_failed");
+      return;
+    }
+    setMessage(reviewForm.action === "approved" ? "Task approved" : "Task rejected");
+    setReviewOpen(false);
+    window.location.reload();
+  }
+
+  return (
+    <>
+      <SectionHeader
+        title="Tasks"
+        action={
+          canCreateTask ? (
+            <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
+              Assign Task
+            </button>
+          ) : null
+        }
+      />
+
+      {roleBase !== "owner" ? (
+        <div className="mb-4 flex gap-2">
+          <button type="button" onClick={() => setTab("assigned")} className={`acm-btn ${tab === "assigned" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>
+            Assigned Tasks
+          </button>
+          <button type="button" onClick={() => setTab("approved")} className={`acm-btn ${tab === "approved" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>
+            Approved By Me
+          </button>
+        </div>
+      ) : null}
+
+      <InlineMessage error={tasks.error || error} message={message} />
+
+      <section className="mt-4 grid gap-4 md:grid-cols-2">
+        {visibleTasks.map((task) => (
+          <TaskCard
+            key={task.id}
+            task={task}
+            onView={setSelectedTask}
+            onEdit={openEdit}
+            onDelete={deleteTask}
+            onSubmit={openSubmit}
+            onReview={openReview}
+            canManageTask={canCreateTask && (roleBase === "owner" || task.creator?.user_id === currentUserId)}
+          />
+        ))}
+        {!visibleTasks.length ? (
+          <div className={cardClass("md:col-span-2 text-sm text-[color:var(--acm-muted-fg)]")}>
+            No tasks available in this workflow tab yet.
+          </div>
+        ) : null}
+      </section>
+
+      <ProfileModal
+        open={Boolean(selectedTask) && !reviewOpen}
+        title="Task Profile"
+        details={selectedTask ? buildTaskDetails(selectedTask) : []}
+        onClose={() => setSelectedTask(null)}
+      />
+
+      <Modal open={open} title={editingTask ? "Edit Task" : "Create Task"} onClose={() => setOpen(false)}>
+        <form onSubmit={saveTask} className="grid gap-3">
+          {!fixedProjectId ? (
+            <select className={fieldClass()} value={activeProjectId} onChange={(e) => setForm((prev) => ({ ...prev, projectId: e.target.value }))}>
+              <option value="">Project</option>
+              {availableProjects.map((project) => (
+                <option key={project.id} value={project.id}>{project.name}</option>
+              ))}
+            </select>
+          ) : null}
+          <input className={fieldClass()} placeholder="Task title" value={form.title} onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))} />
+          <textarea className={fieldClass()} placeholder="Description" value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} />
+          <input className={fieldClass()} type="date" value={form.startDate} onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))} />
+          <input className={fieldClass()} type="date" value={form.endDate} onChange={(e) => setForm((prev) => ({ ...prev, endDate: e.target.value }))} />
+          <select className={fieldClass()} value={form.approvalRole} onChange={(e) => setForm((prev) => ({ ...prev, approvalRole: e.target.value }))}>
+            <option value="manager">Manager Approval</option>
+            <option value="employee">Employee Approval</option>
+          </select>
+          <select
+            multiple
+            className={fieldClass()}
+            value={form.assigneeUserIds}
+            onChange={(e) =>
+              setForm((prev) => ({
+                ...prev,
+                assigneeUserIds: Array.from(e.target.selectedOptions).map((option) => option.value),
+              }))
+            }
+          >
+            {availableAssignees.map((item) => (
+              <option key={item.user_id} value={item.user_id}>
+                {getTaskAssigneeLabel(item, activeProjectId)}
+              </option>
+            ))}
+          </select>
+          <div className="text-sm text-[color:var(--acm-muted-fg)]">
+            {availableAssignees.length ? "Only staff already assigned to this project are shown." : "No eligible project staff found for this task."}
+          </div>
+          <div className="text-sm text-[color:var(--acm-muted-fg)]">
+            {canAssignManagers ? "Owner can assign to managers and employees." : "Manager can assign to employees only."}
+          </div>
+          <button type="submit" className="acm-btn acm-btn-primary">Save</button>
+        </form>
+      </Modal>
+
+      <Modal open={submitOpen} title="Submit Task" onClose={() => setSubmitOpen(false)}>
+        <form onSubmit={submitTask} className="grid gap-3">
+          <textarea className={fieldClass()} placeholder="Work description" value={submitForm.workDescription} onChange={(e) => setSubmitForm((prev) => ({ ...prev, workDescription: e.target.value }))} />
+          <input
+            className={fieldClass()}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={async (e) => {
+              if (!e.target.files?.length) return;
+              try {
+                await handlePhotoInput(e.target.files);
+              } catch (err) {
+                setError(err.message || "photo_read_failed");
+              }
+            }}
+          />
+          <div className="text-sm text-[color:var(--acm-muted-fg)]">
+            {submitForm.photos.length ? `${submitForm.photos.length} photo(s) ready` : "No photos selected"}
+          </div>
+          <textarea className={fieldClass()} placeholder="Blocker (optional)" value={submitForm.blocker} onChange={(e) => setSubmitForm((prev) => ({ ...prev, blocker: e.target.value }))} />
+          <button type="submit" className="acm-btn acm-btn-primary">Submit</button>
+        </form>
+      </Modal>
+
+      <Modal open={reviewOpen} title="Review Submission" onClose={() => setReviewOpen(false)}>
+        <form onSubmit={submitReview} className="grid gap-3">
+          <select className={fieldClass()} value={reviewForm.action} onChange={(e) => setReviewForm((prev) => ({ ...prev, action: e.target.value }))}>
+            <option value="approved">Approve</option>
+            <option value="rejected">Reject</option>
+          </select>
+          <textarea className={fieldClass()} placeholder="Review comment" value={reviewForm.comment} onChange={(e) => setReviewForm((prev) => ({ ...prev, comment: e.target.value }))} />
+          <button type="submit" className="acm-btn acm-btn-primary">Save Review</button>
+        </form>
+      </Modal>
+    </>
+  );
+}

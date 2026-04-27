@@ -1,0 +1,87 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  color: var(--acm-fg);
+}
+
+.card {
+  width: min(100%, 430px);
+  border: 1px solid var(--acm-border);
+  border-radius: 28px;
+  background: var(--acm-surface);
+  padding: 20px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.12);
+}
+
+.topBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.topActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.homeButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--acm-border);
+  border-radius: 999px;
+  background: var(--acm-surface);
+  color: var(--acm-fg);
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.08);
+}
+
+.heading {
+  margin: 0 0 14px;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: var(--acm-fg);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--acm-fg);
+}
+
+.footerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+.linkButton {
+  color: var(--acm-fg);
+  text-decoration: underline;
+  text-decoration-color: var(--acm-accent-border);
+  text-underline-offset: 4px;
+}

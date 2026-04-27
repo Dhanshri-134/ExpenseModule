@@ -1,0 +1,204 @@
+@import "tailwindcss";
+
+:root {
+  --acm-bg: #fff7fb;
+  --acm-fg: #170511;
+  --acm-muted-fg: rgba(23, 5, 17, 0.68);
+  --acm-border: rgba(151, 24, 95, 0.12);
+  --acm-surface: rgba(255, 255, 255, 0.84);
+  --acm-surface-2: rgba(255, 239, 248, 0.95);
+  --acm-panel: rgba(255, 255, 255, 0.92);
+  --acm-input: rgba(255, 255, 255, 0.95);
+  --acm-input-placeholder: rgba(84, 17, 54, 0.45);
+  --acm-ring: rgba(224, 33, 138, 0.32);
+  --acm-overlay: rgba(255, 247, 251, 0.86);
+  --acm-overlay-1: rgba(255, 247, 251, 0.84);
+  --acm-overlay-2: rgba(255, 247, 251, 0.96);
+  --acm-dot: rgba(151, 24, 95, 0.08);
+  --acm-accent: #e0218a;
+  --acm-accent-strong: #ab1467;
+  --acm-accent-soft: rgba(224, 33, 138, 0.12);
+  --acm-accent-border: rgba(224, 33, 138, 0.22);
+  --acm-sidebar: rgba(255, 250, 252, 0.94);
+
+  --background: var(--acm-bg);
+  --foreground: var(--acm-fg);
+  --mx: 0;
+  --my: 0;
+}
+
+html[data-theme="dark"] {
+  --acm-bg: #050205;
+  --acm-fg: #fff4fb;
+  --acm-muted-fg: rgba(255, 244, 251, 0.7);
+  --acm-border: rgba(255, 101, 196, 0.18);
+  --acm-surface: rgba(27, 11, 21, 0.88);
+  --acm-surface-2: rgba(43, 18, 33, 0.98);
+  --acm-panel: rgba(15, 6, 12, 0.96);
+  --acm-input: rgba(18, 7, 14, 0.92);
+  --acm-input-placeholder: rgba(255, 214, 238, 0.42);
+  --acm-ring: rgba(255, 101, 196, 0.38);
+  --acm-overlay: rgba(5, 2, 5, 0.88);
+  --acm-overlay-1: rgba(5, 2, 5, 0.88);
+  --acm-overlay-2: rgba(5, 2, 5, 0.94);
+  --acm-dot: rgba(255, 101, 196, 0.08);
+  --acm-accent: #ff4db3;
+  --acm-accent-strong: #ff9dd2;
+  --acm-accent-soft: rgba(255, 77, 179, 0.14);
+  --acm-accent-border: rgba(255, 77, 179, 0.28);
+  --acm-sidebar: rgba(11, 4, 9, 0.96);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: "Segoe UI", "Trebuchet MS", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+}
+
+body {
+  background: radial-gradient(
+      1000px 700px at 18% 8%,
+      rgba(224, 33, 138, 0.16),
+      transparent 55%
+    ),
+    radial-gradient(
+      900px 650px at 84% 16%,
+      rgba(255, 95, 178, 0.12),
+      transparent 55%
+    ),
+    radial-gradient(
+      900px 720px at 50% 108%,
+      rgba(151, 24, 95, 0.1),
+      transparent 60%
+    ),
+    var(--acm-bg);
+  color: var(--acm-fg);
+  font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+}
+
+.acm-app {
+  background: inherit;
+  color: inherit;
+}
+
+.acm-parallax {
+  transform: translate3d(
+    calc(var(--mx, 0) * 22px),
+    calc(var(--my, 0) * 22px),
+    0
+  );
+}
+
+.acm-parallax-slow {
+  transform: translate3d(
+    calc(var(--mx, 0) * 10px),
+    calc(var(--my, 0) * 10px),
+    0
+  );
+}
+
+@layer components {
+  .acm-container {
+    @apply mx-auto w-full max-w-6xl px-5 sm:px-8;
+  }
+
+  .acm-surface {
+    @apply rounded-2xl border shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset];
+    background: var(--acm-surface);
+    border-color: var(--acm-border);
+  }
+
+  .acm-surface-strong {
+    @apply rounded-3xl border shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset];
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--acm-surface) 88%, white 12%),
+      var(--acm-surface)
+    );
+    border-color: var(--acm-border);
+  }
+
+  .acm-surface-muted {
+    @apply rounded-2xl border;
+    background: var(--acm-surface);
+    border-color: var(--acm-border);
+  }
+
+  .acm-input {
+    @apply mt-2 w-full rounded-xl border px-4 py-3 text-sm outline-none focus:ring-2;
+    background: var(--acm-input);
+    border-color: var(--acm-border);
+    color: var(--acm-fg);
+    --tw-ring-color: var(--acm-ring);
+  }
+
+  .acm-input::placeholder {
+    color: var(--acm-input-placeholder);
+  }
+
+  .acm-badge {
+    @apply inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs;
+    background: var(--acm-accent-soft);
+    border-color: var(--acm-accent-border);
+    color: var(--acm-accent-strong);
+  }
+
+  .acm-btn {
+    @apply inline-flex h-11 items-center justify-center rounded-xl px-5 text-sm font-semibold transition duration-200 ease-out focus:outline-none focus-visible:ring-2;
+    --tw-ring-color: var(--acm-ring);
+  }
+
+  .acm-btn-primary {
+    @apply text-white;
+    background: linear-gradient(135deg, #c71585 0%, var(--acm-accent) 55%, #ff78c8 100%);
+    box-shadow: 0 18px 45px rgba(224, 33, 138, 0.26);
+  }
+
+  .acm-btn-primary:hover {
+    filter: brightness(1.04);
+  }
+
+  .acm-btn-secondary {
+    @apply border shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset];
+    background: var(--acm-surface);
+    border-color: var(--acm-border);
+    color: color-mix(in srgb, var(--acm-fg) 92%, transparent);
+  }
+
+  .acm-btn-secondary:hover {
+    background: var(--acm-surface-2);
+  }
+
+  .acm-btn-employee {
+    @apply border shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset];
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--acm-accent-soft) 92%, transparent),
+      color-mix(in srgb, var(--acm-surface) 88%, white 12%)
+    );
+    border-color: color-mix(in srgb, var(--acm-border) 58%, var(--acm-accent));
+    color: color-mix(in srgb, var(--acm-fg) 92%, transparent);
+  }
+
+  .acm-btn-employee:hover {
+    border-color: color-mix(in srgb, var(--acm-border) 45%, var(--acm-accent));
+  }
+
+  .acm-btn-nav {
+    @apply inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset] backdrop-blur transition focus:outline-none focus-visible:ring-2;
+    background: var(--acm-surface);
+    border-color: var(--acm-border);
+    color: var(--acm-fg);
+    --tw-ring-color: var(--acm-ring);
+  }
+
+  .acm-btn-nav:hover {
+    background: var(--acm-surface-2);
+  }
+
+  .acm-btn-lift {
+    @apply will-change-transform hover:-translate-y-0.5 active:translate-y-0;
+  }
+}
