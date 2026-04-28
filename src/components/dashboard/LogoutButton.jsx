@@ -23,7 +23,7 @@ export default function LogoutButton() {
       type="button"
       onClick={onLogout}
       disabled={busy || !supabase}
-      className="inline-flex items-center justify-center rounded-xl border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-2 text-[color:var(--acm-fg)]/80 transition hover:bg-[color:var(--acm-surface-2)] hover:text-[color:var(--acm-fg)] disabled:opacity-60"
+      className="inline-flex items-center justify-center rounded-xl border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-1)] p-2 text-[color:var(--acm-bg)]/80 transition hover:bg-[color:var(--acm-surface-12)] hover:text-[color:var(--acm-fg)] disabled:opacity-60"
       aria-label="Logout"
       title="Logout"
     >

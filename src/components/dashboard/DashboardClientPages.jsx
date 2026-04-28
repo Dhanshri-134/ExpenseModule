@@ -2,8 +2,16 @@
 
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Modal from "@/components/dashboard/Modal";
+import { BusyButton, CompactListRow, DrilldownModal, StatusMetricButton } from "@/components/dashboard/DashboardUi";
+import {
+  InsightsIcon,
+  ProjectsIcon,
+  PulseIcon,
+  TeamIcon,
+} from "@/components/dashboard/icons";
+import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 function cardClass(extra = "") {
@@ -24,6 +32,45 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString();
+}
+
+function formatCompactNumber(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return "-";
+
+  const absoluteValue = Math.abs(numericValue);
+  const format = (divisor, suffix) => {
+    const scaledValue = numericValue / divisor;
+    const digits = Math.abs(scaledValue) >= 100 ? 0 : Math.abs(scaledValue) >= 10 ? 1 : 2;
+    const roundedValue = Number(scaledValue.toFixed(digits));
+    return `${roundedValue}${suffix}`;
+  };
+
+  if (absoluteValue >= 1_000_000_000) return format(1_000_000_000, "B");
+  if (absoluteValue >= 10_000_000) return format(10_000_000, "Cr");
+  if (absoluteValue >= 1_000_000) return format(1_000_000, "M");
+  if (absoluteValue >= 100_000) return format(100_000, "L");
+  if (absoluteValue >= 1_000) return format(1_000, "K");
+
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(numericValue);
+}
+
+function MetricChip({ label, value, icon: Icon, onClick, tone }) {
+  if (onClick) {
+    return <StatusMetricButton label={label} value={value} onClick={onClick} tone={tone} />;
+  }
+
+  return (
+    <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-3 py-3 text-left">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
+        {label}
+      </div>
+      <div className="mt-1 flex items-center gap-2 text-lg font-extrabold tracking-tight text-[color:var(--acm-fg)]">
+        {Icon ? <Icon className="h-4 w-4 text-[color:var(--acm-accent)]" /> : null}
+        <span>{value}</span>
+      </div>
+    </div>
+  );
 }
 
 function getProjectErrorMessage(error) {
@@ -64,6 +111,75 @@ function getTaskAssigneeLabel(item, projectId = "") {
   return `${getStaffOptionLabel(item)} | ${roleName(item.role)} | ${projectSummary}`;
 }
 
+function getTaskStatusGroups(roleBase, taskGroups, taskSummary) {
+  if (roleBase === "owner") {
+    const today = new Date().toDateString();
+    return [
+      {
+        key: "todayAssigned",
+        label: "Today's Assigned",
+        value: taskSummary.todayAssigned ?? 0,
+        items: (taskGroups.tasks ?? []).filter((task) =>
+          (task.assignments ?? []).some((assignment) => new Date(assignment.created_at).toDateString() === today)
+        ),
+      },
+      {
+        key: "completed",
+        label: "Completed",
+        value: taskSummary.completed ?? 0,
+        items: (taskGroups.tasks ?? []).filter((task) =>
+          (task.assignments ?? []).some((assignment) => assignment.status === "approved")
+        ),
+      },
+    ];
+  }
+
+  return [
+    {
+      key: "myCompleted",
+      label: "My Tasks Completed",
+      value: taskSummary.myTasks?.completed ?? 0,
+      items: (taskGroups.assignedTasks ?? []).filter((task) =>
+        (task.my_assignments ?? []).some((assignment) => assignment.status === "approved")
+      ),
+    },
+    {
+      key: "approved",
+      label: "Approved",
+      value: taskSummary.approvingTasks?.approved ?? 0,
+      items: taskGroups.approvedByMe ?? [],
+    },
+    {
+      key: "toApprove",
+      label: "To Be Approved",
+      value: taskSummary.approvingTasks?.toBeApproved ?? 0,
+      items: (taskGroups.tasks ?? []).filter((task) =>
+        (task.assignments ?? []).some((assignment) => assignment.status === "submitted")
+      ),
+    },
+    ...(roleBase === "manager"
+      ? [
+          {
+            key: "assigned",
+            label: "Assigned",
+            value: taskSummary.assignedTasks?.assigned ?? 0,
+            items: (taskGroups.tasks ?? []).filter((task) =>
+              (task.assignments ?? []).some((assignment) => assignment.assigned_by_user_id === task.creator?.user_id)
+            ),
+          },
+          {
+            key: "assignedCompleted",
+            label: "Assigned Completed",
+            value: taskSummary.assignedTasks?.completed ?? 0,
+            items: (taskGroups.tasks ?? []).filter((task) =>
+              (task.assignments ?? []).some((assignment) => assignment.status === "approved")
+            ),
+          },
+        ]
+      : []),
+  ];
+}
+
 function getApproverOptions(staffData, projectId, role) {
   const source = role === "manager" ? staffData.managers ?? [] : staffData.employees ?? [];
   return source.filter((item) => {
@@ -93,35 +209,7 @@ function FieldGroup({ title, children }) {
 }
 
 function useApi(url) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let active = true;
-
-    async function load() {
-      setLoading(true);
-      const res = await fetch(url);
-      const json = await res.json().catch(() => null);
-      if (!active) return;
-      if (!res.ok) {
-        setError(json?.error || "request_failed");
-        setLoading(false);
-        return;
-      }
-      setData(json);
-      setError("");
-      setLoading(false);
-    }
-
-    load();
-    return () => {
-      active = false;
-    };
-  }, [url]);
-
-  return { data, loading, error, setData };
+  return useApiQuery(url);
 }
 
 function InlineMessage({ error, message }) {
@@ -198,61 +286,6 @@ async function sendCredentialEmail(userId) {
   return json;
 }
 
-function ProjectCard({ roleBase, project, onView, onEdit, onDelete, canManage }) {
-  return (
-    <div className={cardClass()}>
-      <div className="font-bold text-[color:var(--acm-fg)]">{project.name}</div>
-      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{project.job_number}</div>
-      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{project.client?.name || "-"}</div>
-      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{project.location || "-"}</div>
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Link href={`/${roleBase}/project/${project.id}/overview`} className="acm-btn acm-btn-primary h-10 px-4">
-          Open Project Dashboard
-        </Link>
-        <button type="button" onClick={() => onView(project)} className="acm-btn acm-btn-secondary h-10 px-4">
-          View More
-        </button>
-        {canManage ? (
-          <>
-            <button type="button" onClick={() => onEdit(project)} className="acm-btn acm-btn-secondary h-10 px-4">
-              Edit
-            </button>
-            <button type="button" onClick={() => onDelete(project)} className="acm-btn acm-btn-secondary h-10 px-4">
-              Delete
-            </button>
-          </>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function StaffCard({ item, onOpenProfile, onAssignTask, canAssignTask }) {
-  return (
-    <div className={cardClass()}>
-      <div className="font-bold">{item.name || item.user_code}</div>
-      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{item.user_code}</div>
-      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{item.email}</div>
-      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{roleName(item.role)}</div>
-      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">
-        Projects: {getProjectAssignmentSummary(item)}
-      </div>
-      <div className="mt-4">
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => onOpenProfile(item)} className="acm-btn acm-btn-secondary h-10 px-4">
-            View More
-          </button>
-          {canAssignTask ? (
-            <button type="button" onClick={() => onAssignTask(item)} className="acm-btn acm-btn-primary h-10 px-4">
-              Assign Task
-            </button>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function AssignmentPill({ assignment }) {
   return (
     <div className="rounded-[16px] border border-[color:var(--acm-border)] px-3 py-2 text-sm">
@@ -268,66 +301,6 @@ function AssignmentPill({ assignment }) {
       {assignment.latest_approval?.comment ? (
         <div className="mt-1 text-xs text-[color:var(--acm-muted-fg)]">Review: {assignment.latest_approval.comment}</div>
       ) : null}
-    </div>
-  );
-}
-
-function TaskCard({ task, onView, onEdit, onDelete, onSubmit, onReview, canManageTask }) {
-  const reviewableAssignments = (task.assignments ?? []).filter((assignment) => assignment.status === "submitted");
-
-  return (
-    <div className={cardClass()}>
-      <div className="font-bold">{task.title}</div>
-      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">
-        {task.project?.name || "-"} | {formatDate(task.start_date)} to {formatDate(task.end_date)}
-      </div>
-      <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">Approval Role: {task.approval_role}</div>
-
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        {(task.assignments ?? []).map((assignment) => (
-          <AssignmentPill key={assignment.id} assignment={assignment} />
-        ))}
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button type="button" onClick={() => onView(task)} className="acm-btn acm-btn-secondary h-10 px-4">
-          View More
-        </button>
-        {canManageTask ? (
-          <>
-            <button type="button" onClick={() => onEdit(task)} className="acm-btn acm-btn-secondary h-10 px-4">
-              Edit
-            </button>
-            <button type="button" onClick={() => onDelete(task)} className="acm-btn acm-btn-secondary h-10 px-4">
-              Delete
-            </button>
-          </>
-        ) : null}
-        {(task.my_assignments ?? []).map((assignment) =>
-          ["assigned", "rejected"].includes(assignment.status) ? (
-            <button
-              key={assignment.id}
-              type="button"
-              onClick={() => onSubmit(assignment)}
-              className="acm-btn acm-btn-primary h-10 px-4"
-            >
-              {assignment.status === "rejected" ? "Resubmit Task" : "Submit Task"}
-            </button>
-          ) : null
-        )}
-        {task.can_approve
-          ? reviewableAssignments.map((assignment) => (
-              <button
-                key={`review-${assignment.id}`}
-                type="button"
-                onClick={() => onReview(task, assignment)}
-                className="acm-btn acm-btn-primary h-10 px-4"
-              >
-                Review {assignment.assignee?.user_code || assignment.assignee?.name}
-              </button>
-            ))
-          : null}
-      </div>
     </div>
   );
 }
@@ -360,63 +333,155 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
   const projects = useApi("/api/projects");
   const staff = useApi("/api/staff");
   const tasks = useApi("/api/tasks");
-  const [modalType, setModalType] = useState("");
+  const [drilldown, setDrilldown] = useState({ open: false, title: "", items: [], type: "" });
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [selectedStaff, setSelectedStaff] = useState(null);
+  const [selectedTask, setSelectedTask] = useState(null);
 
   const summary = dashboard.data?.summary;
   const projectList = projects.data?.projects ?? [];
+  const managers = staff.data?.staff?.managers ?? [];
+  const employees = staff.data?.staff?.employees ?? [];
   const staffList = [
-    ...(canManageStaff ? staff.data?.staff?.managers ?? [] : []),
-    ...(staff.data?.staff?.employees ?? []),
+    ...(canManageStaff ? managers : []),
+    ...employees,
   ];
-  const taskList = tasks.data?.tasks ?? [];
+  const taskGroups = tasks.data ?? { tasks: [], assignedTasks: [], approvedByMe: [] };
+  const taskList = taskGroups.tasks ?? [];
   const taskSummary = summary?.tasks ?? {};
+  const projectStatusGroups = [
+    {
+      label: "Live",
+      value: summary?.projects?.live ?? 0,
+      items: projectList.filter((project) => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const start = project.start_date ? new Date(project.start_date) : null;
+        const end = project.end_date ? new Date(project.end_date) : null;
+        return (!start || start <= today) && (!end || end >= today);
+      }),
+      tone: "success",
+    },
+    {
+      label: "Complete",
+      value: summary?.projects?.complete ?? 0,
+      items: projectList.filter((project) => {
+        const end = project.end_date ? new Date(project.end_date) : null;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return Boolean(end && end < today);
+      }),
+      tone: "default",
+    },
+    {
+      label: "On Hold",
+      value: summary?.projects?.onhold ?? 0,
+      items: projectList.filter((project) => {
+        const start = project.start_date ? new Date(project.start_date) : null;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return Boolean(start && start > today);
+      }),
+      tone: "default",
+    },
+  ];
+  const staffGroups = [
+    { label: "Managers", value: summary?.staff?.managers ?? 0, items: managers, tone: "default" },
+    { label: "Employees", value: summary?.staff?.employees ?? 0, items: employees, tone: "default" },
+  ];
+  const taskGroupsForOverview = getTaskStatusGroups(roleBase, taskGroups, taskSummary);
+
+  function openDrilldown(title, items, type) {
+    setDrilldown({ open: true, title, items, type });
+  }
 
   return (
     <>
       <SectionHeader title="Overview" />
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <button type="button" className={cardClass("text-left")} onClick={() => router.push(`/${roleBase}/projects`)}>
-          <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">Projects</div>
-          <div className="mt-2 text-3xl font-extrabold">{summary?.projects?.total ?? 0}</div>
-          <div className="mt-3 grid gap-1 text-sm text-[color:var(--acm-muted-fg)]">
-            <div>Live: {summary?.projects?.live ?? 0}</div>
-            <div>Complete: {summary?.projects?.complete ?? 0}</div>
-            <div>On Hold: {summary?.projects?.onhold ?? 0}</div>
+      <section className="grid gap-4 lg:grid-cols-3">
+        <button
+          type="button"
+          className={cardClass("h-full text-left transition-transform hover:-translate-y-0.5")}
+          onClick={() => router.push(`/${roleBase}/projects`)}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">Projects</div>
+              <div className="mt-2 text-3xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">
+                {formatCompactNumber(summary?.projects?.total ?? 0)}
+              </div>
+            </div>
+            <div className="rounded-full border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-3 text-[color:var(--acm-accent)]">
+              <ProjectsIcon className="h-5 w-5" />
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-3 gap-3" onClick={(event) => event.stopPropagation()}>
+            {projectStatusGroups.map((group) => (
+              <MetricChip
+                key={group.label}
+                label={group.label}
+                value={formatCompactNumber(group.value)}
+                onClick={() => openDrilldown(`${group.label} Projects`, group.items, "project")}
+                tone={group.tone}
+              />
+            ))}
           </div>
         </button>
-        <button type="button" className={cardClass("text-left")} onClick={() => setModalType("staff")}>
-          <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">Staff</div>
-          <div className="mt-2 text-3xl font-extrabold">{staffList.length}</div>
-          <div className="mt-3 grid gap-1 text-sm text-[color:var(--acm-muted-fg)]">
-            <div>Managers: {summary?.staff?.managers ?? 0}</div>
-            <div>Employees: {summary?.staff?.employees ?? 0}</div>
+
+        <button
+          type="button"
+          className={cardClass("h-full text-left transition-transform hover:-translate-y-0.5")}
+          onClick={() => openDrilldown("All Staff", staffList, "staff")}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">Staff</div>
+              <div className="mt-2 text-3xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">
+                {formatCompactNumber(staffList.length)}
+              </div>
+            </div>
+            <div className="rounded-full border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-3 text-[color:var(--acm-accent)]">
+              <TeamIcon className="h-5 w-5" />
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3" onClick={(event) => event.stopPropagation()}>
+            {staffGroups.map((group) => (
+              <MetricChip
+                key={group.label}
+                label={group.label}
+                value={formatCompactNumber(group.value)}
+                onClick={() => openDrilldown(group.label, group.items, "staff")}
+              />
+            ))}
           </div>
         </button>
-        <button type="button" className={cardClass("text-left")} onClick={() => router.push(`/${roleBase}/tasks`)}>
-          <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">Tasks</div>
-          <div className="mt-2 text-3xl font-extrabold">
-            {roleBase === "owner" ? taskSummary.todayAssigned ?? 0 : taskSummary.myTasks?.total ?? 0}
+
+        <button
+          type="button"
+          className={cardClass("h-full text-left transition-transform hover:-translate-y-0.5")}
+          onClick={() => router.push(`/${roleBase}/tasks`)}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">Tasks</div>
+              <div className="mt-2 text-3xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">
+                {formatCompactNumber(roleBase === "owner" ? taskSummary.todayAssigned ?? 0 : taskSummary.myTasks?.total ?? 0)}
+              </div>
+            </div>
+            <div className="rounded-full border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-3 text-[color:var(--acm-accent)]">
+              <InsightsIcon className="h-5 w-5" />
+            </div>
           </div>
-          <div className="mt-3 grid gap-1 text-sm text-[color:var(--acm-muted-fg)]">
-            {roleBase === "owner" ? (
-              <>
-                <div>Today&apos;s Assigned: {taskSummary.todayAssigned ?? 0}</div>
-                <div>Completed: {taskSummary.completed ?? 0}</div>
-              </>
-            ) : (
-              <>
-                <div>My Tasks Completed: {taskSummary.myTasks?.completed ?? 0}</div>
-                <div>Approved: {taskSummary.approvingTasks?.approved ?? 0}</div>
-                <div>To Be Approved: {taskSummary.approvingTasks?.toBeApproved ?? 0}</div>
-                {roleBase === "manager" ? (
-                  <>
-                    <div>Assigned: {taskSummary.assignedTasks?.assigned ?? 0}</div>
-                    <div>Assigned Completed: {taskSummary.assignedTasks?.completed ?? 0}</div>
-                  </>
-                ) : null}
-              </>
-            )}
+          <div className="mt-4 grid grid-cols-2 gap-3" onClick={(event) => event.stopPropagation()}>
+            {taskGroupsForOverview.map((group) => (
+              <MetricChip
+                key={group.key}
+                label={group.label}
+                value={formatCompactNumber(group.value)}
+                onClick={() => openDrilldown(group.label, group.items, "task")}
+              />
+            ))}
           </div>
         </button>
       </section>
@@ -426,10 +491,13 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
           <SectionHeader title="Projects" action={<Link href={`/${roleBase}/projects`} className="text-sm font-semibold text-[color:var(--acm-accent)]">Open</Link>} />
           <div className="space-y-3">
             {projectList.slice(0, 3).map((project) => (
-              <div key={project.id} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
-                <div className="font-semibold">{project.name}</div>
-                <div className="text-sm text-[color:var(--acm-muted-fg)]">{project.job_number}</div>
-              </div>
+              <CompactListRow
+                key={project.id}
+                primary={project.name}
+                secondary={project.job_number}
+                tertiary={`${project.client?.name || "-"} | ${project.location || "-"}`}
+                onClick={() => setSelectedProject(project)}
+              />
             ))}
           </div>
         </div>
@@ -437,47 +505,113 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
           <SectionHeader title="Tasks" action={<Link href={`/${roleBase}/tasks`} className="text-sm font-semibold text-[color:var(--acm-accent)]">Open</Link>} />
           <div className="space-y-3">
             {taskList.slice(0, 3).map((task) => (
-              <div key={task.id} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
-                <div className="font-semibold">{task.title}</div>
-                <div className="text-sm text-[color:var(--acm-muted-fg)]">{task.project?.name || "-"}</div>
-              </div>
+              <CompactListRow
+                key={task.id}
+                primary={task.title}
+                secondary={task.project?.name || "-"}
+                tertiary={`${formatDate(task.start_date)} to ${formatDate(task.end_date)}`}
+                onClick={() => setSelectedTask(task)}
+              />
             ))}
           </div>
         </div>
       </section>
 
-      <Modal open={modalType === "projects"} title="Projects" onClose={() => setModalType("")}>
-        <div className="space-y-3">
-          {projectList.map((project) => (
-            <div key={project.id} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
-              <div className="font-semibold">{project.name}</div>
-              <div className="text-sm text-[color:var(--acm-muted-fg)]">{project.job_number}</div>
-            </div>
-          ))}
-        </div>
-      </Modal>
+      <DrilldownModal
+        open={drilldown.open}
+        title={drilldown.title}
+        items={drilldown.items}
+        emptyMessage="No matching records yet."
+        onClose={() => setDrilldown({ open: false, title: "", items: [], type: "" })}
+        renderItem={(item) => {
+          if (drilldown.type === "project") {
+            return (
+              <CompactListRow
+                key={item.id}
+                primary={item.name}
+                secondary={item.job_number}
+                tertiary={`${item.client?.name || "-"} | ${item.location || "-"}`}
+                onClick={() => {
+                  setDrilldown({ open: false, title: "", items: [], type: "" });
+                  setSelectedProject(item);
+                }}
+              />
+            );
+          }
 
-      <Modal open={modalType === "staff"} title="Staff" onClose={() => setModalType("")}>
-        <div className="space-y-3">
-          {staffList.map((item) => (
-            <div key={item.user_id} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
-              <div className="font-semibold">{item.name || item.user_code}</div>
-              <div className="text-sm text-[color:var(--acm-muted-fg)]">{item.user_code}</div>
-            </div>
-          ))}
-        </div>
-      </Modal>
+          if (drilldown.type === "task") {
+            return (
+              <CompactListRow
+                key={item.id}
+                primary={item.title}
+                secondary={item.project?.name || "-"}
+                tertiary={`${formatDate(item.start_date)} to ${formatDate(item.end_date)} | ${item.approval_role || "-"}`}
+                onClick={() => {
+                  setDrilldown({ open: false, title: "", items: [], type: "" });
+                  setSelectedTask(item);
+                }}
+              />
+            );
+          }
 
-      <Modal open={modalType === "tasks"} title="Tasks" onClose={() => setModalType("")}>
-        <div className="space-y-3">
-          {taskList.map((task) => (
-            <div key={task.id} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
-              <div className="font-semibold">{task.title}</div>
-              <div className="text-sm text-[color:var(--acm-muted-fg)]">{task.project?.name || "-"}</div>
-            </div>
-          ))}
-        </div>
-      </Modal>
+          return (
+            <CompactListRow
+              key={item.user_id}
+              primary={item.name || item.user_code}
+              secondary={item.user_code}
+              tertiary={`${roleName(item.role)} | ${getProjectAssignmentSummary(item)}`}
+              onClick={() => {
+                setDrilldown({ open: false, title: "", items: [], type: "" });
+                setSelectedStaff(item);
+              }}
+            />
+          );
+        }}
+      />
+
+      <ProfileModal
+        open={Boolean(selectedProject)}
+        title="Project Profile"
+        details={
+          selectedProject
+            ? [
+                { label: "Job Number", value: selectedProject.job_number },
+                { label: "Project", value: selectedProject.name },
+                { label: "Client", value: selectedProject.client?.name || "-" },
+                { label: "Location", value: selectedProject.location || "-" },
+                { label: "Start Date", value: formatDate(selectedProject.start_date) },
+                { label: "End Date", value: formatDate(selectedProject.end_date) },
+                { label: "Estimate Budget", value: `$${selectedProject.contract_value}` },
+              ]
+            : []
+        }
+        onClose={() => setSelectedProject(null)}
+      />
+
+      <ProfileModal
+        open={Boolean(selectedStaff)}
+        title="User Profile"
+        details={
+          selectedStaff
+            ? [
+                { label: "User Code", value: selectedStaff.user_code },
+                { label: "Name", value: selectedStaff.name },
+                { label: "Email", value: selectedStaff.email },
+                { label: "Mobile", value: selectedStaff.mobile },
+                { label: "Role", value: roleName(selectedStaff.role) },
+                { label: "Projects", value: getProjectAssignmentSummary(selectedStaff) },
+              ]
+            : []
+        }
+        onClose={() => setSelectedStaff(null)}
+      />
+
+      <ProfileModal
+        open={Boolean(selectedTask)}
+        title="Task Profile"
+        details={selectedTask ? buildTaskDetails(selectedTask) : []}
+        onClose={() => setSelectedTask(null)}
+      />
     </>
   );
 }
@@ -489,6 +623,8 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [profileProject, setProfileProject] = useState(null);
+  const [formBusy, setFormBusy] = useState(false);
+  const [deletingProjectId, setDeletingProjectId] = useState("");
   const [form, setForm] = useState({
     id: "",
     name: "",
@@ -540,8 +676,10 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
 
   async function saveProject(e) {
     e.preventDefault();
+    if (formBusy) return;
     setError("");
     setMessage("");
+    setFormBusy(true);
 
     const res = await fetch(editingProject ? "/api/project" : "/api/projects", {
       method: editingProject ? "PUT" : "POST",
@@ -554,18 +692,23 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       setError(json?.error || "project_save_failed");
+      setFormBusy(false);
       return;
     }
 
     setMessage(editingProject ? "Project updated" : `Created ${json.project.job_number}`);
     setOpen(false);
-    window.location.reload();
+    invalidateApiQuery("/api/dashboard");
+    await projects.refresh();
+    setFormBusy(false);
   }
 
   async function deleteProject(project) {
     if (!window.confirm(`Delete project ${project.name}?`)) return;
+    if (deletingProjectId) return;
     setError("");
     setMessage("");
+    setDeletingProjectId(project.id);
     const res = await fetch("/api/project", {
       method: "DELETE",
       headers: { "content-type": "application/json" },
@@ -574,10 +717,13 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       setError(json?.error || "project_delete_failed");
+      setDeletingProjectId("");
       return;
     }
     setMessage(`${project.name} deleted`);
-    window.location.reload();
+    invalidateApiQuery("/api/dashboard");
+    await projects.refresh();
+    setDeletingProjectId("");
   }
 
   return (
@@ -595,16 +741,39 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
 
       <InlineMessage error={projects.error || error} message={message} />
 
-      <section className="mt-4 grid gap-4 md:grid-cols-2">
+      <section className="mt-4 grid grid-cols-2 space-y-3 space-x-3">
         {projectList.map((project) => (
-          <ProjectCard
+          <CompactListRow
             key={project.id}
-            roleBase={roleBase}
-            project={project}
-            onView={setProfileProject}
-            onEdit={openEdit}
-            onDelete={deleteProject}
-            canManage={canCreateProject}
+            primary={project.name}
+            secondary={`${project.job_number} | ${project.client?.name || "-"}`}
+            tertiary={`${project.location || "-"} | ${formatDate(project.start_date)} to ${formatDate(project.end_date)}`}
+            onClick={() => setProfileProject(project)}
+            actions={
+              <div className="flex flex-wrap gap-2">
+                <Link href={`/${roleBase}/project/${project.id}/overview`} className="acm-btn acm-btn-primary h-9 px-3 text-xs">
+                  Open
+                </Link>
+                {canCreateProject ? (
+                  <>
+                    <button type="button" onClick={(event) => { event.stopPropagation(); openEdit(project); }} className="acm-btn acm-btn-secondary h-9 px-3 text-xs">
+                      Edit
+                    </button>
+                    <BusyButton
+                      type="button"
+                      busy={deletingProjectId === project.id}
+                      className="acm-btn acm-btn-secondary h-9 px-3 text-xs"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        deleteProject(project);
+                      }}
+                    >
+                      Delete
+                    </BusyButton>
+                  </>
+                ) : null}
+              </div>
+            }
           />
         ))}
       </section>
@@ -665,7 +834,9 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
               <input className={fieldClass()} inputMode="decimal" value={form.contractValue} onChange={(e) => setForm((prev) => ({ ...prev, contractValue: e.target.value }))} />
             </LabeledField>
           </FieldGroup>
-          <button type="submit" className="acm-btn acm-btn-primary">Save</button>
+          <BusyButton type="submit" busy={formBusy} className="acm-btn acm-btn-primary">
+            Save
+          </BusyButton>
         </form>
       </Modal>
     </>
@@ -682,6 +853,8 @@ export function ProjectDashboardView({ projectId, roleBase, ownerMode = false, s
 const [editClientOpen, setEditClientOpen] = useState(false);
   const [editMessage, setEditMessage] = useState("");
   const [editError, setEditError] = useState("");
+  const [projectBusy, setProjectBusy] = useState(false);
+  const [clientBusy, setClientBusy] = useState(false);
   const [projectForm, setProjectForm] = useState({
   id: "",
   name: "",
@@ -729,8 +902,10 @@ function openEditClient() {
   
 async function saveClientChanges(e) {
   e.preventDefault();
+  if (clientBusy) return;
   setEditError("");
   setEditMessage("");
+  setClientBusy(true);
   const res = await fetch("/api/project", {
     method: "PUT",
     headers: { "content-type": "application/json" },
@@ -750,17 +925,23 @@ async function saveClientChanges(e) {
   const json = await res.json().catch(() => null);
   if (!res.ok) {
     setEditError(json?.error || "client_update_failed");
+    setClientBusy(false);
     return;
   }
   setEditMessage("Client info updated");
   setEditClientOpen(false);
-  window.location.reload();
+  invalidateApiQuery("/api/projects");
+  invalidateApiQuery("/api/dashboard");
+  await Promise.all([detail.refresh(), updates.refresh()]);
+  setClientBusy(false);
 }
 
   async function saveProjectChanges(e) {
     e.preventDefault();
+    if (projectBusy) return;
     setEditError("");
     setEditMessage("");
+    setProjectBusy(true);
     const res = await fetch("/api/project", {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -780,11 +961,15 @@ async function saveClientChanges(e) {
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       setEditError(json?.error || "project_update_failed");
+      setProjectBusy(false);
       return;
     }
     setEditMessage("Project info updated");
     setEditProjectOpen(false);
-    window.location.reload();
+    invalidateApiQuery("/api/projects");
+    invalidateApiQuery("/api/dashboard");
+    await Promise.all([detail.refresh(), updates.refresh()]);
+    setProjectBusy(false);
   }
 
   const profileDetails =
@@ -831,15 +1016,15 @@ async function saveClientChanges(e) {
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <button type="button" onClick={() => setSelectedStaffGroup("managers")} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3 text-left">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">Managers</div>
-                <div className="mt-1 text-xl font-bold">{project.managers.length}</div>
+                <div className="mt-1 flex items-center gap-2 text-xl font-bold"><TeamIcon className="h-4 w-4 text-[color:var(--acm-accent)]" />{project.managers.length}</div>
               </button>
               <button type="button" onClick={() => setSelectedStaffGroup("employees")} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3 text-left">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">Employees</div>
-                <div className="mt-1 text-xl font-bold">{project.employees.length}</div>
+                <div className="mt-1 flex items-center gap-2 text-xl font-bold"><TeamIcon className="h-4 w-4 text-[color:var(--acm-accent)]" />{project.employees.length}</div>
               </button>
               <div className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">Tasks</div>
-                <div className="mt-1 text-xl font-bold">{project.tasks.length}</div>
+                <div className="mt-1 flex items-center gap-2 text-xl font-bold"><PulseIcon className="h-4 w-4 text-[color:var(--acm-accent)]" />{project.tasks.length}</div>
               </div>
               <div className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">Estimate Budget</div>
@@ -958,21 +1143,17 @@ async function saveClientChanges(e) {
       >
         <div className="space-y-3">
           {(selectedStaffGroup === "managers" ? project.managers : project.employees).map((entry) => (
-            <button
+            <CompactListRow
               key={entry.user_id}
-              type="button"
+              primary={entry.staff?.name || entry.staff?.user_code || "Staff"}
+              secondary={`${entry.staff?.user_code || "-"} | ${roleName(entry.role)}`}
+              tertiary={`Hourly Rate: ${entry.hourly_rate ?? 0}`}
               onClick={() => {
                 setSelectedStaffGroup("");
                 setSelectedItem(entry);
                 setSelectedType("staff");
               }}
-              className="w-full rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3 text-left"
-            >
-              <div className="font-semibold">{entry.staff?.name || entry.staff?.user_code || "Staff"}</div>
-              <div className="text-sm text-[color:var(--acm-muted-fg)]">
-                {entry.staff?.user_code || "-"} | Hourly Rate: {entry.hourly_rate ?? 0}
-              </div>
-            </button>
+            />
           ))}
           {!(selectedStaffGroup === "managers" ? project.managers : project.employees).length ? (
             <div className="text-sm text-[color:var(--acm-muted-fg)]">No staff assigned in this group yet.</div>
@@ -998,7 +1179,7 @@ async function saveClientChanges(e) {
       <textarea className={fieldClass()} value={clientForm.clientAddress} onChange={(e) => setClientForm(p => ({ ...p, clientAddress: e.target.value }))} />
     </LabeledField>
 
-    <button type="submit" className="acm-btn acm-btn-primary">Save</button>
+    <BusyButton type="submit" busy={clientBusy} className="acm-btn acm-btn-primary">Save</BusyButton>
   </form>
 </Modal>
 <Modal open={editProjectOpen} title="Edit Project Info" onClose={() => setEditProjectOpen(false)}>
@@ -1023,7 +1204,7 @@ async function saveClientChanges(e) {
       <input className={fieldClass()} value={projectForm.contractValue} onChange={(e) => setProjectForm(p => ({ ...p, contractValue: e.target.value }))} />
     </LabeledField>
 
-    <button type="submit" className="acm-btn acm-btn-primary">Save</button>
+    <BusyButton type="submit" busy={projectBusy} className="acm-btn acm-btn-primary">Save</BusyButton>
   </form>
 </Modal>
 
@@ -1055,6 +1236,11 @@ export function StaffManagerPage({
   const [historyLoading, setHistoryLoading] = useState(false);
   const [editingStaff, setEditingStaff] = useState(null);
   const [taskTarget, setTaskTarget] = useState(null);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [assignBusy, setAssignBusy] = useState(false);
+  const [editBusy, setEditBusy] = useState(false);
+  const [taskBusy, setTaskBusy] = useState(false);
+  const [deleteUserId, setDeleteUserId] = useState("");
   const [form, setForm] = useState({
     name: "",
     role: "employee",
@@ -1110,8 +1296,10 @@ export function StaffManagerPage({
 
   async function createStaff(e) {
     e.preventDefault();
+    if (createBusy) return;
     setError("");
     setMessage("");
+    setCreateBusy(true);
     const res = await fetch("/api/staff", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1124,18 +1312,24 @@ export function StaffManagerPage({
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       setError(json?.error || "staff_create_failed");
+      setCreateBusy(false);
       return;
     }
     setMessage(`${json.staff.user_code} created`);
     setOpen(false);
-    window.location.reload();
+    invalidateApiQuery("/api/dashboard");
+    invalidateApiQuery("/api/staff");
+    await Promise.all([staff.refresh(), projects.refresh()]);
+    setCreateBusy(false);
   }
 
   async function updateStaff(e) {
     e.preventDefault();
     if (!editingStaff) return;
+    if (editBusy) return;
     setError("");
     setMessage("");
+    setEditBusy(true);
     const res = await fetch("/api/staff", {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -1150,17 +1344,22 @@ export function StaffManagerPage({
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       setError(json?.error || "staff_update_failed");
+      setEditBusy(false);
       return;
     }
     setMessage("Staff updated");
     setEditOpen(false);
-    window.location.reload();
+    invalidateApiQuery("/api/staff");
+    await staff.refresh();
+    setEditBusy(false);
   }
 
   async function assignProject(e) {
     e.preventDefault();
+    if (assignBusy) return;
     setError("");
     setMessage("");
+    setAssignBusy(true);
     const res = await fetch("/api/project-assignments", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1173,17 +1372,24 @@ export function StaffManagerPage({
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       setError(json?.error || "assignment_failed");
+      setAssignBusy(false);
       return;
     }
     setMessage(json?.message || "Project assigned");
     setAssignOpen(false);
-    window.location.reload();
+    invalidateApiQuery("/api/staff");
+    invalidateApiQuery("/api/projects");
+    invalidateApiQuery("/api/dashboard");
+    await Promise.all([staff.refresh(), projects.refresh()]);
+    setAssignBusy(false);
   }
 
   async function deleteStaff(item) {
     if (!window.confirm(`Delete ${item.name || item.user_code}?`)) return;
+    if (deleteUserId) return;
     setError("");
     setMessage("");
+    setDeleteUserId(item.user_id);
     const res = await fetch("/api/staff", {
       method: "DELETE",
       headers: { "content-type": "application/json" },
@@ -1192,10 +1398,14 @@ export function StaffManagerPage({
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       setError(json?.error || "staff_delete_failed");
+      setDeleteUserId("");
       return;
     }
     setMessage("Staff deleted");
-    window.location.reload();
+    invalidateApiQuery("/api/staff");
+    invalidateApiQuery("/api/dashboard");
+    await Promise.all([staff.refresh(), projects.refresh()]);
+    setDeleteUserId("");
   }
 
   async function onSendEmail(userId) {
@@ -1252,8 +1462,10 @@ export function StaffManagerPage({
 
   async function assignTaskFromStaffList(e) {
     e.preventDefault();
+    if (taskBusy) return;
     setError("");
     setMessage("");
+    setTaskBusy(true);
     const res = await fetch("/api/tasks", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1262,11 +1474,15 @@ export function StaffManagerPage({
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       setError(json?.error || "task_create_failed");
+      setTaskBusy(false);
       return;
     }
     setMessage("Task created");
     setTaskOpen(false);
-    window.location.reload();
+    invalidateApiQuery("/api/tasks");
+    invalidateApiQuery("/api/dashboard");
+    await staff.refresh();
+    setTaskBusy(false);
   }
 
   return (
@@ -1298,23 +1514,42 @@ export function StaffManagerPage({
 
       <InlineMessage error={staff.error || error} message={message} />
 
-      <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <section className="mt-4 space-y-3">
         {(visibleStaffData[tab] ?? []).map((item) => (
-          (() => {
-            return (
-          <StaffCard
+          <CompactListRow
             key={item.user_id}
-            item={item}
-            onOpenProfile={setSelectedProfile}
-            onEdit={openEditStaff}
-            onDelete={deleteStaff}
-            onAssignTask={openAssignTask}
-            canEdit={canManageThisStaff}
-            canDelete={canManageThisStaff}
-            canAssignTask={canAssignToThisStaff}
+            primary={item.name || item.user_code}
+            secondary={`${item.user_code} | ${roleName(item.role)}`}
+            tertiary={`${item.email || "-"} | ${getProjectAssignmentSummary(item, fixedProjectId)}`}
+            onClick={() => setSelectedProfile(item)}
+            actions={
+              <div className="flex flex-wrap gap-2">
+                {canAssignToThisStaff(item) ? (
+                  <button type="button" onClick={(event) => { event.stopPropagation(); openAssignTask(item); }} className="acm-btn acm-btn-primary h-9 px-3 text-xs">
+                    Assign Task
+                  </button>
+                ) : null}
+                {canManageThisStaff(item) ? (
+                  <>
+                    <button type="button" onClick={(event) => { event.stopPropagation(); openEditStaff(item); }} className="acm-btn acm-btn-secondary h-9 px-3 text-xs">
+                      Edit
+                    </button>
+                    <BusyButton
+                      type="button"
+                      busy={deleteUserId === item.user_id}
+                      className="acm-btn acm-btn-secondary h-9 px-3 text-xs"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        deleteStaff(item);
+                      }}
+                    >
+                      Delete
+                    </BusyButton>
+                  </>
+                ) : null}
+              </div>
+            }
           />
-            );
-          })()
         ))}
       </section>
 
@@ -1346,11 +1581,7 @@ export function StaffManagerPage({
         actions={
           selectedProfile ? (
             <>
-              <button
-                type="button"
-                onClick={() => openHistory(selectedProfile)}
-                className="acm-btn acm-btn-secondary h-10 px-4"
-              >
+              <button type="button" onClick={() => openHistory(selectedProfile)} className="acm-btn acm-btn-secondary h-10 px-4">
                 History
               </button>
               {canManageThisStaff(selectedProfile) ? (
@@ -1414,7 +1645,7 @@ export function StaffManagerPage({
             ))}
           </select>
           {managerProjectOnly ? <div className="text-sm text-[color:var(--acm-muted-fg)]">Manager can create employees only inside an assigned project.</div> : null}
-          <button type="submit" className="acm-btn acm-btn-primary">Save</button>
+          <BusyButton type="submit" busy={createBusy} className="acm-btn acm-btn-primary">Save</BusyButton>
         </form>
       </Modal>
 
@@ -1437,7 +1668,7 @@ export function StaffManagerPage({
             <option value="employee">Employee</option>
           </select>
           <input className={fieldClass()} inputMode="decimal" placeholder="Hourly Rate" value={assignForm.hourlyRate} onChange={(e) => setAssignForm((prev) => ({ ...prev, hourlyRate: e.target.value }))} />
-          <button type="submit" className="acm-btn acm-btn-primary">Assign</button>
+          <BusyButton type="submit" busy={assignBusy} className="acm-btn acm-btn-primary">Assign</BusyButton>
         </form>
       </Modal>
 
@@ -1447,7 +1678,7 @@ export function StaffManagerPage({
           <input className={fieldClass()} placeholder="Email" value={editingStaff?.email || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, email: e.target.value }))} />
           <input className={fieldClass()} placeholder="Mobile" value={editingStaff?.mobile || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, mobile: e.target.value }))} />
           <input className={fieldClass()} inputMode="decimal" placeholder="Hourly Rate" value={editingStaff?.hourly_rate || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, hourly_rate: e.target.value }))} />
-          <button type="submit" className="acm-btn acm-btn-primary">Save</button>
+          <BusyButton type="submit" busy={editBusy} className="acm-btn acm-btn-primary">Save</BusyButton>
         </form>
       </Modal>
 
@@ -1476,7 +1707,7 @@ export function StaffManagerPage({
               </option>
             ))}
           </select>
-          <button type="submit" className="acm-btn acm-btn-primary">Assign Task</button>
+          <BusyButton type="submit" busy={taskBusy} className="acm-btn acm-btn-primary">Assign Task</BusyButton>
         </form>
       </Modal>
     </>
@@ -1553,6 +1784,10 @@ export function TasksManagerPage({
     action: "approved",
     comment: "",
   });
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [deleteTaskId, setDeleteTaskId] = useState("");
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState(false);
 
   const managers = staff.data?.staff?.managers ?? [];
   const employees = staff.data?.staff?.employees ?? [];
@@ -1608,8 +1843,10 @@ export function TasksManagerPage({
 
   async function saveTask(e) {
     e.preventDefault();
+    if (saveBusy) return;
     setError("");
     setMessage("");
+    setSaveBusy(true);
 
     const res = await fetch("/api/tasks", {
       method: editingTask ? "PUT" : "POST",
@@ -1622,17 +1859,23 @@ export function TasksManagerPage({
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       setError(json?.error || "task_save_failed");
+      setSaveBusy(false);
       return;
     }
     setMessage(editingTask ? "Task updated" : "Task created");
     setOpen(false);
-    window.location.reload();
+    invalidateApiQuery("/api/tasks");
+    invalidateApiQuery("/api/dashboard");
+    await Promise.all([tasks.refresh(), staff.refresh()]);
+    setSaveBusy(false);
   }
 
   async function deleteTask(task) {
     if (!window.confirm(`Delete task ${task.title}?`)) return;
+    if (deleteTaskId) return;
     setError("");
     setMessage("");
+    setDeleteTaskId(task.id);
     const res = await fetch("/api/tasks", {
       method: "DELETE",
       headers: { "content-type": "application/json" },
@@ -1641,10 +1884,14 @@ export function TasksManagerPage({
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       setError(json?.error || "task_delete_failed");
+      setDeleteTaskId("");
       return;
     }
     setMessage(`${task.title} deleted`);
-    window.location.reload();
+    invalidateApiQuery("/api/tasks");
+    invalidateApiQuery("/api/dashboard");
+    await tasks.refresh();
+    setDeleteTaskId("");
   }
 
   function openSubmit(assignment) {
@@ -1675,8 +1922,10 @@ export function TasksManagerPage({
   async function submitTask(e) {
     e.preventDefault();
     if (!selectedAssignment) return;
+    if (submitBusy) return;
     setError("");
     setMessage("");
+    setSubmitBusy(true);
     const res = await fetch("/api/task-submissions", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1690,11 +1939,15 @@ export function TasksManagerPage({
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       setError(json?.error || "task_submission_failed");
+      setSubmitBusy(false);
       return;
     }
     setMessage("Task submitted");
     setSubmitOpen(false);
-    window.location.reload();
+    invalidateApiQuery("/api/tasks");
+    invalidateApiQuery("/api/dashboard");
+    await tasks.refresh();
+    setSubmitBusy(false);
   }
 
   function openReview(task, assignment) {
@@ -1707,8 +1960,10 @@ export function TasksManagerPage({
   async function submitReview(e) {
     e.preventDefault();
     if (!selectedAssignment) return;
+    if (reviewBusy) return;
     setError("");
     setMessage("");
+    setReviewBusy(true);
     const res = await fetch("/api/task-approvals", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1721,11 +1976,15 @@ export function TasksManagerPage({
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       setError(json?.error || "task_review_failed");
+      setReviewBusy(false);
       return;
     }
     setMessage(reviewForm.action === "approved" ? "Task approved" : "Task rejected");
     setReviewOpen(false);
-    window.location.reload();
+    invalidateApiQuery("/api/tasks");
+    invalidateApiQuery("/api/dashboard");
+    await tasks.refresh();
+    setReviewBusy(false);
   }
 
   return (
@@ -1754,21 +2013,72 @@ export function TasksManagerPage({
 
       <InlineMessage error={tasks.error || error} message={message} />
 
-      <section className="mt-4 grid gap-4 md:grid-cols-2">
+      <section className="mt-4 space-y-3">
         {visibleTasks.map((task) => (
-          <TaskCard
+          <CompactListRow
             key={task.id}
-            task={task}
-            onView={setSelectedTask}
-            onEdit={openEdit}
-            onDelete={deleteTask}
-            onSubmit={openSubmit}
-            onReview={openReview}
-            canManageTask={canCreateTask && (roleBase === "owner" || task.creator?.user_id === currentUserId)}
+            primary={task.title}
+            secondary={`${task.project?.name || "-"} | ${task.approval_role || "-"}`}
+            tertiary={`${formatDate(task.start_date)} to ${formatDate(task.end_date)} | ${task.assignments?.length || 0} assignment(s)`}
+            onClick={() => setSelectedTask(task)}
+            actions={
+              <div className="flex flex-wrap gap-2">
+                {canCreateTask && (roleBase === "owner" || task.creator?.user_id === currentUserId) ? (
+                  <>
+                    <button type="button" onClick={(event) => { event.stopPropagation(); openEdit(task); }} className="acm-btn acm-btn-secondary h-9 px-3 text-xs">
+                      Edit
+                    </button>
+                    <BusyButton
+                      type="button"
+                      busy={deleteTaskId === task.id}
+                      className="acm-btn acm-btn-secondary h-9 px-3 text-xs"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        deleteTask(task);
+                      }}
+                    >
+                      Delete
+                    </BusyButton>
+                  </>
+                ) : null}
+                {(task.my_assignments ?? []).map((assignment) =>
+                  ["assigned", "rejected"].includes(assignment.status) ? (
+                    <button
+                      key={assignment.id}
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openSubmit(assignment);
+                      }}
+                      className="acm-btn acm-btn-primary h-9 px-3 text-xs"
+                    >
+                      {assignment.status === "rejected" ? "Resubmit" : "Submit"}
+                    </button>
+                  ) : null
+                )}
+                {task.can_approve
+                  ? (task.assignments ?? [])
+                      .filter((assignment) => assignment.status === "submitted")
+                      .map((assignment) => (
+                        <button
+                          key={`review-${assignment.id}`}
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openReview(task, assignment);
+                          }}
+                          className="acm-btn acm-btn-primary h-9 px-3 text-xs"
+                        >
+                          Review
+                        </button>
+                      ))
+                  : null}
+              </div>
+            }
           />
         ))}
         {!visibleTasks.length ? (
-          <div className={cardClass("md:col-span-2 text-sm text-[color:var(--acm-muted-fg)]")}>
+          <div className={cardClass("text-sm text-[color:var(--acm-muted-fg)]")}>
             No tasks available in this workflow tab yet.
           </div>
         ) : null}
@@ -1830,7 +2140,7 @@ export function TasksManagerPage({
           <div className="text-sm text-[color:var(--acm-muted-fg)]">
             {canAssignManagers ? "Owner can assign to managers and employees." : "Manager can assign to employees only."}
           </div>
-          <button type="submit" className="acm-btn acm-btn-primary">Save</button>
+          <BusyButton type="submit" busy={saveBusy} className="acm-btn acm-btn-primary">Save</BusyButton>
         </form>
       </Modal>
 
@@ -1855,7 +2165,7 @@ export function TasksManagerPage({
             {submitForm.photos.length ? `${submitForm.photos.length} photo(s) ready` : "No photos selected"}
           </div>
           <textarea className={fieldClass()} placeholder="Blocker (optional)" value={submitForm.blocker} onChange={(e) => setSubmitForm((prev) => ({ ...prev, blocker: e.target.value }))} />
-          <button type="submit" className="acm-btn acm-btn-primary">Submit</button>
+          <BusyButton type="submit" busy={submitBusy} className="acm-btn acm-btn-primary">Submit</BusyButton>
         </form>
       </Modal>
 
@@ -1866,7 +2176,7 @@ export function TasksManagerPage({
             <option value="rejected">Reject</option>
           </select>
           <textarea className={fieldClass()} placeholder="Review comment" value={reviewForm.comment} onChange={(e) => setReviewForm((prev) => ({ ...prev, comment: e.target.value }))} />
-          <button type="submit" className="acm-btn acm-btn-primary">Save Review</button>
+          <BusyButton type="submit" busy={reviewBusy} className="acm-btn acm-btn-primary">Save Review</BusyButton>
         </form>
       </Modal>
     </>
@@ -1878,6 +2188,8 @@ export function SettingsPage() {
   const settings = useApi("/api/settings");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [passwordBusy, setPasswordBusy] = useState(false);
   const [profileForm, setProfileForm] = useState(null);
   const [passwordForm, setPasswordForm] = useState({
     password: "",
@@ -1892,8 +2204,10 @@ export function SettingsPage() {
 
   async function saveProfile(e) {
     e.preventDefault();
+    if (profileBusy) return;
     setError("");
     setMessage("");
+    setProfileBusy(true);
     const res = await fetch("/api/settings", {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -1902,36 +2216,46 @@ export function SettingsPage() {
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       setError(json?.error || "settings_update_failed");
+      setProfileBusy(false);
       return;
     }
     setMessage("Personal details updated.");
+    await settings.refresh();
+    setProfileBusy(false);
   }
 
   async function changePassword(e) {
     e.preventDefault();
+    if (passwordBusy) return;
     setError("");
     setMessage("");
+    setPasswordBusy(true);
     if (!supabase) {
       setError("supabase_not_configured");
+      setPasswordBusy(false);
       return;
     }
     if (!passwordForm.password || passwordForm.password.length < 8) {
       setError("Password must be at least 8 characters.");
+      setPasswordBusy(false);
       return;
     }
     if (passwordForm.password !== passwordForm.confirmPassword) {
       setError("Passwords do not match.");
+      setPasswordBusy(false);
       return;
     }
 
     const { error: updateError } = await supabase.auth.updateUser({ password: passwordForm.password });
     if (updateError) {
       setError(updateError.message || "password_update_failed");
+      setPasswordBusy(false);
       return;
     }
 
     setPasswordForm({ password: "", confirmPassword: "" });
     setMessage("Credentials updated.");
+    setPasswordBusy(false);
   }
 
   return (
@@ -1955,7 +2279,7 @@ export function SettingsPage() {
             <LabeledField label="Address">
               <textarea className={fieldClass()} rows={4} value={resolvedProfileForm.address} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), address: e.target.value }))} />
             </LabeledField>
-            <button type="submit" className="acm-btn acm-btn-primary">Save Details</button>
+            <BusyButton type="submit" busy={profileBusy} className="acm-btn acm-btn-primary">Save Details</BusyButton>
           </form>
         </div>
 
@@ -1971,7 +2295,7 @@ export function SettingsPage() {
             <LabeledField label="Confirm Password">
               <input className={fieldClass()} type="password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))} />
             </LabeledField>
-            <button type="submit" className="acm-btn acm-btn-primary">Update Credentials</button>
+            <BusyButton type="submit" busy={passwordBusy} className="acm-btn acm-btn-primary">Update Credentials</BusyButton>
           </form>
         </div>
       </section>

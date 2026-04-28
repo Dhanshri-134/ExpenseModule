@@ -56,7 +56,7 @@ export default function ResetPasswordPanel() {
   return (
     <div className="min-h-screen text-[color:var(--acm-fg)]">
       <div className="acm-container py-16">
-        <div className="max-w-xl">
+        <div className="max-w-xl max-h-[calc(100vh-4rem)] overflow-y-auto">
           <div className="acm-badge">Password recovery</div>
           <h1 className="mt-5 text-3xl font-semibold tracking-tight">
             Set a new password
@@ -126,4 +126,3 @@ export default function ResetPasswordPanel() {
     </div>
   );
 }
-

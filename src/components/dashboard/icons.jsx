@@ -228,3 +228,81 @@ export function SettingsIcon({ className }) {
     </BaseStrokeIcon>
   );
 }
+
+export function CheckCircleIcon({ className }) {
+  return (
+    <BaseStrokeIcon className={className}>
+      <path
+        d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="m8.5 12 2.3 2.3 4.7-4.8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </BaseStrokeIcon>
+  );
+}
+
+export function PauseCircleIcon({ className }) {
+  return (
+    <BaseStrokeIcon className={className}>
+      <path
+        d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M10 9v6M14 9v6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </BaseStrokeIcon>
+  );
+}
+
+export function PulseIcon({ className }) {
+  return (
+    <BaseStrokeIcon className={className}>
+      <path
+        d="M3.5 12h3.2l1.9-3.6 3.2 7.2 2.3-4h6.4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </BaseStrokeIcon>
+  );
+}
+
+export function ChevronRightIcon({ className }) {
+  return (
+    <BaseStrokeIcon className={className}>
+      <path
+        d="m10 7 5 5-5 5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </BaseStrokeIcon>
+  );
+}
+
+export function SpinnerIcon({ className }) {
+  return (
+    <BaseStrokeIcon className={className}>
+      <path
+        d="M12 4.5a7.5 7.5 0 1 0 7.5 7.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </BaseStrokeIcon>
+  );
+}

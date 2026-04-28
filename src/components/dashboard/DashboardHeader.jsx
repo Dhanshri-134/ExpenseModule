@@ -5,7 +5,7 @@ import { BellIcon, MenuIcon } from "@/components/dashboard/icons";
 import Modal from "@/components/dashboard/Modal";
 import LogoutButton from "@/components/dashboard/LogoutButton";
 import ThemeToggle from "@/components/theme/ThemeToggle";
-import styles from "@/components/dashboard/DashboardShell.module.css";
+import styles from "@/styles/DashboardShell.module.css";
 
 export default function DashboardHeader({
   companyName = "Company",

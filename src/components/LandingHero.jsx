@@ -105,7 +105,7 @@ export default function LandingHero() {
 
               <Link
                 href="/login/manager"
-                className="acm-btn acm-btn-secondary acm-btn-lift"
+                className="acm-btn acm-btn-employee acm-btn-lift"
               >
                 Continue as Manager
               </Link>

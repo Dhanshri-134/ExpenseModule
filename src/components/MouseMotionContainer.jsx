@@ -55,10 +55,10 @@ export default function MouseMotionContainer({ children }) {
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
       >
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_10%,rgba(99,102,241,0.22),transparent_60%),radial-gradient(circle_at_90%_20%,rgba(59,130,246,0.18),transparent_55%),radial-gradient(circle_at_55%_105%,rgba(217,70,239,0.14),transparent_60%)]" />
-        <div className="acm-parallax absolute -top-44 left-1/2 h-[560px] w-[560px] -translate-x-1/2 rounded-full bg-fuchsia-500/20 blur-3xl" />
-        <div className="acm-parallax-slow absolute -bottom-48 left-[10%] h-[520px] w-[520px] rounded-full bg-indigo-500/18 blur-3xl" />
-        <div className="acm-parallax absolute top-24 right-[6%] h-[420px] w-[420px] rounded-full bg-sky-500/14 blur-3xl" />
+        <div className="acm-parallax-slow absolute -bottom-48 left-[10%] h-[520px] w-[520px] rounded-full bg-blue-600/18 blur-3xl" />
+        <div className="acm-parallax absolute top-24 right-[6%] h-[420px] w-[420px] rounded-full bg-blue-400/14 blur-3xl" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_bottom,var(--acm-overlay-1),var(--acm-overlay-2))]" />
+        <div className="absolute inset-0 [background-image:radial-gradient(var(--acm-dot)_1px,transparent_1px)] [background-size:22px_22px] opacity-[0.18]" />
         <div className="absolute inset-0 bg-[linear-gradient(to_bottom,var(--acm-overlay-1),var(--acm-overlay-2))]" />
         <div className="absolute inset-0 [background-image:radial-gradient(var(--acm-dot)_1px,transparent_1px)] [background-size:22px_22px] opacity-[0.18]" />
       </div>

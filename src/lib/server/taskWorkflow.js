@@ -1,4 +1,5 @@
 import { ROLE_LABELS } from "@/lib/roles";
+import { getAuthUsersMap } from "@/lib/server/authUsers";
 
 export const PROJECT_ASSIGNABLE_ROLES = ["manager", "employee"];
 export const TASK_ASSIGNMENT_STATUSES = ["assigned", "submitted", "approved", "rejected"];
@@ -36,7 +37,7 @@ export async function loadUserDirectory(admin, companyId, userIds) {
       .select("user_id, role, user_code, person_id, mobile_no")
       .eq("company_id", companyId)
       .in("user_id", dedupedUserIds),
-    admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+    getAuthUsersMap(admin),
   ]);
 
   if (membershipError) {
@@ -44,8 +45,7 @@ export async function loadUserDirectory(admin, companyId, userIds) {
   }
 
   const membershipRows = memberships ?? [];
-  const authUsers = authUsersResponse.data?.users ?? [];
-  const authUsersById = new Map(authUsers.map((user) => [user.id, user]));
+  const authUsersById = authUsersResponse;
   const personIds = [...new Set(membershipRows.map((item) => item.person_id).filter(Boolean))];
   const { data: people, error: peopleError } = personIds.length
     ? await admin.from("people").select("id, name, email, contact, address").in("id", personIds)

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { canCreateStaff, getRequestContext } from "@/lib/server/authz";
 import { upsertDemoCredential, readDemoCredentials } from "@/lib/server/demoCredentials";
 import { sendError, sendOk } from "@/lib/server/responses";
+import { getAuthUsersMap, invalidateAuthUsersCache } from "@/lib/server/authUsers";
 import { createAuthUser } from "@/lib/server/users";
 import { insertActivityLog } from "@/lib/server/taskWorkflow";
 
@@ -95,18 +96,19 @@ export default async function handler(req, res) {
     const personIds = [...new Set(filtered.map((item) => item.person_id).filter(Boolean))];
     const userIds = filtered.map((item) => item.user_id);
 
-    const [{ data: people }, authUsersResponse] = await Promise.all([
+    const [{ data: people }, authUsersById] = await Promise.all([
       personIds.length
         ? ctx.admin
             .from("people")
             .select("id, name, email, contact, address")
             .in("id", personIds)
         : Promise.resolve({ data: [] }),
-      ctx.admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+      getAuthUsersMap(ctx.admin),
     ]);
 
-    const authUsers = authUsersResponse.data?.users ?? [];
+    const peopleById = new Map((people ?? []).map((person) => [person.id, person]));
     const credentials = readDemoCredentials();
+    const credentialsByUserId = new Map(credentials.map((entry) => [entry.userId, entry]));
     const projectsById = {};
     const projectAssignmentsByUserId = {};
     if (filtered.some((item) => item.created_in_project_id)) {
@@ -150,9 +152,9 @@ export default async function handler(req, res) {
     }
 
     const enriched = filtered.map((item) => {
-      const person = (people ?? []).find((entry) => entry.id === item.person_id) || null;
-      const credential = credentials.find((entry) => entry.userId === item.user_id) || null;
-      const authUser = authUsers.find((entry) => entry.id === item.user_id) || null;
+      const person = item.person_id ? peopleById.get(item.person_id) || null : null;
+      const credential = credentialsByUserId.get(item.user_id) || null;
+      const authUser = authUsersById.get(item.user_id) || null;
       return {
         ...item,
         name: person?.name || authUser?.user_metadata?.full_name || item.user_code,
@@ -195,6 +197,7 @@ export default async function handler(req, res) {
       name: payload.name,
       mobile: payload.mobile,
     });
+    invalidateAuthUsersCache();
 
     const { data: membership, error: membershipError } = await ctx.admin
       .from("company_users")
@@ -276,6 +279,7 @@ export default async function handler(req, res) {
     });
 
     if (authError) return sendError(res, 500, "staff_auth_update_failed", authError.message);
+    invalidateAuthUsersCache();
 
     const { error: membershipError } = await ctx.admin
       .from("company_users")
@@ -319,6 +323,7 @@ export default async function handler(req, res) {
 
     const { error } = await ctx.admin.auth.admin.deleteUser(parsed.data.userId);
     if (error) return sendError(res, 500, "staff_delete_failed", error.message);
+    invalidateAuthUsersCache();
 
     await insertActivityLog(ctx.admin, {
       company_id: ctx.company.id,

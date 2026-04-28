@@ -6,7 +6,8 @@ import { useRouter } from "next/router";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { ROLE_LABELS } from "@/lib/roles";
 import ThemeToggle from "@/components/theme/ThemeToggle";
-import styles from "@/components/auth/RoleLoginPanel.module.css";
+import Image from "next/image";
+import styles from "@/styles/auth/RoleLoginPanel.module.css";
 
 function classNames(...parts) {
   return parts.filter(Boolean).join(" ");
@@ -75,7 +76,7 @@ export default function RoleLoginPanel({ role }) {
       setError(
         serverConfigured
           ? "Supabase keys are set, but the dev server needs a restart to expose NEXT_PUBLIC_* variables to the browser."
-          : "Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in apps/web/.env.local then restart."
+          : "Supabase is not configured."
       );
       return;
     }
@@ -193,7 +194,10 @@ export default function RoleLoginPanel({ role }) {
   };
 
   return (
-    <div className={styles.page}>
+     <div className="min-h-screen flex items-center justify-center px-6">
+      <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
+        
+        {/* LEFT - FORM */}
       <div className={styles.card}>
         <div className={styles.topBar}>
           <div className="acm-badge">Role: {roleLabel}</div>
@@ -276,6 +280,20 @@ export default function RoleLoginPanel({ role }) {
             {mode === "login" ? "Forgot password?" : "Back to login"}
           </button>
         </div>
+      </div>
+    {/* RIGHT - LOGO */}
+        <div className="hidden lg:flex justify-center items-center">
+          <div className="relative w-[400px] h-[400px]">
+            <Image
+              src="/assets/logo.png"
+              alt="logo"
+              fill
+              
+              className="object-contain drop-shadow-2xl"
+            />
+          </div>
+        </div>
+
       </div>
     </div>
   );

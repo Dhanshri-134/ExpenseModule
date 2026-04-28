@@ -3,7 +3,7 @@
 import { useState } from "react";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import DashboardSidebar from "@/components/dashboard/DashboardSidebar";
-import styles from "@/components/dashboard/DashboardShell.module.css";
+import styles from "@/styles/DashboardShell.module.css";
 
 export default function DashboardShell({
   companyName,

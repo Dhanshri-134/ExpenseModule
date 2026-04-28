@@ -3,8 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import Logo from "@/components/Logo";
-import styles from "@/components/dashboard/DashboardShell.module.css";
+import styles from "@/styles/DashboardShell.module.css";
 
 function NavItem({ item, active }) {
   const Icon = item.icon;
@@ -30,8 +29,6 @@ function ViewerCard({ viewer }) {
       <div className={styles.viewerRow}>
         <div className={styles.avatar}>
           {hasPhoto ? (
-            // `avatarUrl` may come from arbitrary auth providers, so we avoid
-            // Next image domain configuration requirements here.
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={viewer.avatarUrl}
@@ -61,10 +58,10 @@ function ViewerCard({ viewer }) {
 }
 
 export default function DashboardSidebar({
-  companyName,
   navigation,
   viewer,
   showBackButton,
+  backHref,
   mobileOpen,
   onClose,
 }) {
@@ -87,22 +84,17 @@ export default function DashboardSidebar({
           mobileOpen ? styles.sidebarOpen : styles.sidebarClosed,
         ].join(" ")}
       >
-         {showBackButton ? (
-  <button
-    type="button"
-    onClick={() => router.push(`/${viewer?.role?.toLowerCase()}`)}
-    className={styles.backButton}
-  >
-    ← Back
-  </button>
-) : null}
-         {/* {showBackButton ? (
-          <button type="button" onClick={() => router.back()} className={styles.backButton}>
-            ← Back
+        {showBackButton ? (
+          <button
+            type="button"
+            onClick={() => router.push(backHref || `/${viewer?.role?.toLowerCase() || "login"}`)}
+            className={styles.backButton}
+          >
+            Back
           </button>
-        ) : null} */}
+        ) : null}
+
         <div className={styles.sidebarTop}>
-          {/* <Logo /> */}
           <button
             type="button"
             onClick={onClose}
@@ -113,10 +105,6 @@ export default function DashboardSidebar({
         </div>
 
         <ViewerCard viewer={viewer} />
-
-        {/* <div className={styles.company}>{companyName}</div> */}
-
-       
 
         <nav className={styles.nav}>
           {navigation.map((item) => {

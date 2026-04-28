@@ -1,25 +1,27 @@
 @import "tailwindcss";
 
 :root {
-  --acm-bg: #fff7fb;
-  --acm-fg: #170511;
-  --acm-muted-fg: rgba(23, 5, 17, 0.68);
-  --acm-border: rgba(151, 24, 95, 0.12);
+  --acm-bg: #f4f8ff;
+  --acm-fg: #050a17;
+  --acm-muted-fg: rgba(5, 10, 23, 0.68);
+  --acm-border: rgba(24, 60, 151, 0.12);
   --acm-surface: rgba(255, 255, 255, 0.84);
-  --acm-surface-2: rgba(255, 239, 248, 0.95);
+  --acm-surface-1: #ffbf00;
+  --acm-surface-2: rgba(235, 242, 255, 0.95);
+  --acm-surface-3: rgba(255, 255, 255, 1);
   --acm-panel: rgba(255, 255, 255, 0.92);
   --acm-input: rgba(255, 255, 255, 0.95);
-  --acm-input-placeholder: rgba(84, 17, 54, 0.45);
-  --acm-ring: rgba(224, 33, 138, 0.32);
-  --acm-overlay: rgba(255, 247, 251, 0.86);
-  --acm-overlay-1: rgba(255, 247, 251, 0.84);
-  --acm-overlay-2: rgba(255, 247, 251, 0.96);
-  --acm-dot: rgba(151, 24, 95, 0.08);
-  --acm-accent: #e0218a;
-  --acm-accent-strong: #ab1467;
-  --acm-accent-soft: rgba(224, 33, 138, 0.12);
-  --acm-accent-border: rgba(224, 33, 138, 0.22);
-  --acm-sidebar: rgba(255, 250, 252, 0.94);
+  --acm-input-placeholder: rgba(17, 36, 84, 0.45);
+  --acm-ring: rgba(33, 84, 224, 0.32);
+  --acm-overlay: rgba(244, 248, 255, 0.86);
+  --acm-overlay-1: rgba(244, 248, 255, 0.84);
+  --acm-overlay-2: rgba(244, 248, 255, 0.96);
+  --acm-dot: rgba(24, 60, 151, 0.08);
+  --acm-accent: #1e3a8a;
+  --acm-accent-strong: #172554;
+  --acm-accent-soft: rgba(30, 58, 138, 0.12);
+  --acm-accent-border: rgba(30, 58, 138, 0.22);
+  --acm-sidebar: rgba(248, 250, 255, 0.94);
 
   --background: var(--acm-bg);
   --foreground: var(--acm-fg);
@@ -28,25 +30,25 @@
 }
 
 html[data-theme="dark"] {
-  --acm-bg: #050205;
-  --acm-fg: #fff4fb;
-  --acm-muted-fg: rgba(255, 244, 251, 0.7);
-  --acm-border: rgba(255, 101, 196, 0.18);
-  --acm-surface: rgba(27, 11, 21, 0.88);
-  --acm-surface-2: rgba(43, 18, 33, 0.98);
-  --acm-panel: rgba(15, 6, 12, 0.96);
-  --acm-input: rgba(18, 7, 14, 0.92);
-  --acm-input-placeholder: rgba(255, 214, 238, 0.42);
-  --acm-ring: rgba(255, 101, 196, 0.38);
-  --acm-overlay: rgba(5, 2, 5, 0.88);
-  --acm-overlay-1: rgba(5, 2, 5, 0.88);
-  --acm-overlay-2: rgba(5, 2, 5, 0.94);
-  --acm-dot: rgba(255, 101, 196, 0.08);
-  --acm-accent: #ff4db3;
-  --acm-accent-strong: #ff9dd2;
-  --acm-accent-soft: rgba(255, 77, 179, 0.14);
-  --acm-accent-border: rgba(255, 77, 179, 0.28);
-  --acm-sidebar: rgba(11, 4, 9, 0.96);
+  --acm-bg: #020617;
+  --acm-fg: #e6ecff;
+  --acm-muted-fg: rgba(230, 236, 255, 0.7);
+  --acm-border: rgba(101, 143, 255, 0.18);
+  --acm-surface: rgba(11, 18, 32, 0.88);
+  --acm-surface-2: rgba(18, 28, 53, 0.98);
+  --acm-panel: rgba(6, 10, 22, 0.96);
+  --acm-input: rgba(7, 12, 24, 0.92);
+  --acm-input-placeholder: rgba(180, 200, 255, 0.42);
+  --acm-ring: rgba(101, 143, 255, 0.38);
+  --acm-overlay: rgba(2, 6, 23, 0.88);
+  --acm-overlay-1: rgba(2, 6, 23, 0.88);
+  --acm-overlay-2: rgba(2, 6, 23, 0.94);
+  --acm-dot: rgba(101, 143, 255, 0.08);
+  --acm-accent: #3b82f6;
+  --acm-accent-strong: #93c5fd;
+  --acm-accent-soft: rgba(59, 130, 246, 0.14);
+  --acm-accent-border: rgba(59, 130, 246, 0.28);
+  --acm-sidebar: rgba(4, 8, 20, 0.96);
 }
 
 @theme inline {
@@ -60,17 +62,17 @@ html[data-theme="dark"] {
 body {
   background: radial-gradient(
       1000px 700px at 18% 8%,
-      rgba(224, 33, 138, 0.16),
+      rgba(30, 58, 138, 0.16),
       transparent 55%
     ),
     radial-gradient(
       900px 650px at 84% 16%,
-      rgba(255, 95, 178, 0.12),
+      rgba(59, 130, 246, 0.12),
       transparent 55%
     ),
     radial-gradient(
       900px 720px at 50% 108%,
-      rgba(151, 24, 95, 0.1),
+      rgba(24, 60, 151, 0.1),
       transparent 60%
     ),
     var(--acm-bg);
@@ -152,8 +154,9 @@ body {
 
   .acm-btn-primary {
     @apply text-white;
-    background: linear-gradient(135deg, #c71585 0%, var(--acm-accent) 55%, #ff78c8 100%);
-    box-shadow: 0 18px 45px rgba(224, 33, 138, 0.26);
+    /* background: linear-gradient(135deg, #1e3a8a 0%, var(--acm-accent) 55%, #60a5fa 100%); */
+    background: #ffbf00;
+    /* box-shadow: 0 18px 45px rgba(30, 58, 138, 0.26);c */
   }
 
   .acm-btn-primary:hover {
