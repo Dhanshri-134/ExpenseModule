@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import PasswordInput from "@/components/shared/PasswordInput";
 
 export default function ResetPasswordPanel() {
   const router = useRouter();
@@ -69,9 +70,8 @@ export default function ResetPasswordPanel() {
           <div className="mt-8 acm-surface-strong p-6">
             <form onSubmit={onSubmit} className="space-y-4">
               <div>
-                <label className="text-sm text-[color:var(--acm-muted-fg)]">New password</label>
-                <input
-                  type="password"
+                <label className="acm-form-label">New password</label>
+                <PasswordInput
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="acm-input"
@@ -82,9 +82,8 @@ export default function ResetPasswordPanel() {
               </div>
 
               <div>
-                <label className="text-sm text-[color:var(--acm-muted-fg)]">Confirm password</label>
-                <input
-                  type="password"
+                <label className="acm-form-label">Confirm password</label>
+                <PasswordInput
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}
                   className="acm-input"
@@ -95,7 +94,7 @@ export default function ResetPasswordPanel() {
               </div>
 
               {error ? (
-                <div className="rounded-xl border border-rose-500/25 bg-rose-500/8 px-4 py-3 text-sm text-rose-500 dark:text-rose-200">
+                <div className="acm-message-error">
                   {error}
                 </div>
               ) : null}

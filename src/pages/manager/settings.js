@@ -4,7 +4,7 @@ import { requireRolePage } from "@/lib/pages/requireRolePage";
 
 export default function ManagerSettingsPage({ authContext }) {
   return (
-    <ManagerShell companyName={authContext.company.name} viewer={authContext.viewer} title="Settings">
+    <ManagerShell companyName={authContext.company.name} viewer={authContext.viewer} title="Profile">
       <SettingsPage />
     </ManagerShell>
   );

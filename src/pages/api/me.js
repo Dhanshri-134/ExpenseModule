@@ -13,7 +13,7 @@ export default async function handler(req, res) {
 
   const { data: companyUsers } = await supabase
     .from("company_users")
-    .select("company_id,role,user_code,role_number,hourly_rate,created_in_project_id")
+    .select("company_id,role,user_code,user_name,role_number,hourly_rate,created_in_project_id")
     .eq("user_id", user.id);
 
   const { data: projectUsers } = await supabase
@@ -23,9 +23,8 @@ export default async function handler(req, res) {
 
   return res.status(200).json({
     ok: true,
-    user: { id: user.id, email: user.email },
+    user: { id: user.id, email: user.email, userName: user.user_metadata?.user_name || "" },
     company_users: companyUsers ?? [],
     project_users: projectUsers ?? [],
   });
 }
-

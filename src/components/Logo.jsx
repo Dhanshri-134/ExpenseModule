@@ -7,8 +7,8 @@ export default function Logo() {
         <Image
           src="/assets/logo.png"
           alt="ACM Desk"
-          width={24}
-          height={24}
+          width={34}
+          height={34}
           priority
         />
       </div>

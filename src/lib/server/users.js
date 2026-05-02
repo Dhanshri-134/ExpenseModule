@@ -4,7 +4,7 @@ export function makeTemporaryPassword() {
   return `Shris@${crypto.randomBytes(4).toString("hex")}9`;
 }
 
-export async function createAuthUser(admin, { email, name, mobile, password }) {
+export async function createAuthUser(admin, { email, name, userName, mobile, password }) {
   const temporaryPassword = password || makeTemporaryPassword();
   const { data, error } = await admin.auth.admin.createUser({
     email,
@@ -13,6 +13,7 @@ export async function createAuthUser(admin, { email, name, mobile, password }) {
     user_metadata: {
       name,
       full_name: name,
+      user_name: userName,
       mobile_no: mobile ?? "",
     },
   });

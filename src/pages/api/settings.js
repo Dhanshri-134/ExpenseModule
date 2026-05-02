@@ -1,12 +1,16 @@
+import { updateDemoCredential } from "@/lib/server/demoCredentials";
 import { z } from "zod";
+import { invalidateAuthUsersCache } from "@/lib/server/authUsers";
 import { getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
 
 const UpdateSettingsSchema = z.object({
   name: z.string().min(1),
+  userName: z.string().min(1),
   email: z.string().email(),
   mobile: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
+  password: z.string().min(8).optional().or(z.literal("")),
 });
 
 export default async function handler(req, res) {
@@ -16,7 +20,7 @@ export default async function handler(req, res) {
   if (req.method === "GET") {
     const { data: membership, error: membershipError } = await ctx.admin
       .from("company_users")
-      .select("company_id, user_id, role, user_code, person_id, mobile_no, hourly_rate")
+      .select("company_id, user_id, role, user_code, user_name, person_id, mobile_no, hourly_rate")
       .eq("company_id", ctx.company.id)
       .eq("user_id", ctx.user.id)
       .maybeSingle();
@@ -36,6 +40,7 @@ export default async function handler(req, res) {
         userId: ctx.user.id,
         role: ctx.role,
         userCode: membership.user_code,
+        userName: membership.user_name || membership.user_code,
         name: person?.name || ctx.user.user_metadata?.full_name || ctx.user.user_metadata?.name || "",
         email: person?.email || ctx.user.email || "",
         mobile: membership.mobile_no || person?.contact || "",
@@ -53,7 +58,7 @@ export default async function handler(req, res) {
 
     const { data: membership, error: membershipError } = await ctx.admin
       .from("company_users")
-      .select("company_id, user_id, person_id")
+      .select("company_id, user_id, user_code, user_name, person_id")
       .eq("company_id", ctx.company.id)
       .eq("user_id", ctx.user.id)
       .maybeSingle();
@@ -101,23 +106,48 @@ export default async function handler(req, res) {
 
     const { error: membershipError2 } = await ctx.admin
       .from("company_users")
-      .update({ mobile_no: payload.mobile || "" })
+      .update({
+        mobile_no: payload.mobile || "",
+        user_name: payload.userName.trim(),
+      })
       .eq("company_id", ctx.company.id)
       .eq("user_id", ctx.user.id);
 
     if (membershipError2) return sendError(res, 500, "membership_update_failed", membershipError2.message);
 
-    const { error: authError } = await ctx.admin.auth.admin.updateUserById(ctx.user.id, {
+    const updatePayload = {
       email: payload.email,
       user_metadata: {
         ...ctx.user.user_metadata,
         full_name: payload.name,
         name: payload.name,
+        user_name: payload.userName.trim(),
         mobile_no: payload.mobile || "",
       },
-    });
+    };
+
+    if (payload.password) {
+      updatePayload.password = payload.password;
+      updatePayload.email_confirm = true;
+    }
+
+    const { error: authError } = await ctx.admin.auth.admin.updateUserById(ctx.user.id, updatePayload);
 
     if (authError) return sendError(res, 500, "auth_update_failed", authError.message);
+    invalidateAuthUsersCache();
+
+    if (payload.password) {
+      updateDemoCredential(ctx.user.id, {
+        email: payload.email,
+        password: payload.password,
+        userName: payload.userName.trim(),
+      });
+    } else {
+      updateDemoCredential(ctx.user.id, {
+        email: payload.email,
+        userName: payload.userName.trim(),
+      });
+    }
 
     return sendOk(res, { updated: true });
   }

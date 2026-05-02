@@ -34,7 +34,7 @@ export async function loadUserDirectory(admin, companyId, userIds) {
   const [{ data: memberships, error: membershipError }, authUsersResponse] = await Promise.all([
     admin
       .from("company_users")
-      .select("user_id, role, user_code, person_id, mobile_no")
+      .select("user_id, role, user_code, user_name, person_id, mobile_no")
       .eq("company_id", companyId)
       .in("user_id", dedupedUserIds),
     getAuthUsersMap(admin),
@@ -65,6 +65,7 @@ export async function loadUserDirectory(admin, companyId, userIds) {
       user_id: membership.user_id,
       role: membership.role,
       user_code: membership.user_code,
+      user_name: membership.user_name || authUser?.user_metadata?.user_name || membership.user_code,
       name:
         person?.name ||
         authUser?.user_metadata?.full_name ||

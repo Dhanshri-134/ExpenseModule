@@ -29,7 +29,7 @@ export function StatusMetricButton({ label, value, onClick, tone = "default" }) 
       : tone === "warning"
         ? "border-amber-500/20 bg-amber-500/10"
         : tone === "danger"
-          ? "border-rose-500/20 bg-rose-500/10"
+          ? "border-[color:var(--acm-accent-border)] bg-[color:var(--acm-hover)]"
           : "border-[color:var(--acm-bg)] bg-[color:var(--acm-surface-2)]";
 
   return (
@@ -53,32 +53,56 @@ export function CompactListRow({
   onClick,
   actions,
 }) {
-  const Wrapper = onClick ? "button" : "div";
-
   return (
-    <Wrapper
-      type={onClick ? "button" : undefined}
-      onClick={onClick}
+    <div
       className={`grid w-full gap-3 rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3 text-left ${onClick ? "transition hover:-translate-y-0.5 hover:bg-[color:var(--acm-surface-2)]" : ""}`}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold text-[color:var(--acm-fg)]">{primary}</div>
-          {secondary ? (
-            <div className="mt-1 text-xs font-medium uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">
-              {secondary}
-            </div>
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+        <div className="min-w-0">
+          {onClick ? (
+            <button type="button" onClick={onClick} className="w-full min-w-0 text-left">
+              <div className="truncate text-sm font-semibold text-[color:var(--acm-fg)]">{primary}</div>
+              {secondary ? (
+                <div className="mt-1 text-xs font-medium uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">
+                  {secondary}
+                </div>
+              ) : null}
+            </button>
+          ) : (
+            <>
+              <div className="truncate text-sm font-semibold text-[color:var(--acm-fg)]">{primary}</div>
+              {secondary ? (
+                <div className="mt-1 text-xs font-medium uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">
+                  {secondary}
+                </div>
+              ) : null}
+            </>
+          )}
+          {tertiary ? (
+            onClick ? (
+              <button type="button" onClick={onClick} className="mt-3 w-full text-left text-sm text-[color:var(--acm-muted-fg)]">
+                {tertiary}
+              </button>
+            ) : (
+              <div className="mt-3 text-sm text-[color:var(--acm-muted-fg)]">{tertiary}</div>
+            )
           ) : null}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {actions}
-          {onClick ? <ChevronRightIcon className="h-4 w-4 text-[color:var(--acm-muted-fg)]" /> : null}
+          {onClick ? (
+            <button
+              type="button"
+              onClick={onClick}
+              className="rounded-full border border-[color:var(--acm-border)] p-2 text-[color:var(--acm-muted-fg)] transition hover:bg-[color:var(--acm-surface-2)]"
+              aria-label="Open details"
+            >
+              <ChevronRightIcon className="h-4 w-4" />
+            </button>
+          ) : null}
         </div>
       </div>
-      {tertiary ? (
-        <div className="text-sm text-[color:var(--acm-muted-fg)]">{tertiary}</div>
-      ) : null}
-    </Wrapper>
+    </div>
   );
 }
 

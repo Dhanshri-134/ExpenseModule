@@ -50,6 +50,8 @@ function ViewerCard({ viewer }) {
         </div>
         <div className={styles.viewerMeta}>
           <div className={styles.viewerName}>{viewer.name}</div>
+          <div className={styles.viewerSubline}>User Name: {viewer.userName || "-"}</div>
+          <div className={styles.viewerSubline}>User ID: {viewer.userCode || "-"}</div>
           <div className={styles.roleBadge}>{viewer.roleBadge}</div>
         </div>
       </div>

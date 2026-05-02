@@ -306,3 +306,44 @@ export function SpinnerIcon({ className }) {
     </BaseStrokeIcon>
   );
 }
+
+export function EyeIcon({ className }) {
+  return (
+    <BaseStrokeIcon className={className}>
+      <path
+        d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
+    </BaseStrokeIcon>
+  );
+}
+
+export function EyeOffIcon({ className }) {
+  return (
+    <BaseStrokeIcon className={className}>
+      <path
+        d="M3 3l18 18"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M10.6 5.2A10.9 10.9 0 0 1 12 5c6.1 0 9.5 7 9.5 7a15.8 15.8 0 0 1-3.2 4.1M6.2 6.7C3.9 8.3 2.5 12 2.5 12s3.4 6 9.5 6c1.7 0 3.2-.5 4.5-1.2"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9.9 9.9A3 3 0 0 0 14.1 14.1"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </BaseStrokeIcon>
+  );
+}

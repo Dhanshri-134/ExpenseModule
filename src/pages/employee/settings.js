@@ -4,7 +4,7 @@ import { requireRolePage } from "@/lib/pages/requireRolePage";
 
 export default function EmployeeSettingsPage({ authContext }) {
   return (
-    <EmployeeShell companyName={authContext.company.name} viewer={authContext.viewer} title="Settings">
+    <EmployeeShell companyName={authContext.company.name} viewer={authContext.viewer} title="Profile">
       <SettingsPage />
     </EmployeeShell>
   );

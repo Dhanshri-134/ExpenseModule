@@ -38,3 +38,16 @@ export function touchDemoCredentialSentAt(userId) {
   );
   writeDemoCredentials(next);
 }
+
+export function updateDemoCredential(userId, updates) {
+  const items = readDemoCredentials();
+  const next = items.map((item) =>
+    item.userId === userId
+      ? {
+          ...item,
+          ...updates,
+        }
+      : item
+  );
+  writeDemoCredentials(next);
+}

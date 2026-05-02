@@ -7,6 +7,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { ROLE_LABELS } from "@/lib/roles";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 import Image from "next/image";
+import PasswordInput from "@/components/shared/PasswordInput";
 import styles from "@/styles/auth/RoleLoginPanel.module.css";
 
 function classNames(...parts) {
@@ -26,6 +27,9 @@ export default function RoleLoginPanel({ role }) {
   const [mode, setMode] = useState("login");
   const [loginId, setLoginId] = useState("");
   const [password, setPassword] = useState("");
+  const [recoveryEmail, setRecoveryEmail] = useState("");
+  const [recoveryOtp, setRecoveryOtp] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -82,7 +86,7 @@ export default function RoleLoginPanel({ role }) {
     }
 
     if (!loginId) {
-      setError("Enter your User ID or Email ID.");
+      setError("Enter your User Name, User ID, or Email ID.");
       return;
     }
     if (loginId.includes("@") && !isEmail(loginId)) {
@@ -101,7 +105,7 @@ export default function RoleLoginPanel({ role }) {
         setError(
           resolved.error === "supabase_admin_not_configured"
             ? "User ID login needs SUPABASE_SERVICE_ROLE_KEY configured on the server. Use Email login or set the key."
-            : "User ID / Email not found."
+            : "User Name / User ID / Email not found."
         );
         return;
       }
@@ -121,10 +125,10 @@ export default function RoleLoginPanel({ role }) {
           : "";
         setError(
           role === "owner"
-            ? `Your account is not registered as an Owner.${who} If you are the company owner in companies.owner_user_id, you still need a matching row in company_users with role='owner'.`
+            ? `Your account is not registered as an Owner.`
             : role === "manager"
-              ? `Your account is not registered as a Manager.${who}`
-              : `Your account is not registered as an Employee.${who}`
+              ? `Your account is not registered as a Manager.`
+              : `Your account is not registered as an Employee.`
         );
         return;
       }
@@ -152,7 +156,7 @@ export default function RoleLoginPanel({ role }) {
     }
 
     if (!loginId) {
-      setError("Enter your User ID or Email ID to reset the password.");
+      setError("Enter your User Name, User ID, or Email ID to reset the password.");
       return;
     }
     if (loginId.includes("@") && !isEmail(loginId)) {
@@ -167,7 +171,7 @@ export default function RoleLoginPanel({ role }) {
         setError(
           resolved.error === "supabase_admin_not_configured"
             ? "User ID reset needs SUPABASE_SERVICE_ROLE_KEY configured on the server. Use Email or set the key."
-            : "User ID / Email not found."
+            : "User Name / User ID / Email not found."
         );
         return;
       }
@@ -193,8 +197,78 @@ export default function RoleLoginPanel({ role }) {
     }
   };
 
+  const onRequestUsernameOtp = async (e) => {
+    e.preventDefault();
+    resetMessages();
+
+    if (!recoveryEmail || !isEmail(recoveryEmail)) {
+      setError("Enter a valid Email ID.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const res = await fetch("/api/auth/forgot-username", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "request",
+          role,
+          email: recoveryEmail.trim(),
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || "username_recovery_failed");
+      }
+      setOtpSent(true);
+      setMessage("Verification OTP sent to your email.");
+    } catch (err) {
+      setError(err?.message || "Unable to send OTP right now.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onVerifyUsernameOtp = async (e) => {
+    e.preventDefault();
+    resetMessages();
+
+    if (!recoveryOtp || recoveryOtp.length !== 6) {
+      setError("Enter the 6-digit OTP.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const res = await fetch("/api/auth/forgot-username", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "verify",
+          role,
+          email: recoveryEmail.trim(),
+          otp: recoveryOtp.trim(),
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || "otp_verify_failed");
+      }
+      setMessage(`Your User Name is ${data?.userName}. User ID: ${data?.userCode}.`);
+      setLoginId(data?.userName || "");
+      setMode("login");
+      setOtpSent(false);
+      setRecoveryOtp("");
+    } catch (err) {
+      setError(err?.message || "Unable to verify OTP right now.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-     <div className="min-h-screen flex items-center justify-center px-6">
+     <div className="h-screen flex flex-col items-center justify-center px-6 overflow-y-auto">
       <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
         
         {/* LEFT - FORM */}
@@ -209,28 +283,70 @@ export default function RoleLoginPanel({ role }) {
           </div>
         </div>
         <h1 className={styles.heading}>
-            {mode === "login" ? `Login as ${roleLabel}` : "Forgot password"}
+            {mode === "login" ? `Login as ${roleLabel}` : mode === "forgot-password" ? "Forgot password" : "Forgot username"}
         </h1>
 
-        <form onSubmit={mode === "login" ? onLogin : onForgot} className={styles.form}>
+        <form
+          onSubmit={
+            mode === "login"
+              ? onLogin
+              : mode === "forgot-password"
+                ? onForgot
+                : otpSent
+                  ? onVerifyUsernameOtp
+                  : onRequestUsernameOtp
+          }
+          className={styles.form}
+        >
+          {mode === "forgot-username" ? (
+            <>
               <div className={styles.field}>
-                <label className={styles.label}>User ID / Email ID</label>
+                <label className={styles.label}>Email ID</label>
+                <input
+                  type="email"
+                  value={recoveryEmail}
+                  onChange={(e) => setRecoveryEmail(e.target.value)}
+                  placeholder="you@company.com"
+                  className="acm-input"
+                  autoComplete="email"
+                  required
+                />
+              </div>
+
+              {otpSent ? (
+                <div className={styles.field}>
+                  <label className={styles.label}>Verification OTP</label>
+                  <input
+                    type="text"
+                    value={recoveryOtp}
+                    onChange={(e) => setRecoveryOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="6-digit OTP"
+                    className="acm-input"
+                    inputMode="numeric"
+                    required
+                  />
+                </div>
+              ) : null}
+            </>
+          ) : (
+              <div className={styles.field}>
+                <label className={styles.label}>User Name / User ID / Email ID</label>
                 <input
                   type="text"
                   value={loginId}
                   onChange={(e) => setLoginId(e.target.value)}
-                  placeholder="ACM-M-001 or you@company.com"
+                  placeholder="acm.manager or ACM-M-001 or you@company.com"
                   className="acm-input"
                   autoComplete="username"
                   required
                 />
               </div>
+          )}
 
               {mode === "login" ? (
                 <div className={styles.field}>
                   <label className={styles.label}>Password</label>
-                  <input
-                    type="password"
+                  <PasswordInput
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Password"
@@ -242,7 +358,7 @@ export default function RoleLoginPanel({ role }) {
               ) : null}
 
               {error ? (
-                <div className="rounded-xl border border-rose-500/25 bg-rose-500/8 px-4 py-3 text-sm text-rose-500 dark:text-rose-200">
+                <div className="acm-message-error">
                   {error}
                 </div>
               ) : null}
@@ -264,20 +380,38 @@ export default function RoleLoginPanel({ role }) {
                   ? "Please wait..."
                   : mode === "login"
                     ? "Login"
-                    : "Send reset link"}
+                    : mode === "forgot-password"
+                      ? "Send reset link"
+                      : otpSent
+                        ? "Verify OTP"
+                        : "Send OTP"}
               </button>
         </form>
 
-        <div className={styles.footerRow}>
+        <div className={styles.footerRow} style={{ gap: "12px", flexWrap: "wrap" }}>
           <button
             type="button"
             onClick={() => {
               resetMessages();
-              setMode((m) => (m === "login" ? "forgot" : "login"));
+              setOtpSent(false);
+              setRecoveryOtp("");
+              setMode((m) => (m === "forgot-password" ? "login" : "forgot-password"));
             }}
             className={styles.linkButton}
           >
-            {mode === "login" ? "Forgot password?" : "Back to login"}
+            {mode === "forgot-password" ? "Back to login" : "Forgot password?"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              resetMessages();
+              setOtpSent(false);
+              setRecoveryOtp("");
+              setMode((m) => (m === "forgot-username" ? "login" : "forgot-username"));
+            }}
+            className={styles.linkButton}
+          >
+            {mode === "forgot-username" ? "Back to login" : "Forgot username?"}
           </button>
         </div>
       </div>

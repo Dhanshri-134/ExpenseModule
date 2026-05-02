@@ -40,19 +40,19 @@ export const DASHBOARD_NAVIGATION = {
     },
     { href: "/owner/staff", label: "Staff", icon: TeamIcon, match: /^\/owner\/staff$/ },
     { href: "/owner/tasks", label: "Tasks", icon: InsightsIcon, match: /^\/owner\/tasks$/ },
-    // { href: "/owner/settings", label: "Settings", icon: SettingsIcon, match: /^\/owner\/settings$/ },
+    { href: "/owner/settings", label: "Profile", icon: SettingsIcon, match: /^\/owner\/settings$/ },
   ],
   manager: [
     { href: "/manager", label: "Overview", icon: DashboardIcon, match: /^\/manager$/ },
     { href: "/manager/projects", label: "Projects", icon: ProjectsIcon, match: /^\/manager\/projects/ },
     { href: "/manager/tasks", label: "Tasks", icon: InsightsIcon, match: /^\/manager\/tasks$/ },
-    // { href: "/manager/settings", label: "Settings", icon: SettingsIcon, match: /^\/manager\/settings$/ },
+    { href: "/manager/settings", label: "Profile", icon: SettingsIcon, match: /^\/manager\/settings$/ },
   ],
   employee: [
     { href: "/employee", label: "Overview", icon: DashboardIcon, match: /^\/employee$/ },
     { href: "/employee/projects", label: "Projects", icon: ProjectsIcon, match: /^\/employee\/projects$/ },
     { href: "/employee/tasks", label: "Tasks", icon: InsightsIcon, match: /^\/employee\/tasks$/ },
-    // { href: "/employee/settings", label: "Settings", icon: SettingsIcon, match: /^\/employee\/settings$/ },
+    { href: "/employee/settings", label: "Profile", icon: SettingsIcon, match: /^\/employee\/settings$/ },
   ],
 };
 
@@ -64,8 +64,8 @@ export function getProjectNavigation(roleBase, projectId) {
       { href: `${base}/overview`, label: "Overview", icon: DashboardIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/overview$`) },
       { href: `${base}/staff`, label: "Staff", icon: TeamIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/staff$`) },
       { href: `${base}/tasks`, label: "Tasks", icon: CalendarIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/tasks$`) },
-      // { href: `${base}/reports`, label: "Reports", icon: ReportIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/reports$`) },
-      // { href: `${base}/expenses`, label: "Expenses", icon: ExpenseIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/expenses$`) },
+      { href: `${base}/estimates`, label: "Estimates", icon: ExpenseIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/estimates$`) },
+      { href: `${base}/reports`, label: "Field Reports", icon: ReportIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/reports$`) },
     ];
   }
 
@@ -74,7 +74,8 @@ export function getProjectNavigation(roleBase, projectId) {
       { href: `${base}/overview`, label: "Overview", icon: DashboardIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/overview$`) },
       { href: `${base}/staff`, label: "Staff", icon: TeamIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/staff$`) },
       { href: `${base}/tasks`, label: "Tasks", icon: CalendarIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/tasks$`) },
-      // { href: `${base}/reports`, label: "Reports", icon: ReportIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/reports$`) },
+      { href: `${base}/estimates`, label: "Estimates", icon: ExpenseIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/estimates$`) },
+      { href: `${base}/reports`, label: "Field Reports", icon: ReportIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/reports$`) },
     ];
   }
 
@@ -82,6 +83,8 @@ export function getProjectNavigation(roleBase, projectId) {
     { href: `${base}/overview`, label: "Overview", icon: DashboardIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/overview$`) },
     { href: `${base}/staff`, label: "Staff", icon: TeamIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/staff$`) },
     { href: `${base}/tasks`, label: "Tasks", icon: CalendarIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/tasks$`) },
+    { href: `${base}/estimates`, label: "Estimates", icon: ExpenseIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/estimates$`) },
+    { href: `${base}/reports`, label: "Field Reports", icon: ReportIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/reports$`) },
   ];
 }
 
@@ -98,6 +101,8 @@ export function buildDashboardViewer({
   id,
   name,
   email,
+  userName,
+  userCode,
   role,
   avatarUrl = null,
   companyName,
@@ -109,6 +114,8 @@ export function buildDashboardViewer({
     id,
     name: name || fallbackName,
     email: email || "",
+    userName: userName || userCode || "",
+    userCode: userCode || "",
     role: safeRole,
     roleLabel: ROLE_LABELS[safeRole] ?? "User",
     roleBadge: DASHBOARD_ROLE_META[safeRole]?.badge ?? "Workspace Member",

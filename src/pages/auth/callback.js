@@ -35,8 +35,10 @@ export async function getServerSideProps(ctx) {
   const config = getSupabaseConfig();
   const next = safeNextPath(ctx.query.next || "/");
   const code = typeof ctx.query.code === "string" ? ctx.query.code : null;
+  const tokenHash = typeof ctx.query.token_hash === "string" ? ctx.query.token_hash : null;
+  const type = typeof ctx.query.type === "string" ? ctx.query.type : null;
 
-  if (!config || !code) {
+  if (!config || (!code && !tokenHash)) {
     return { redirect: { destination: next, permanent: false } };
   }
 
@@ -64,8 +66,14 @@ export async function getServerSideProps(ctx) {
     },
   });
 
-  await supabase.auth.exchangeCodeForSession(code);
+  if (code) {
+    await supabase.auth.exchangeCodeForSession(code);
+  } else if (tokenHash && type) {
+    await supabase.auth.verifyOtp({
+      token_hash: tokenHash,
+      type,
+    });
+  }
 
   return { redirect: { destination: next, permanent: false } };
 }
-

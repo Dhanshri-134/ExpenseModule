@@ -5,7 +5,8 @@ export const PROJECT_SECTION_TITLES = {
   overview: "Project Overview",
   staff: "Project Staff",
   tasks: "Project Tasks",
-  reports: "Project Reports",
+  estimates: "Project Estimates",
+  reports: "Project Field Reports",
   expenses: "Project Expenses",
 };
 

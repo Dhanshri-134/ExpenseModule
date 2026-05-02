@@ -54,7 +54,7 @@ export default function ThemeToggle() {
     <button
       type="button"
       onClick={toggle}
-      className="inline-flex items-center justify-center rounded-xl border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-1)] p-2 text-[color:var(--acm-bg)] transition hover:bg-[color:var(--acm-surface-12)]"
+      className="inline-flex items-center justify-center rounded-xl border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-1)] p-2 text-white transition hover:border-[color:var(--acm-accent-border)] hover:bg-[color:var(--acm-surface-12)]"
     >
       {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
     </button>

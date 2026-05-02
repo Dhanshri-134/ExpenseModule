@@ -21,7 +21,7 @@ export default async function handler(req, res) {
 
   const { data: staff, error: staffError } = await ctx.admin
     .from("company_users")
-    .select("user_id, user_code, role, person_id")
+    .select("user_id, user_code, user_name, role, person_id")
     .eq("company_id", ctx.company.id)
     .eq("user_id", parsed.data.userId)
     .maybeSingle();
@@ -64,6 +64,7 @@ export default async function handler(req, res) {
       email,
       password,
       userCode: staff.user_code,
+      userName: staff.user_name || staff.user_code,
       password_sent_at: credential?.password_sent_at || null,
     });
   }
@@ -76,6 +77,7 @@ export default async function handler(req, res) {
       email,
       name: person?.name || staff.user_code,
       userCode: staff.user_code,
+      userName: staff.user_name || staff.user_code,
       password,
       loginUrl,
     });

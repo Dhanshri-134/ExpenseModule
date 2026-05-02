@@ -5,6 +5,8 @@ import { useRouter } from "next/router";
 import { useMemo, useState } from "react";
 import Modal from "@/components/dashboard/Modal";
 import { BusyButton, CompactListRow, DrilldownModal, StatusMetricButton } from "@/components/dashboard/DashboardUi";
+import { ProjectEstimatesPage, ProjectFieldReportsPage } from "@/components/dashboard/Project/ProjectOperationsPanels";
+import PasswordInput from "@/components/shared/PasswordInput";
 import {
   InsightsIcon,
   ProjectsIcon,
@@ -12,7 +14,6 @@ import {
   TeamIcon,
 } from "@/components/dashboard/icons";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 function cardClass(extra = "") {
   return `rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.08)] ${extra}`.trim();
@@ -73,6 +74,88 @@ function MetricChip({ label, value, icon: Icon, onClick, tone }) {
   );
 }
 
+function OverviewStatButton({ label, value, onClick, tone = "default" }) {
+  const toneClass =
+    tone === "success"
+      ? "border-emerald-500/20 bg-emerald-500/10"
+      : tone === "warning"
+        ? "border-amber-500/20 bg-amber-500/10"
+        : tone === "danger"
+          ? "border-[color:var(--acm-accent-border)] bg-[color:var(--acm-hover)]"
+          : "border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)]";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-[14px] border px-3 py-2 text-left transition hover:border-[color:var(--acm-accent-border)] hover:bg-[color:var(--acm-surface)] ${toneClass}`}
+    >
+      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
+        {label}
+      </div>
+      <div className="mt-1 text-lg font-extrabold tracking-tight text-[color:var(--acm-fg)]">{value}</div>
+    </button>
+  );
+}
+
+function OverviewCard({
+  title,
+  value,
+  accent,
+  icon: Icon,
+  onOpen,
+  openLabel = "Open",
+  stats = [],
+  layout = "grid",
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4 shadow-[0_12px_28px_rgba(0,0,0,0.05)]">
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 h-16 opacity-75"
+        style={{ background: accent }}
+      />
+      <div className="pointer-events-none absolute right-0 top-0 h-16 w-16 border-l border-b border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] [clip-path:polygon(30%_0,100%_0,100%_100%,0_100%)] opacity-80" />
+      <div className="relative">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">
+              {title}
+            </div>
+            <div className="mt-2 flex items-end gap-3">
+              <div className="text-3xl font-black tracking-[-0.05em] text-[color:var(--acm-fg)]">
+                {value}
+              </div>
+              <button
+                type="button"
+                onClick={onOpen}
+                className="inline-flex items-center rounded-full border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--acm-fg)] transition hover:border-[color:var(--acm-accent-border)] hover:bg-[color:var(--acm-surface-2)]"
+              >
+                {openLabel}
+              </button>
+            </div>
+          </div>
+          <div className="rounded-[16px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)]/95 p-2.5 text-[color:var(--acm-accent)] backdrop-blur">
+            <Icon className="h-4 w-4" />
+          </div>
+        </div>
+
+        <div className={layout === "stack" ? "mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2" : "mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-2"}>
+          {stats.map((stat) => (
+            <OverviewStatButton
+              key={stat.key || stat.label}
+              label={stat.label}
+              value={stat.value}
+              onClick={stat.onClick}
+              tone={stat.tone}
+            />
+          ))}
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
 function getProjectErrorMessage(error) {
   if (!error) return "";
   if (error === "forbidden") return "You do not have access to this project.";
@@ -88,7 +171,7 @@ function getProjectDefaultId(projects) {
 
 function getStaffOptionLabel(item) {
   if (!item) return "";
-  const primary = item.name || item.user_code || "User";
+  const primary = item.name || item.user_name || item.user_code || "User";
   return item.user_code && item.user_code !== primary ? `${primary} (${item.user_code})` : primary;
 }
 
@@ -191,7 +274,7 @@ function getApproverOptions(staffData, projectId, role) {
 function LabeledField({ label, children }) {
   return (
     <label className="relative block pt-3">
-      <span className="absolute left-3 top-0 z-10 bg-[color:var(--acm-surface)] px-2 text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
+      <span className="acm-field-label">
         {label}
       </span>
       {children}
@@ -202,7 +285,7 @@ function LabeledField({ label, children }) {
 function FieldGroup({ title, children }) {
   return (
     <fieldset className="rounded-[20px] border border-[color:var(--acm-border)] p-4">
-      <legend className="px-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">{title}</legend>
+      <legend className="acm-fieldset-legend">{title}</legend>
       <div className="grid gap-3">{children}</div>
     </fieldset>
   );
@@ -215,7 +298,7 @@ function useApi(url) {
 function InlineMessage({ error, message }) {
   if (error) {
     return (
-      <div className="rounded-xl border border-rose-500/25 bg-rose-500/8 px-4 py-3 text-sm text-rose-500">
+      <div className="acm-message-error">
         {error}
       </div>
     );
@@ -399,91 +482,55 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
     <>
       <SectionHeader title="Overview" />
 
-      <section className="grid gap-4 lg:grid-cols-3">
-        <button
-          type="button"
-          className={cardClass("h-full text-left transition-transform hover:-translate-y-0.5")}
-          onClick={() => router.push(`/${roleBase}/projects`)}
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">Projects</div>
-              <div className="mt-2 text-3xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">
-                {formatCompactNumber(summary?.projects?.total ?? 0)}
-              </div>
-            </div>
-            <div className="rounded-full border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-3 text-[color:var(--acm-accent)]">
-              <ProjectsIcon className="h-5 w-5" />
-            </div>
-          </div>
-          <div className="mt-4 grid grid-cols-3 gap-3" onClick={(event) => event.stopPropagation()}>
-            {projectStatusGroups.map((group) => (
-              <MetricChip
-                key={group.label}
-                label={group.label}
-                value={formatCompactNumber(group.value)}
-                onClick={() => openDrilldown(`${group.label} Projects`, group.items, "project")}
-                tone={group.tone}
-              />
-            ))}
-          </div>
-        </button>
+      <section className="grid gap-3 xl:grid-cols-[1fr_1fr_1.15fr]">
+        <OverviewCard
+          title="Projects"
+          value={formatCompactNumber(summary?.projects?.total ?? 0)}
+          icon={ProjectsIcon}
+          accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 22%, transparent), transparent 70%)"
+          onOpen={() => router.push(`/${roleBase}/projects`)}
+          openLabel="Open Projects"
+          stats={projectStatusGroups.map((group) => ({
+            key: group.label,
+            label: group.label,
+            value: formatCompactNumber(group.value),
+            onClick: () => openDrilldown(`${group.label} Projects`, group.items, "project"),
+            tone: group.tone,
+          }))}
+        />
 
-        <button
-          type="button"
-          className={cardClass("h-full text-left transition-transform hover:-translate-y-0.5")}
-          onClick={() => openDrilldown("All Staff", staffList, "staff")}
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">Staff</div>
-              <div className="mt-2 text-3xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">
-                {formatCompactNumber(staffList.length)}
-              </div>
-            </div>
-            <div className="rounded-full border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-3 text-[color:var(--acm-accent)]">
-              <TeamIcon className="h-5 w-5" />
-            </div>
-          </div>
-          <div className="mt-4 grid grid-cols-2 gap-3" onClick={(event) => event.stopPropagation()}>
-            {staffGroups.map((group) => (
-              <MetricChip
-                key={group.label}
-                label={group.label}
-                value={formatCompactNumber(group.value)}
-                onClick={() => openDrilldown(group.label, group.items, "staff")}
-              />
-            ))}
-          </div>
-        </button>
+        <OverviewCard
+          title="Staff"
+          value={formatCompactNumber(staffList.length)}
+          icon={TeamIcon}
+          accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 14%, transparent), transparent 72%)"
+          onOpen={() => openDrilldown("All Staff", staffList, "staff")}
+          openLabel="Open Staff"
+          stats={staffGroups.map((group) => ({
+            key: group.label,
+            label: group.label,
+            value: formatCompactNumber(group.value),
+            onClick: () => openDrilldown(group.label, group.items, "staff"),
+            tone: group.tone,
+          }))}
+        />
 
-        <button
-          type="button"
-          className={cardClass("h-full text-left transition-transform hover:-translate-y-0.5")}
-          onClick={() => router.push(`/${roleBase}/tasks`)}
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">Tasks</div>
-              <div className="mt-2 text-3xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">
-                {formatCompactNumber(roleBase === "owner" ? taskSummary.todayAssigned ?? 0 : taskSummary.myTasks?.total ?? 0)}
-              </div>
-            </div>
-            <div className="rounded-full border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-3 text-[color:var(--acm-accent)]">
-              <InsightsIcon className="h-5 w-5" />
-            </div>
-          </div>
-          <div className="mt-4 grid grid-cols-2 gap-3" onClick={(event) => event.stopPropagation()}>
-            {taskGroupsForOverview.map((group) => (
-              <MetricChip
-                key={group.key}
-                label={group.label}
-                value={formatCompactNumber(group.value)}
-                onClick={() => openDrilldown(group.label, group.items, "task")}
-              />
-            ))}
-          </div>
-        </button>
+        <OverviewCard
+          title="Tasks"
+          value={formatCompactNumber(roleBase === "owner" ? taskSummary.todayAssigned ?? 0 : taskSummary.myTasks?.total ?? 0)}
+          icon={PulseIcon}
+          accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 18%, transparent), color-mix(in srgb, var(--acm-surface-2) 55%, transparent) 52%, transparent 85%)"
+          onOpen={() => router.push(`/${roleBase}/tasks`)}
+          openLabel="Open Tasks"
+          layout="stack"
+          stats={taskGroupsForOverview.map((group, index) => ({
+            key: group.key,
+            label: group.label,
+            value: formatCompactNumber(group.value),
+            onClick: () => openDrilldown(group.label, group.items, "task"),
+            tone: index === 0 ? "success" : "default",
+          }))}
+        />
       </section>
 
       <section className="mt-4 grid gap-4 xl:grid-cols-2">
@@ -557,8 +604,8 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
           return (
             <CompactListRow
               key={item.user_id}
-              primary={item.name || item.user_code}
-              secondary={item.user_code}
+              primary={item.name || item.user_name || item.user_code}
+              secondary={`${item.user_name || item.user_code} | ${item.user_code}`}
               tertiary={`${roleName(item.role)} | ${getProjectAssignmentSummary(item)}`}
               onClick={() => {
                 setDrilldown({ open: false, title: "", items: [], type: "" });
@@ -586,6 +633,20 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
             : []
         }
         onClose={() => setSelectedProject(null)}
+        actions={
+          selectedProject ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedProject(null);
+                router.push(`/${roleBase}/project/${selectedProject.id}/overview`);
+              }}
+              className="acm-btn acm-btn-primary h-10 px-4"
+            >
+              Go to Project Dashboard
+            </button>
+          ) : null
+        }
       />
 
       <ProfileModal
@@ -595,6 +656,7 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
           selectedStaff
             ? [
                 { label: "User Code", value: selectedStaff.user_code },
+                { label: "User Name", value: selectedStaff.user_name || selectedStaff.user_code },
                 { label: "Name", value: selectedStaff.name },
                 { label: "Email", value: selectedStaff.email },
                 { label: "Mobile", value: selectedStaff.mobile },
@@ -604,6 +666,18 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
             : []
         }
         onClose={() => setSelectedStaff(null)}
+        actions={
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedStaff(null);
+              router.push(`/${roleBase}${roleBase === "owner" ? "/staff" : "/projects"}`);
+            }}
+            className="acm-btn acm-btn-primary h-10 px-4"
+          >
+            {roleBase === "owner" ? "Open Staff Directory" : "Open Projects"}
+          </button>
+        }
       />
 
       <ProfileModal
@@ -611,12 +685,25 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
         title="Task Profile"
         details={selectedTask ? buildTaskDetails(selectedTask) : []}
         onClose={() => setSelectedTask(null)}
+        actions={
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedTask(null);
+              router.push(`/${roleBase}/tasks`);
+            }}
+            className="acm-btn acm-btn-primary h-10 px-4"
+          >
+            Open Task Board
+          </button>
+        }
       />
     </>
   );
 }
 
 export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
+  const router = useRouter();
   const projects = useApi("/api/projects");
   const [open, setOpen] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
@@ -741,7 +828,7 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
 
       <InlineMessage error={projects.error || error} message={message} />
 
-      <section className="mt-4 grid grid-cols-2 space-y-3 space-x-3">
+      <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {projectList.map((project) => (
           <CompactListRow
             key={project.id}
@@ -754,7 +841,7 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
                 <Link href={`/${roleBase}/project/${project.id}/overview`} className="acm-btn acm-btn-primary h-9 px-3 text-xs">
                   Open
                 </Link>
-                {canCreateProject ? (
+                {/* {canCreateProject ? (
                   <>
                     <button type="button" onClick={(event) => { event.stopPropagation(); openEdit(project); }} className="acm-btn acm-btn-secondary h-9 px-3 text-xs">
                       Edit
@@ -771,7 +858,7 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
                       Delete
                     </BusyButton>
                   </>
-                ) : null}
+                ) : null} */}
               </div>
             }
           />
@@ -798,6 +885,47 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
             : []
         }
         onClose={() => setProfileProject(null)}
+        actions={
+          profileProject ? (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setProfileProject(null);
+                  router.push(`/${roleBase}/project/${profileProject.id}/overview`);
+                }}
+                className="acm-btn acm-btn-primary h-10 px-4"
+              >
+                Go to Project Dashboard
+              </button>
+              {canCreateProject ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileProject(null);
+                      openEdit(profileProject);
+                    }}
+                    className="acm-btn acm-btn-secondary h-10 px-4"
+                  >
+                    Edit
+                  </button>
+                  <BusyButton
+                    type="button"
+                    busy={deletingProjectId === profileProject.id}
+                    className="acm-btn acm-btn-secondary h-10 px-4"
+                    onClick={() => {
+                      setProfileProject(null);
+                      deleteProject(profileProject);
+                    }}
+                  >
+                    Delete
+                  </BusyButton>
+                </>
+              ) : null}
+            </>
+          ) : null
+        }
       />
 
       <Modal open={open} title={editingProject ? "Edit Project" : "Create Project"} onClose={() => setOpen(false)}>
@@ -995,7 +1123,8 @@ async function saveClientChanges(e) {
             },
           ]
         : [
-            { label: "User Code", value: selectedItem?.staff?.user_code || selectedItem?.user_code },
+            { label: "User ID", value: selectedItem?.staff?.user_code || selectedItem?.user_code },
+            { label: "User Name", value: selectedItem?.staff?.user_name || selectedItem?.user_name || selectedItem?.staff?.user_code || selectedItem?.user_code },
             { label: "Name", value: selectedItem?.staff?.name || selectedItem?.name },
             { label: "Email", value: selectedItem?.staff?.email || selectedItem?.email },
             { label: "Mobile", value: selectedItem?.staff?.mobile || selectedItem?.mobile },
@@ -1062,13 +1191,13 @@ async function saveClientChanges(e) {
                 title="Client Info"
                 action={
   <div className="flex gap-3 items-center">
-    <button
+    {/* <button
       type="button"
       onClick={() => setSelectedType("client")}
       className="acm-btn acm-btn-secondary h-10 px-4"
     >
       Open Profile
-    </button>
+    </button> */}
 
     {ownerMode && (
       <>
@@ -1122,7 +1251,8 @@ async function saveClientChanges(e) {
           />
         ) : null}
 
-        {section === "reports" ? <div className={cardClass()}>Reports will be configured here.</div> : null}
+        {section === "estimates" ? <ProjectEstimatesPage projectId={projectId} canManage={roleBase !== "employee"} /> : null}
+        {section === "reports" ? <ProjectFieldReportsPage projectId={projectId} roleBase={roleBase} currentUserId={currentUserId} /> : null}
         {section === "expenses" ? <div className={cardClass()}>Expenses will be configured here.</div> : null}
       </section>
 
@@ -1243,11 +1373,13 @@ export function StaffManagerPage({
   const [deleteUserId, setDeleteUserId] = useState("");
   const [form, setForm] = useState({
     name: "",
+    userName: "",
     role: "employee",
     email: "",
     mobile: "",
     hourlyRate: "",
     projectId: "",
+    password: "",
   });
   const [assignForm, setAssignForm] = useState({
     userId: "",
@@ -1307,6 +1439,8 @@ export function StaffManagerPage({
         ...form,
         hourlyRate: Number(form.hourlyRate || 0),
         projectId: selectedProjectId || null,
+        userName: form.userName?.trim() || null,
+        password: form.password?.trim() || null,
       }),
     });
     const json = await res.json().catch(() => null);
@@ -1315,7 +1449,7 @@ export function StaffManagerPage({
       setCreateBusy(false);
       return;
     }
-    setMessage(`${json.staff.user_code} created`);
+    setMessage(`Created. User ID: ${json.staff.user_code}, User Name: ${json.auth.userName}, Password: ${json.auth.temporaryPassword}`);
     setOpen(false);
     invalidateApiQuery("/api/dashboard");
     invalidateApiQuery("/api/staff");
@@ -1336,9 +1470,11 @@ export function StaffManagerPage({
       body: JSON.stringify({
         userId: editingStaff.user_id,
         name: editingStaff.name,
+        userName: editingStaff.user_name,
         email: editingStaff.email,
         mobile: editingStaff.mobile,
         hourlyRate: Number(editingStaff.hourly_rate || 0),
+        password: editingStaff.password || "",
       }),
     });
     const json = await res.json().catch(() => null);
@@ -1518,8 +1654,8 @@ export function StaffManagerPage({
         {(visibleStaffData[tab] ?? []).map((item) => (
           <CompactListRow
             key={item.user_id}
-            primary={item.name || item.user_code}
-            secondary={`${item.user_code} | ${roleName(item.role)}`}
+            primary={item.name || item.user_name || item.user_code}
+            secondary={`${item.user_name || item.user_code} | ${item.user_code} | ${roleName(item.role)}`}
             tertiary={`${item.email || "-"} | ${getProjectAssignmentSummary(item, fixedProjectId)}`}
             onClick={() => setSelectedProfile(item)}
             actions={
@@ -1559,7 +1695,8 @@ export function StaffManagerPage({
         details={
           selectedProfile
             ? [
-                { label: "User Code", value: selectedProfile.user_code },
+                { label: "User ID", value: selectedProfile.user_code },
+                { label: "User Name", value: selectedProfile.user_name || selectedProfile.user_code },
                 { label: "Name", value: selectedProfile.name },
                 { label: "Email", value: selectedProfile.email },
                 { label: "Mobile", value: selectedProfile.mobile },
@@ -1572,12 +1709,12 @@ export function StaffManagerPage({
                       .map((assignment) => assignment.project?.name || assignment.project_id)
                       .join(", ") || "-",
                 },
-                ...(ownerMode ? [{ label: "Password", value: selectedProfile.password || "-" }] : []),
+                ...(!readOnly ? [{ label: "Password", value: selectedProfile.password || "-" }] : []),
               ]
             : []
         }
         onClose={() => setSelectedProfile(null)}
-        onSendEmail={ownerMode && selectedProfile ? () => onSendEmail(selectedProfile.user_id) : null}
+        onSendEmail={!readOnly && selectedProfile ? () => onSendEmail(selectedProfile.user_id) : null}
         actions={
           selectedProfile ? (
             <>
@@ -1630,20 +1767,45 @@ export function StaffManagerPage({
 
       <Modal open={open} title="Create Staff" onClose={() => setOpen(false)}>
         <form onSubmit={createStaff} className="grid gap-3">
-          <input className={fieldClass()} placeholder="Name" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
-          <select className={fieldClass()} value={form.role} onChange={(e) => setForm((prev) => ({ ...prev, role: e.target.value }))}>
-            {allowManagerCreation ? <option value="manager">Manager</option> : null}
-            <option value="employee">Employee</option>
-          </select>
-          <input className={fieldClass()} placeholder="Email" value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
-          <input className={fieldClass()} placeholder="Mobile" value={form.mobile} onChange={(e) => setForm((prev) => ({ ...prev, mobile: e.target.value }))} />
-          <input className={fieldClass()} inputMode="decimal" placeholder="Hourly Rate" value={form.hourlyRate} onChange={(e) => setForm((prev) => ({ ...prev, hourlyRate: e.target.value }))} />
-          <select className={fieldClass()} value={selectedProjectId} onChange={(e) => setForm((prev) => ({ ...prev, projectId: e.target.value }))} disabled={Boolean(fixedProjectId)}>
-            <option value="">Assigned Project</option>
-            {availableProjects.map((project) => (
-              <option key={project.id} value={project.id}>{project.name}</option>
-            ))}
-          </select>
+          <FieldGroup title="Profile">
+            <LabeledField label="Name">
+              <input className={fieldClass()} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Role">
+              <select className={fieldClass()} value={form.role} onChange={(e) => setForm((prev) => ({ ...prev, role: e.target.value }))}>
+                {allowManagerCreation ? <option value="manager">Manager</option> : null}
+                <option value="employee">Employee</option>
+              </select>
+            </LabeledField>
+            <LabeledField label="Email">
+              <input className={fieldClass()} value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Mobile">
+              <input className={fieldClass()} value={form.mobile} onChange={(e) => setForm((prev) => ({ ...prev, mobile: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Hourly Rate">
+              <input className={fieldClass()} inputMode="decimal" value={form.hourlyRate} onChange={(e) => setForm((prev) => ({ ...prev, hourlyRate: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Assigned Project">
+              <select className={fieldClass()} value={selectedProjectId} onChange={(e) => setForm((prev) => ({ ...prev, projectId: e.target.value }))} disabled={Boolean(fixedProjectId)}>
+                <option value="">Select project</option>
+                {availableProjects.map((project) => (
+                  <option key={project.id} value={project.id}>{project.name}</option>
+                ))}
+              </select>
+            </LabeledField>
+          </FieldGroup>
+          <FieldGroup title="Credentials">
+            <LabeledField label="User Name">
+              <input className={fieldClass()} value={form.userName} onChange={(e) => setForm((prev) => ({ ...prev, userName: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="User ID">
+              <input className={fieldClass()} value="Auto-generated on save" disabled />
+            </LabeledField>
+            <LabeledField label="Password">
+              <PasswordInput className={fieldClass()} placeholder="Leave blank for auto-generated password" value={form.password} onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))} />
+            </LabeledField>
+          </FieldGroup>
           {managerProjectOnly ? <div className="text-sm text-[color:var(--acm-muted-fg)]">Manager can create employees only inside an assigned project.</div> : null}
           <BusyButton type="submit" busy={createBusy} className="acm-btn acm-btn-primary">Save</BusyButton>
         </form>
@@ -1651,62 +1813,107 @@ export function StaffManagerPage({
 
       <Modal open={assignOpen} title="Assign Project" onClose={() => setAssignOpen(false)}>
         <form onSubmit={assignProject} className="grid gap-3">
-          <select className={fieldClass()} value={assignForm.userId} onChange={(e) => setAssignForm((prev) => ({ ...prev, userId: e.target.value }))}>
-            <option value="">Select Staff</option>
-            {[...staffData.managers, ...staffData.employees].map((item) => (
-              <option key={item.user_id} value={item.user_id}>{getStaffOptionLabel(item)}</option>
-            ))}
-          </select>
-          <select className={fieldClass()} value={selectedAssignmentProjectId} onChange={(e) => setAssignForm((prev) => ({ ...prev, projectId: e.target.value }))} disabled={Boolean(fixedProjectId)}>
-            <option value="">Select Project</option>
-            {availableProjects.map((project) => (
-              <option key={project.id} value={project.id}>{project.name}</option>
-            ))}
-          </select>
-          <select className={fieldClass()} value={assignForm.role} onChange={(e) => setAssignForm((prev) => ({ ...prev, role: e.target.value }))}>
-            {allowManagerCreation ? <option value="manager">Manager</option> : null}
-            <option value="employee">Employee</option>
-          </select>
-          <input className={fieldClass()} inputMode="decimal" placeholder="Hourly Rate" value={assignForm.hourlyRate} onChange={(e) => setAssignForm((prev) => ({ ...prev, hourlyRate: e.target.value }))} />
+          <LabeledField label="Select Staff">
+            <select className={fieldClass()} value={assignForm.userId} onChange={(e) => setAssignForm((prev) => ({ ...prev, userId: e.target.value }))}>
+              <option value="">Select staff</option>
+              {[...staffData.managers, ...staffData.employees].map((item) => (
+                <option key={item.user_id} value={item.user_id}>{getStaffOptionLabel(item)}</option>
+              ))}
+            </select>
+          </LabeledField>
+          <LabeledField label="Select Project">
+            <select className={fieldClass()} value={selectedAssignmentProjectId} onChange={(e) => setAssignForm((prev) => ({ ...prev, projectId: e.target.value }))} disabled={Boolean(fixedProjectId)}>
+              <option value="">Select project</option>
+              {availableProjects.map((project) => (
+                <option key={project.id} value={project.id}>{project.name}</option>
+              ))}
+            </select>
+          </LabeledField>
+          <LabeledField label="Role">
+            <select className={fieldClass()} value={assignForm.role} onChange={(e) => setAssignForm((prev) => ({ ...prev, role: e.target.value }))}>
+              {allowManagerCreation ? <option value="manager">Manager</option> : null}
+              <option value="employee">Employee</option>
+            </select>
+          </LabeledField>
+          <LabeledField label="Hourly Rate">
+            <input className={fieldClass()} inputMode="decimal" value={assignForm.hourlyRate} onChange={(e) => setAssignForm((prev) => ({ ...prev, hourlyRate: e.target.value }))} />
+          </LabeledField>
           <BusyButton type="submit" busy={assignBusy} className="acm-btn acm-btn-primary">Assign</BusyButton>
         </form>
       </Modal>
 
       <Modal open={editOpen} title="Edit Staff" onClose={() => setEditOpen(false)}>
         <form onSubmit={updateStaff} className="grid gap-3">
-          <input className={fieldClass()} placeholder="Name" value={editingStaff?.name || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, name: e.target.value }))} />
-          <input className={fieldClass()} placeholder="Email" value={editingStaff?.email || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, email: e.target.value }))} />
-          <input className={fieldClass()} placeholder="Mobile" value={editingStaff?.mobile || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, mobile: e.target.value }))} />
-          <input className={fieldClass()} inputMode="decimal" placeholder="Hourly Rate" value={editingStaff?.hourly_rate || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, hourly_rate: e.target.value }))} />
+          <FieldGroup title="Profile">
+            <LabeledField label="Name">
+              <input className={fieldClass()} value={editingStaff?.name || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, name: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Email">
+              <input className={fieldClass()} value={editingStaff?.email || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, email: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Mobile">
+              <input className={fieldClass()} value={editingStaff?.mobile || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, mobile: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Hourly Rate">
+              <input className={fieldClass()} inputMode="decimal" value={editingStaff?.hourly_rate || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, hourly_rate: e.target.value }))} />
+            </LabeledField>
+          </FieldGroup>
+          <FieldGroup title="Credentials">
+            <LabeledField label="User Name">
+              <input className={fieldClass()} value={editingStaff?.user_name || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, user_name: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="User ID">
+              <input className={fieldClass()} value={editingStaff?.user_code || ""} disabled />
+            </LabeledField>
+            <LabeledField label="Password">
+              <PasswordInput className={fieldClass()} placeholder="New password (optional)" value={editingStaff?.password || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, password: e.target.value }))} />
+            </LabeledField>
+          </FieldGroup>
           <BusyButton type="submit" busy={editBusy} className="acm-btn acm-btn-primary">Save</BusyButton>
         </form>
       </Modal>
 
       <Modal open={taskOpen} title="Assign Task" onClose={() => setTaskOpen(false)}>
         <form onSubmit={assignTaskFromStaffList} className="grid gap-3">
-          <select className={fieldClass()} value={taskForm.projectId} onChange={(e) => setTaskForm((prev) => ({ ...prev, projectId: e.target.value }))} disabled={Boolean(fixedProjectId)}>
-            <option value="">Project</option>
-            {availableProjects.map((project) => (
-              <option key={project.id} value={project.id}>{project.name}</option>
-            ))}
-          </select>
-          <input className={fieldClass()} value={taskTarget ? getStaffOptionLabel(taskTarget) : ""} disabled />
-          <input className={fieldClass()} placeholder="Task title" value={taskForm.title} onChange={(e) => setTaskForm((prev) => ({ ...prev, title: e.target.value }))} />
-          <textarea className={fieldClass()} placeholder="Description" value={taskForm.description} onChange={(e) => setTaskForm((prev) => ({ ...prev, description: e.target.value }))} />
-          <input className={fieldClass()} type="date" value={taskForm.startDate} onChange={(e) => setTaskForm((prev) => ({ ...prev, startDate: e.target.value }))} />
-          <input className={fieldClass()} type="date" value={taskForm.endDate} onChange={(e) => setTaskForm((prev) => ({ ...prev, endDate: e.target.value }))} />
-          <select className={fieldClass()} value={taskForm.approvalRole} onChange={(e) => setTaskForm((prev) => ({ ...prev, approvalRole: e.target.value }))}>
-            <option value="manager">Manager Approval</option>
-            <option value="employee">Employee Approval</option>
-          </select>
-          <select className={fieldClass()} value={taskForm.approverUserId} onChange={(e) => setTaskForm((prev) => ({ ...prev, approverUserId: e.target.value }))}>
-            <option value="">Select Approving Person</option>
-            {availableTaskApprovers.map((item) => (
-              <option key={item.user_id} value={item.user_id}>
-                {getTaskAssigneeLabel(item, taskForm.projectId || fixedProjectId || "")}
-              </option>
-            ))}
-          </select>
+          <LabeledField label="Project">
+            <select className={fieldClass()} value={taskForm.projectId} onChange={(e) => setTaskForm((prev) => ({ ...prev, projectId: e.target.value }))} disabled={Boolean(fixedProjectId)}>
+              <option value="">Select project</option>
+              {availableProjects.map((project) => (
+                <option key={project.id} value={project.id}>{project.name}</option>
+              ))}
+            </select>
+          </LabeledField>
+          <LabeledField label="Assigned To">
+            <input className={fieldClass()} value={taskTarget ? getStaffOptionLabel(taskTarget) : ""} disabled />
+          </LabeledField>
+          <LabeledField label="Task Title">
+            <input className={fieldClass()} value={taskForm.title} onChange={(e) => setTaskForm((prev) => ({ ...prev, title: e.target.value }))} />
+          </LabeledField>
+          <LabeledField label="Description">
+            <textarea className={fieldClass()} value={taskForm.description} onChange={(e) => setTaskForm((prev) => ({ ...prev, description: e.target.value }))} />
+          </LabeledField>
+          <LabeledField label="Start Date">
+            <input className={fieldClass()} type="date" value={taskForm.startDate} onChange={(e) => setTaskForm((prev) => ({ ...prev, startDate: e.target.value }))} />
+          </LabeledField>
+          <LabeledField label="End Date">
+            <input className={fieldClass()} type="date" value={taskForm.endDate} onChange={(e) => setTaskForm((prev) => ({ ...prev, endDate: e.target.value }))} />
+          </LabeledField>
+          <LabeledField label="Approval Role">
+            <select className={fieldClass()} value={taskForm.approvalRole} onChange={(e) => setTaskForm((prev) => ({ ...prev, approvalRole: e.target.value }))}>
+              <option value="manager">Manager Approval</option>
+              <option value="employee">Employee Approval</option>
+            </select>
+          </LabeledField>
+          <LabeledField label="Approving Person">
+            <select className={fieldClass()} value={taskForm.approverUserId} onChange={(e) => setTaskForm((prev) => ({ ...prev, approverUserId: e.target.value }))}>
+              <option value="">Select approving person</option>
+              {availableTaskApprovers.map((item) => (
+                <option key={item.user_id} value={item.user_id}>
+                  {getTaskAssigneeLabel(item, taskForm.projectId || fixedProjectId || "")}
+                </option>
+              ))}
+            </select>
+          </LabeledField>
           <BusyButton type="submit" busy={taskBusy} className="acm-btn acm-btn-primary">Assign Task</BusyButton>
         </form>
       </Modal>
@@ -2184,7 +2391,6 @@ export function TasksManagerPage({
 }
 
 export function SettingsPage() {
-  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const settings = useApi("/api/settings");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -2197,6 +2403,8 @@ export function SettingsPage() {
   });
   const resolvedProfileForm = profileForm ?? {
     name: settings.data?.profile?.name || "",
+    userName: settings.data?.profile?.userName || settings.data?.profile?.userCode || "",
+    userCode: settings.data?.profile?.userCode || "",
     email: settings.data?.profile?.email || "",
     mobile: settings.data?.profile?.mobile || "",
     address: settings.data?.profile?.address || "",
@@ -2230,11 +2438,6 @@ export function SettingsPage() {
     setError("");
     setMessage("");
     setPasswordBusy(true);
-    if (!supabase) {
-      setError("supabase_not_configured");
-      setPasswordBusy(false);
-      return;
-    }
     if (!passwordForm.password || passwordForm.password.length < 8) {
       setError("Password must be at least 8 characters.");
       setPasswordBusy(false);
@@ -2246,9 +2449,17 @@ export function SettingsPage() {
       return;
     }
 
-    const { error: updateError } = await supabase.auth.updateUser({ password: passwordForm.password });
-    if (updateError) {
-      setError(updateError.message || "password_update_failed");
+    const res = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...resolvedProfileForm,
+        password: passwordForm.password,
+      }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(json?.error || "password_update_failed");
       setPasswordBusy(false);
       return;
     }
@@ -2260,7 +2471,7 @@ export function SettingsPage() {
 
   return (
     <>
-      <SectionHeader title="Settings" />
+      <SectionHeader title="Profile" />
       <InlineMessage error={settings.error || error} message={message} />
 
       <section className="grid gap-4 xl:grid-cols-2">
@@ -2269,6 +2480,12 @@ export function SettingsPage() {
           <form onSubmit={saveProfile} className="grid gap-3">
             <LabeledField label="Name">
               <input className={fieldClass()} value={resolvedProfileForm.name} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), name: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="User ID">
+              <input className={fieldClass()} value={resolvedProfileForm.userCode} readOnly />
+            </LabeledField>
+            <LabeledField label="User Name">
+              <input className={fieldClass()} value={resolvedProfileForm.userName} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), userName: e.target.value }))} />
             </LabeledField>
             <LabeledField label="Email">
               <input className={fieldClass()} type="email" value={resolvedProfileForm.email} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), email: e.target.value }))} />
@@ -2286,14 +2503,14 @@ export function SettingsPage() {
         <div className={cardClass()}>
           <SectionHeader title="Change Credentials" />
           <div className="mb-3 text-sm text-[color:var(--acm-muted-fg)]">
-            Update your password for future logins.
+            Update your user name and password for future logins. Your User ID stays fixed.
           </div>
           <form onSubmit={changePassword} className="grid gap-3">
             <LabeledField label="New Password">
-              <input className={fieldClass()} type="password" value={passwordForm.password} onChange={(e) => setPasswordForm((prev) => ({ ...prev, password: e.target.value }))} />
+              <PasswordInput className={fieldClass()} value={passwordForm.password} onChange={(e) => setPasswordForm((prev) => ({ ...prev, password: e.target.value }))} />
             </LabeledField>
             <LabeledField label="Confirm Password">
-              <input className={fieldClass()} type="password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))} />
+              <PasswordInput className={fieldClass()} value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))} />
             </LabeledField>
             <BusyButton type="submit" busy={passwordBusy} className="acm-btn acm-btn-primary">Update Credentials</BusyButton>
           </form>

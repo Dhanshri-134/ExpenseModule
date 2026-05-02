@@ -19,7 +19,7 @@ export async function getRequestContext(req, res) {
 
   const { data: memberships, error: membershipError } = await admin
     .from("company_users")
-    .select("company_id, role, user_code, role_number, mobile_no, hourly_rate, created_in_project_id")
+    .select("company_id, role, user_code, user_name, role_number, mobile_no, hourly_rate, created_in_project_id")
     .eq("user_id", user.id);
 
   if (membershipError || !memberships?.length) {
@@ -71,6 +71,8 @@ export async function getRequestContext(req, res) {
       id: user.id,
       name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split("@")[0],
       email: user.email ?? "",
+      userName: membership.user_name || user.user_metadata?.user_name || membership.user_code,
+      userCode: membership.user_code || "",
       role,
       avatarUrl: user.user_metadata?.avatar_url ?? null,
       companyName: company.name,

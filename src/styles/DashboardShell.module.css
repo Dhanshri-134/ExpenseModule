@@ -224,6 +224,16 @@
   color: var(--acm-fg);
 }
 
+.viewerSubline {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--acm-muted-fg);
+}
+
 .roleBadge {
   display: inline-flex;
   margin-top: 6px;

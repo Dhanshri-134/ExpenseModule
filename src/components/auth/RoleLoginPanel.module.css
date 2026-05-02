@@ -68,7 +68,9 @@
 .label {
   font-size: 14px;
   font-weight: 600;
-  color: var(--acm-fg);
+  color: var(--acm-accent-strong);
+  font-family: var(--acm-label-font);
+  letter-spacing: 0.01em;
 }
 
 .footerRow {

@@ -79,7 +79,7 @@ export default function DashboardHeader({
       <Modal open={notificationOpen} title="Notifications" onClose={() => setNotificationOpen(false)}>
         <div className="space-y-3">
           {loading ? <div className="text-sm text-[color:var(--acm-muted-fg)]">Loading updates...</div> : null}
-          {error ? <div className="text-sm text-rose-500">{error}</div> : null}
+          {error ? <div className="acm-message-error">{error}</div> : null}
           {!loading && !error && !notifications.length ? (
             <div className="text-sm text-[color:var(--acm-muted-fg)]">No project updates yet.</div>
           ) : null}
