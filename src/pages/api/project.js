@@ -80,7 +80,7 @@ export default async function handler(req, res) {
   if (req.method === "GET") {
     const { data: project, error: projectError } = await ctx.admin
       .from("projects")
-      .select("id, company_id, client_id, job_number, name, location, start_date, end_date, contract_value")
+      .select("*")
       .eq("id", projectId)
       .maybeSingle();
 
@@ -89,7 +89,7 @@ export default async function handler(req, res) {
     const [{ data: client }, { data: assignments }, taskWorkspace] = await Promise.all([
       ctx.admin
         .from("clients")
-        .select("id, name, contact, email, address")
+        .select("*")
         .eq("id", project.client_id)
         .maybeSingle(),
       ctx.admin

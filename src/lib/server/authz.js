@@ -109,7 +109,14 @@ export async function requirePageRole(ctx, allowedRoles) {
     if (reqCtx.status === 401) {
       return { redirect: { destination: "/login", permanent: false } };
     }
-    return { notFound: true };
+
+    const preferredRole = allowedRoles?.[0];
+    return {
+      redirect: {
+        destination: preferredRole ? `/login/${preferredRole}` : "/login",
+        permanent: false,
+      },
+    };
   }
 
   if (!hasRole(reqCtx, allowedRoles)) {

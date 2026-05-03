@@ -127,6 +127,45 @@ export function TeamIcon({ className }) {
   );
 }
 
+export function LeadsIcon({ className }) {
+  return (
+    <BaseStrokeIcon className={className}>
+      <path
+        d="M7.5 7.5h9M7.5 12h9M7.5 16.5h5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M6 4.5h12A1.5 1.5 0 0 1 19.5 6v12A1.5 1.5 0 0 1 18 19.5H6A1.5 1.5 0 0 1 4.5 18V6A1.5 1.5 0 0 1 6 4.5Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </BaseStrokeIcon>
+  );
+}
+
+export function ClientsIcon({ className }) {
+  return (
+    <BaseStrokeIcon className={className}>
+      <path
+        d="M8.5 10.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM15.5 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M4.5 19a4.5 4.5 0 0 1 8 0M13.5 19a3.5 3.5 0 0 1 6 0"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </BaseStrokeIcon>
+  );
+}
+
 export function InsightsIcon({ className }) {
   return (
     <BaseStrokeIcon className={className}>

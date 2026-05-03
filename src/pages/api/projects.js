@@ -64,7 +64,7 @@ export default async function handler(req, res) {
   if (req.method === "GET") {
     const { data: projects, error } = await ctx.admin
       .from("projects")
-      .select("id, company_id, client_id, job_number, name, location, start_date, end_date, contract_value, created_at")
+      .select("*")
       .eq("company_id", ctx.company.id)
       .order("created_at", { ascending: false });
 
@@ -73,7 +73,7 @@ export default async function handler(req, res) {
     const visibleProjects = (projects ?? []).filter((project) => canAccessProject(ctx, project.id));
     const clientIds = [...new Set(visibleProjects.map((item) => item.client_id).filter(Boolean))];
     const { data: clients } = clientIds.length
-      ? await ctx.admin.from("clients").select("id, name, email, contact, address").in("id", clientIds)
+      ? await ctx.admin.from("clients").select("*").in("id", clientIds)
       : { data: [] };
 
     const enriched = visibleProjects.map((project) => ({

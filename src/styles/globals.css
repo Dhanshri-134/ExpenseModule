@@ -228,13 +228,13 @@ html[data-theme="dark"] body {
 
   .acm-btn-primary {
     @apply text-white;
-    background: linear-gradient(135deg, #f59e0b 0%, #ffbf00 52%, #facc15 100%);
-    box-shadow: 0 18px 45px rgba(245, 158, 11, 0.28);
+    background: #f59e0b;
+    box-shadow: 0 18px 45px rgba(245, 158, 11, 0.24);
   }
 
   .acm-btn-primary:hover {
-    filter: brightness(1.05);
-    box-shadow: 0 20px 48px rgba(245, 158, 11, 0.32);
+    background: #d97706;
+    box-shadow: 0 20px 48px rgba(245, 158, 11, 0.28);
   }
 
   .acm-btn-secondary {

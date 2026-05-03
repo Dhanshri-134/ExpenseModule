@@ -1,12 +1,19 @@
 import { z } from "zod";
 import { getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
-import { insertActivityLog } from "@/lib/server/taskWorkflow";
+import { insertActivityLog, syncTaskStatus } from "@/lib/server/taskWorkflow";
 
 const TaskSubmissionSchema = z.object({
   taskAssignmentId: z.string().uuid(),
   workDescription: z.string().min(1),
-  photos: z.array(z.string().min(1)).max(8).default([]),
+  files: z.array(
+    z.object({
+      name: z.string().min(1),
+      type: z.string().optional().nullable(),
+      size: z.number().optional().nullable(),
+      dataUrl: z.string().min(1),
+    })
+  ).max(8).default([]),
   blocker: z.string().optional().nullable(),
 });
 
@@ -40,7 +47,8 @@ export default async function handler(req, res) {
       project_id: assignment.project_id,
       submitted_by_user_id: ctx.user.id,
       work_description: payload.workDescription,
-      photos: payload.photos,
+      photos: payload.files.map((file) => file.dataUrl),
+      files: payload.files,
       blocker: payload.blocker ?? null,
     })
     .select("id, created_at")
@@ -57,6 +65,7 @@ export default async function handler(req, res) {
     .eq("id", assignment.id);
 
   if (statusError) return sendError(res, 500, "task_assignment_status_failed", statusError.message);
+  await syncTaskStatus(ctx.admin, assignment.task_id);
 
   await insertActivityLog(ctx.admin, {
     company_id: ctx.company.id,

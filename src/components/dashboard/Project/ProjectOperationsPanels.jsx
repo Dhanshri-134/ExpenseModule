@@ -901,7 +901,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
               {useDetailedInspectionForm ? (
                 <>
                   <LabeledField label="Temperature Value">
-                    <input className={fieldClass()} inputMode="decimal" value={form.temperatureValue} onChange={(event) => setForm((current) => ({ ...current, temperatureValue: event.target.value }))} />
+                    <input type="number" min="-50" max="150" step="0.1" className={fieldClass()} value={form.temperatureValue} onChange={(event) => setForm((current) => ({ ...current, temperatureValue: event.target.value }))} />
                   </LabeledField>
                   <LabeledField label="Temperature Unit">
                     <select className={fieldClass()} value={form.temperatureUnit} onChange={(event) => setForm((current) => ({ ...current, temperatureUnit: event.target.value }))}>

@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import Modal from "@/components/dashboard/Modal";
 import { BusyButton, CompactListRow, DrilldownModal, StatusMetricButton } from "@/components/dashboard/DashboardUi";
 import { ProjectEstimatesPage, ProjectFieldReportsPage } from "@/components/dashboard/Project/ProjectOperationsPanels";
+import { TasksManagerPage as TaskModulePage } from "@/components/dashboard/task/TasksManagerPage";
 import PasswordInput from "@/components/shared/PasswordInput";
 import {
   InsightsIcon,
@@ -33,6 +34,13 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString();
+}
+
+function formatDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
 }
 
 function formatCompactNumber(value) {
@@ -705,6 +713,7 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
 export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
   const router = useRouter();
   const projects = useApi("/api/projects");
+  const clients = useApi("/api/clients");
   const [open, setOpen] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
   const [message, setMessage] = useState("");
@@ -726,6 +735,11 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
   });
 
   const projectList = projects.data?.projects ?? [];
+  const filterClientId = typeof router.query.clientId === "string" ? router.query.clientId : "";
+  const filteredClient = (clients.data?.clients ?? []).find((client) => client.id === filterClientId) || null;
+  const visibleProjects = filterClientId
+    ? projectList.filter((project) => project.client_id === filterClientId)
+    : projectList;
 
   function openCreate() {
     setEditingProject(null);
@@ -733,10 +747,10 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
       id: "",
       name: "",
       location: "",
-      clientName: "",
-      clientContact: "",
-      clientEmail: "",
-      clientAddress: "",
+      clientName: filteredClient?.name || "",
+      clientContact: filteredClient?.contact || "",
+      clientEmail: filteredClient?.email || "",
+      clientAddress: filteredClient?.address || "",
       startDate: "",
       endDate: "",
       contractValue: "",
@@ -816,20 +830,31 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
   return (
     <>
       <SectionHeader
-        title="Projects"
+        title={filteredClient ? `${filteredClient.name} Projects` : "Projects"}
         action={
-          canCreateProject ? (
-            <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
-              Create Project
-            </button>
-          ) : null
+          <div className="flex flex-wrap items-center gap-2">
+            {filteredClient ? (
+              <button
+                type="button"
+                onClick={() => router.push(`/${roleBase}/clients`)}
+                className="acm-btn acm-btn-secondary h-10 px-4"
+              >
+                Back to Clients
+              </button>
+            ) : null}
+            {canCreateProject ? (
+              <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
+                Create Project
+              </button>
+            ) : null}
+          </div>
         }
       />
 
       <InlineMessage error={projects.error || error} message={message} />
 
       <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {projectList.map((project) => (
+        {visibleProjects.map((project) => (
           <CompactListRow
             key={project.id}
             primary={project.name}
@@ -932,16 +957,16 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
         <form onSubmit={saveProject} className="grid gap-3">
           <FieldGroup title="Client Info">
             <LabeledField label="Client Name">
-              <input className={fieldClass()} value={form.clientName} onChange={(e) => setForm((prev) => ({ ...prev, clientName: e.target.value }))} />
+              <input className={fieldClass()} value={form.clientName} disabled={Boolean(filteredClient && !editingProject)} onChange={(e) => setForm((prev) => ({ ...prev, clientName: e.target.value }))} />
             </LabeledField>
             <LabeledField label="Client Contact">
-              <input className={fieldClass()} value={form.clientContact} onChange={(e) => setForm((prev) => ({ ...prev, clientContact: e.target.value }))} />
+              <input className={fieldClass()} value={form.clientContact} disabled={Boolean(filteredClient && !editingProject)} onChange={(e) => setForm((prev) => ({ ...prev, clientContact: e.target.value }))} />
             </LabeledField>
             <LabeledField label="Client Email">
-              <input className={fieldClass()} type="email" value={form.clientEmail} onChange={(e) => setForm((prev) => ({ ...prev, clientEmail: e.target.value }))} />
+              <input className={fieldClass()} type="email" value={form.clientEmail} disabled={Boolean(filteredClient && !editingProject)} onChange={(e) => setForm((prev) => ({ ...prev, clientEmail: e.target.value }))} />
             </LabeledField>
             <LabeledField label="Client Address">
-              <textarea className={fieldClass()} rows={3} value={form.clientAddress} onChange={(e) => setForm((prev) => ({ ...prev, clientAddress: e.target.value }))} />
+              <textarea className={fieldClass()} rows={3} value={form.clientAddress} disabled={Boolean(filteredClient && !editingProject)} onChange={(e) => setForm((prev) => ({ ...prev, clientAddress: e.target.value }))} />
             </LabeledField>
           </FieldGroup>
 
@@ -960,6 +985,458 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
             </LabeledField>
             <LabeledField label="Estimate Budget">
               <input className={fieldClass()} inputMode="decimal" value={form.contractValue} onChange={(e) => setForm((prev) => ({ ...prev, contractValue: e.target.value }))} />
+            </LabeledField>
+          </FieldGroup>
+          <BusyButton type="submit" busy={formBusy} className="acm-btn acm-btn-primary">
+            Save
+          </BusyButton>
+        </form>
+      </Modal>
+    </>
+  );
+}
+
+export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) {
+  const router = useRouter();
+  const leads = useApi("/api/leads");
+  const [open, setOpen] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [formBusy, setFormBusy] = useState(false);
+  const [convertBusyId, setConvertBusyId] = useState("");
+  const [selectedLead, setSelectedLead] = useState(null);
+  const [followUpMessage, setFollowUpMessage] = useState("");
+  const [followUpError, setFollowUpError] = useState("");
+  const [followUpBusy, setFollowUpBusy] = useState(false);
+  const [followUpForm, setFollowUpForm] = useState({
+    note: "",
+    nextFollowUpDate: "",
+    status: "pending",
+  });
+  const followUps = useApiQuery(
+    selectedLead ? `/api/lead-followups?leadId=${selectedLead.id}` : "",
+    { enabled: Boolean(selectedLead) }
+  );
+  const [form, setForm] = useState({
+    name: "",
+    address: "",
+    contact: "",
+    email: "",
+    followUpDate: "",
+    followUpNote: "",
+    followUpStatus: "pending",
+  });
+
+  const leadList = leads.data?.leads ?? [];
+
+  function openCreate() {
+    setForm({
+      name: "",
+      address: "",
+      contact: "",
+      email: "",
+      followUpDate: "",
+      followUpNote: "",
+      followUpStatus: "pending",
+    });
+    setOpen(true);
+  }
+
+  async function saveLead(e) {
+    e.preventDefault();
+    if (formBusy) return;
+
+    setError("");
+    setMessage("");
+    setFormBusy(true);
+
+    const res = await fetch("/api/leads", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(form),
+    });
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setError(json?.error || "lead_create_failed");
+      setFormBusy(false);
+      return;
+    }
+
+    setOpen(false);
+    setMessage("Lead created");
+    invalidateApiQuery("/api/leads");
+    invalidateApiQuery("/api/dashboard");
+    await leads.refresh();
+    setFormBusy(false);
+  }
+
+  async function convertLead(lead) {
+    if (lead.status === "converted" || convertBusyId) return;
+    setError("");
+    setMessage("");
+    setConvertBusyId(lead.id);
+
+    const res = await fetch("/api/lead", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: lead.id }),
+    });
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setError(json?.error || "lead_convert_failed");
+      setConvertBusyId("");
+      return;
+    }
+
+    setMessage("Lead converted to client");
+    invalidateApiQuery("/api/clients");
+    invalidateApiQuery("/api/leads");
+    await leads.refresh();
+    setConvertBusyId("");
+  }
+
+  async function saveFollowUp(e) {
+    e.preventDefault();
+    if (!selectedLead || followUpBusy) return;
+
+    setFollowUpMessage("");
+    setFollowUpError("");
+    setFollowUpBusy(true);
+
+    const res = await fetch("/api/lead-followups", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        leadId: selectedLead.id,
+        note: followUpForm.note,
+        nextFollowUpDate: followUpForm.nextFollowUpDate,
+        status: followUpForm.status,
+      }),
+    });
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setFollowUpError(json?.error || "lead_followup_create_failed");
+      setFollowUpBusy(false);
+      return;
+    }
+
+    setFollowUpForm({ note: "", nextFollowUpDate: "", status: "pending" });
+    setFollowUpMessage("Follow-up saved");
+    invalidateApiQuery("/api/leads");
+    await Promise.all([followUps.refresh(), leads.refresh()]);
+    setFollowUpBusy(false);
+  }
+
+  return (
+    <>
+      <SectionHeader
+        title="Leads"
+        action={
+          canCreateLead ? (
+            <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
+              Create Lead
+            </button>
+          ) : null
+        }
+      />
+
+      <div className="mb-4">
+        <button type="button" onClick={() => router.push(`/${roleBase}/followups`)} className="acm-btn acm-btn-secondary h-10 px-4">
+          Open Follow-up List
+        </button>
+      </div>
+
+      <InlineMessage error={leads.error || error} message={message} />
+
+      <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {leadList.map((lead) => (
+          <CompactListRow
+            key={lead.id}
+            primary={lead.name}
+            secondary={lead.status === "converted" ? "Converted Lead" : "Enquiry Lead"}
+            tertiary={`${lead.contact} | ${lead.email} | Next follow-up: ${formatDate(lead.nextFollowUpDate)}`}
+            onClick={() => {
+              setSelectedLead(lead);
+              setFollowUpMessage("");
+              setFollowUpError("");
+            }}
+            actions={
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setSelectedLead(lead);
+                    setFollowUpMessage("");
+                    setFollowUpError("");
+                  }}
+                  className="acm-btn acm-btn-secondary h-9 px-3 text-xs"
+                >
+                  Follow Ups
+                </button>
+                <BusyButton
+                  type="button"
+                  busy={convertBusyId === lead.id}
+                  disabled={lead.status === "converted"}
+                  className="acm-btn acm-btn-primary h-9 px-3 text-xs"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    convertLead(lead);
+                  }}
+                >
+                  {lead.status === "converted" ? "Converted" : "Convert to Client"}
+                </BusyButton>
+              </div>
+            }
+          />
+        ))}
+      </section>
+
+      <Modal open={open} title="Create Lead" onClose={() => setOpen(false)}>
+        <form onSubmit={saveLead} className="grid gap-3">
+          <FieldGroup title="Lead Info">
+            <LabeledField label="Client Name">
+              <input required className={fieldClass()} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Client Contact">
+              <input required className={fieldClass()} value={form.contact} onChange={(e) => setForm((prev) => ({ ...prev, contact: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Client Email">
+              <input required type="email" className={fieldClass()} value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Client Address">
+              <textarea required className={fieldClass()} rows={3} value={form.address} onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))} />
+            </LabeledField>
+          </FieldGroup>
+          <FieldGroup title="Create Follow-up">
+            <div className="grid gap-3 md:grid-cols-2">
+              <LabeledField label="Follow-up Date">
+                <input className={fieldClass()} type="date" value={form.followUpDate} onChange={(e) => setForm((prev) => ({ ...prev, followUpDate: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="Status">
+                <select className={fieldClass()} value={form.followUpStatus} onChange={(e) => setForm((prev) => ({ ...prev, followUpStatus: e.target.value }))}>
+                  <option value="pending">Pending</option>
+                  <option value="done">Done</option>
+                </select>
+              </LabeledField>
+            </div>
+            <LabeledField label="Note">
+              <textarea className={fieldClass()} rows={3} value={form.followUpNote} onChange={(e) => setForm((prev) => ({ ...prev, followUpNote: e.target.value }))} />
+            </LabeledField>
+          </FieldGroup>
+          <BusyButton type="submit" busy={formBusy} className="acm-btn acm-btn-primary">
+            Save
+          </BusyButton>
+        </form>
+      </Modal>
+
+      <Modal
+        open={Boolean(selectedLead)}
+        title={selectedLead ? `${selectedLead.name} Follow Ups` : "Follow Ups"}
+        onClose={() => {
+          setSelectedLead(null);
+          setFollowUpForm({ note: "", nextFollowUpDate: "", status: "pending" });
+        }}
+      >
+        <div className="space-y-3">
+          {selectedLead ? (
+            <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm text-[color:var(--acm-muted-fg)]">
+              {selectedLead.contact} | {selectedLead.email} | Status: {selectedLead.status}
+            </div>
+          ) : null}
+
+          <InlineMessage error={followUps.error || followUpError} message={followUpMessage} />
+
+          <form onSubmit={saveFollowUp} className="grid gap-3 rounded-[20px] border border-[color:var(--acm-border)] p-4">
+            <LabeledField label="Follow-up Note">
+              <textarea required className={fieldClass()} rows={3} value={followUpForm.note} onChange={(e) => setFollowUpForm((prev) => ({ ...prev, note: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Next Follow-up Date">
+              <input type="date" className={fieldClass()} value={followUpForm.nextFollowUpDate} onChange={(e) => setFollowUpForm((prev) => ({ ...prev, nextFollowUpDate: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Status">
+              <select className={fieldClass()} value={followUpForm.status} onChange={(e) => setFollowUpForm((prev) => ({ ...prev, status: e.target.value }))}>
+                <option value="pending">Pending</option>
+                <option value="done">Done</option>
+              </select>
+            </LabeledField>
+            <BusyButton type="submit" busy={followUpBusy} className="acm-btn acm-btn-primary">
+              Add Follow Up
+            </BusyButton>
+          </form>
+
+          <div className="space-y-3">
+            {(followUps.data?.followUps ?? []).map((item) => (
+              <div key={item.id} className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">
+                  {formatDateTime(item.created_at)}
+                </div>
+                <div className="mt-2 text-sm text-[color:var(--acm-fg)]">{item.note}</div>
+                <div className="mt-2 text-sm text-[color:var(--acm-muted-fg)]">
+                  Follow-up Date: {formatDate(item.next_follow_up_date)} | Status: {item.status ?? "-"}
+                </div>
+                <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">
+                  Created By: {item.createdBy?.name ?? "-"}
+                </div>
+              </div>
+            ))}
+            {!followUps.loading && !(followUps.data?.followUps ?? []).length ? (
+              <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-6 text-sm text-[color:var(--acm-muted-fg)]">
+                No follow-ups yet.
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </Modal>
+    </>
+  );
+}
+
+export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
+  const router = useRouter();
+  const clients = useApi("/api/clients");
+  const [open, setOpen] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [formBusy, setFormBusy] = useState(false);
+  const [form, setForm] = useState({
+    name: "",
+    address: "",
+    contact: "",
+    email: "",
+    followUpDate: "",
+    followUpNote: "",
+    followUpStatus: "pending",
+  });
+
+  const clientList = clients.data?.clients ?? [];
+
+  function openCreate() {
+    setForm({
+      name: "",
+      address: "",
+      contact: "",
+      email: "",
+      followUpDate: "",
+      followUpNote: "",
+      followUpStatus: "pending",
+    });
+    setOpen(true);
+  }
+
+  async function saveClient(e) {
+    e.preventDefault();
+    if (formBusy) return;
+
+    setError("");
+    setMessage("");
+    setFormBusy(true);
+
+    const res = await fetch("/api/clients", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(form),
+    });
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setError(json?.error || "client_create_failed");
+      setFormBusy(false);
+      return;
+    }
+
+    setOpen(false);
+    setMessage("Client created");
+    invalidateApiQuery("/api/clients");
+    await clients.refresh();
+    setFormBusy(false);
+  }
+
+  function openClientProjects(client) {
+    router.push({
+      pathname: `/${roleBase}/projects`,
+      query: { clientId: client.id },
+    });
+  }
+
+  return (
+    <>
+      <SectionHeader
+        title="Clients"
+        action={
+          canCreateClient ? (
+            <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
+              Create Client
+            </button>
+          ) : null
+        }
+      />
+
+      <InlineMessage error={clients.error || error} message={message} />
+
+      <div className="mb-4">
+        <button type="button" onClick={() => router.push(`/${roleBase}/followups`)} className="acm-btn acm-btn-secondary h-10 px-4">
+          Open Follow-up List
+        </button>
+      </div>
+
+      <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {clientList.map((client) => (
+          <CompactListRow
+            key={client.id}
+            primary={client.name}
+            secondary={`${client.contact} | ${client.email}`}
+            tertiary={`${client.address} | Projects: ${client.projectCount ?? 0}`}
+            onClick={() => openClientProjects(client)}
+            actions={
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openClientProjects(client);
+                }}
+                className="acm-btn acm-btn-primary h-9 px-3 text-xs"
+              >
+                Open Projects
+              </button>
+            }
+          />
+        ))}
+      </section>
+
+      <Modal open={open} title="Create Client" onClose={() => setOpen(false)}>
+        <form onSubmit={saveClient} className="grid gap-3">
+          <FieldGroup title="Client Info">
+            <LabeledField label="Client Name">
+              <input required className={fieldClass()} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Client Contact">
+              <input required className={fieldClass()} value={form.contact} onChange={(e) => setForm((prev) => ({ ...prev, contact: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Client Email">
+              <input required type="email" className={fieldClass()} value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Client Address">
+              <textarea required className={fieldClass()} rows={3} value={form.address} onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))} />
+            </LabeledField>
+          </FieldGroup>
+          <FieldGroup title="Create Follow-up">
+            <div className="grid gap-3 md:grid-cols-2">
+              <LabeledField label="Follow-up Date">
+                <input className={fieldClass()} type="date" value={form.followUpDate} onChange={(e) => setForm((prev) => ({ ...prev, followUpDate: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="Status">
+                <select className={fieldClass()} value={form.followUpStatus} onChange={(e) => setForm((prev) => ({ ...prev, followUpStatus: e.target.value }))}>
+                  <option value="pending">Pending</option>
+                  <option value="done">Done</option>
+                </select>
+              </LabeledField>
+            </div>
+            <LabeledField label="Note">
+              <textarea className={fieldClass()} rows={3} value={form.followUpNote} onChange={(e) => setForm((prev) => ({ ...prev, followUpNote: e.target.value }))} />
             </LabeledField>
           </FieldGroup>
           <BusyButton type="submit" busy={formBusy} className="acm-btn acm-btn-primary">
@@ -1921,31 +2398,42 @@ export function StaffManagerPage({
   );
 }
 
+function getTaskStatusBadgeClass(status) {
+  if (status === "approved") return "border-emerald-500/25 bg-emerald-500/10 text-emerald-700";
+  if (status === "submitted") return "border-sky-500/25 bg-sky-500/10 text-sky-700";
+  if (status === "rejected") return "border-rose-500/25 bg-rose-500/10 text-rose-700";
+  return "border-slate-300 bg-slate-100 text-slate-700";
+}
+
+function getTaskStatusLabel(status) {
+  if (!status) return "-";
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function getApprovalRoleLabel(role) {
+  return role === "manager" ? "Manager Approval" : role === "employee" ? "Employee Approval" : "-";
+}
+
 function buildTaskDetails(task) {
   return [
-    { label: "Task", value: task?.title },
-    { label: "Project", value: task?.project?.name || "-" },
-    { label: "Description", value: task?.description || "-" },
-    { label: "Start Date", value: formatDate(task?.start_date) },
-    { label: "End Date", value: formatDate(task?.end_date) },
-    { label: "Approval Role", value: task?.approval_role || "-" },
-    { label: "Approving Person", value: task?.approver?.name || task?.approver?.user_code || "-" },
+    { label: "Task", value: task?.title ?? "-" },
+    { label: "Project", value: task?.project?.name ?? "-" },
+    { label: "Description", value: task?.description ?? "-" },
+    { label: "Date Range", value: `${formatDate(task?.start_date)} - ${formatDate(task?.end_date)}` },
+    { label: "Status", value: getTaskStatusLabel(task?.status) },
+    { label: "Approving Person", value: task?.approver?.name ?? task?.approver?.user_code ?? "-" },
     {
-      label: "Assignments",
+      label: "Assigned Users",
       value:
         (task?.assignments ?? [])
-          .map((assignment) => `${assignment.assignee?.name || assignment.assignee?.user_code} (${assignment.status})`)
+          .map((assignment) => `${assignment.assignee?.name ?? assignment.assignee?.user_code ?? "-"} (${getTaskStatusLabel(assignment.status)})`)
           .join(", ") || "-",
     },
     {
-      label: "Approved By",
+      label: "Remarks",
       value:
         (task?.assignments ?? [])
-          .map((assignment) =>
-            assignment.latest_approval?.approved_by
-              ? `${assignment.latest_approval.approved_by.name || assignment.latest_approval.approved_by.user_code} (${assignment.latest_approval.approved_by_role})`
-              : null
-          )
+          .map((assignment) => assignment.latest_approval?.comment)
           .filter(Boolean)
           .join(", ") || "-",
     },
@@ -1959,434 +2447,14 @@ export function TasksManagerPage({
   fixedProjectId = "",
   currentUserId = "",
 }) {
-  const tasks = useApi(fixedProjectId ? `/api/tasks?projectId=${fixedProjectId}` : "/api/tasks");
-  const projects = useApi("/api/projects");
-  const staff = useApi("/api/staff");
-  const [tab, setTab] = useState("assigned");
-  const [open, setOpen] = useState(false);
-  const [submitOpen, setSubmitOpen] = useState(false);
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [editingTask, setEditingTask] = useState(null);
-  const [selectedTask, setSelectedTask] = useState(null);
-  const [selectedAssignment, setSelectedAssignment] = useState(null);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [form, setForm] = useState({
-    id: "",
-    projectId: fixedProjectId || "",
-    assigneeUserIds: [],
-    title: "",
-    description: "",
-    startDate: "",
-    endDate: "",
-    approvalRole: "manager",
-    approverUserId: "",
-  });
-  const [submitForm, setSubmitForm] = useState({
-    workDescription: "",
-    photos: [],
-    blocker: "",
-  });
-  const [reviewForm, setReviewForm] = useState({
-    action: "approved",
-    comment: "",
-  });
-  const [saveBusy, setSaveBusy] = useState(false);
-  const [deleteTaskId, setDeleteTaskId] = useState("");
-  const [submitBusy, setSubmitBusy] = useState(false);
-  const [reviewBusy, setReviewBusy] = useState(false);
-
-  const managers = staff.data?.staff?.managers ?? [];
-  const employees = staff.data?.staff?.employees ?? [];
-  const projectList = projects.data?.projects ?? [];
-  const availableProjects = fixedProjectId ? projectList.filter((project) => project.id === fixedProjectId) : projectList;
-  const activeProjectId = form.projectId || fixedProjectId || getProjectDefaultId(availableProjects);
-  const candidateAssignees = canAssignManagers ? [...managers, ...employees] : employees;
-  const availableAssignees = candidateAssignees.filter((item) => {
-    if (!activeProjectId) return true;
-    return (item.project_assignments ?? []).some((assignment) => assignment.project_id === activeProjectId);
-  });
-  const availableApprovers = getApproverOptions(staff.data?.staff ?? { managers: [], employees: [] }, activeProjectId, form.approvalRole);
-
-  const taskGroups = tasks.data ?? { tasks: [], assignedTasks: [], approvedByMe: [] };
-  const visibleTasks =
-    roleBase === "owner"
-      ? taskGroups.tasks
-      : tab === "approved"
-        ? taskGroups.approvedByMe
-        : taskGroups.assignedTasks;
-
-  function openCreate() {
-    setEditingTask(null);
-    setForm({
-      id: "",
-      projectId: fixedProjectId || "",
-      assigneeUserIds: [],
-      title: "",
-      description: "",
-      startDate: "",
-      endDate: "",
-      approvalRole: "manager",
-      approverUserId: "",
-    });
-    setOpen(true);
-  }
-
-  function openEdit(task) {
-    setEditingTask(task);
-    setForm({
-      id: task.id,
-      projectId: task.project_id,
-      assigneeUserIds: (task.assignments ?? []).map((assignment) => assignment.user_id),
-      title: task.title || "",
-      description: task.description || "",
-      startDate: task.start_date || "",
-      endDate: task.end_date || "",
-      approvalRole: task.approval_role || "manager",
-      approverUserId: task.approver_user_id || "",
-    });
-    setOpen(true);
-  }
-
-  async function saveTask(e) {
-    e.preventDefault();
-    if (saveBusy) return;
-    setError("");
-    setMessage("");
-    setSaveBusy(true);
-
-    const res = await fetch("/api/tasks", {
-      method: editingTask ? "PUT" : "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        ...form,
-        projectId: activeProjectId,
-      }),
-    });
-    const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(json?.error || "task_save_failed");
-      setSaveBusy(false);
-      return;
-    }
-    setMessage(editingTask ? "Task updated" : "Task created");
-    setOpen(false);
-    invalidateApiQuery("/api/tasks");
-    invalidateApiQuery("/api/dashboard");
-    await Promise.all([tasks.refresh(), staff.refresh()]);
-    setSaveBusy(false);
-  }
-
-  async function deleteTask(task) {
-    if (!window.confirm(`Delete task ${task.title}?`)) return;
-    if (deleteTaskId) return;
-    setError("");
-    setMessage("");
-    setDeleteTaskId(task.id);
-    const res = await fetch("/api/tasks", {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: task.id }),
-    });
-    const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(json?.error || "task_delete_failed");
-      setDeleteTaskId("");
-      return;
-    }
-    setMessage(`${task.title} deleted`);
-    invalidateApiQuery("/api/tasks");
-    invalidateApiQuery("/api/dashboard");
-    await tasks.refresh();
-    setDeleteTaskId("");
-  }
-
-  function openSubmit(assignment) {
-    setSelectedAssignment(assignment);
-    setSubmitForm({
-      workDescription: "",
-      photos: [],
-      blocker: "",
-    });
-    setSubmitOpen(true);
-  }
-
-  async function handlePhotoInput(files) {
-    const nextPhotos = await Promise.all(
-      Array.from(files).map(
-        (file) =>
-          new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
-            reader.onerror = () => reject(new Error(`Unable to read ${file.name}`));
-            reader.readAsDataURL(file);
-          })
-      )
-    );
-    setSubmitForm((prev) => ({ ...prev, photos: nextPhotos }));
-  }
-
-  async function submitTask(e) {
-    e.preventDefault();
-    if (!selectedAssignment) return;
-    if (submitBusy) return;
-    setError("");
-    setMessage("");
-    setSubmitBusy(true);
-    const res = await fetch("/api/task-submissions", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        taskAssignmentId: selectedAssignment.id,
-        workDescription: submitForm.workDescription,
-        photos: submitForm.photos,
-        blocker: submitForm.blocker || null,
-      }),
-    });
-    const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(json?.error || "task_submission_failed");
-      setSubmitBusy(false);
-      return;
-    }
-    setMessage("Task submitted");
-    setSubmitOpen(false);
-    invalidateApiQuery("/api/tasks");
-    invalidateApiQuery("/api/dashboard");
-    await tasks.refresh();
-    setSubmitBusy(false);
-  }
-
-  function openReview(task, assignment) {
-    setSelectedTask(task);
-    setSelectedAssignment(assignment);
-    setReviewForm({ action: "approved", comment: "" });
-    setReviewOpen(true);
-  }
-
-  async function submitReview(e) {
-    e.preventDefault();
-    if (!selectedAssignment) return;
-    if (reviewBusy) return;
-    setError("");
-    setMessage("");
-    setReviewBusy(true);
-    const res = await fetch("/api/task-approvals", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        taskAssignmentId: selectedAssignment.id,
-        action: reviewForm.action,
-        comment: reviewForm.comment || null,
-      }),
-    });
-    const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(json?.error || "task_review_failed");
-      setReviewBusy(false);
-      return;
-    }
-    setMessage(reviewForm.action === "approved" ? "Task approved" : "Task rejected");
-    setReviewOpen(false);
-    invalidateApiQuery("/api/tasks");
-    invalidateApiQuery("/api/dashboard");
-    await tasks.refresh();
-    setReviewBusy(false);
-  }
-
   return (
-    <>
-      <SectionHeader
-        title="Tasks"
-        action={
-          canCreateTask ? (
-            <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
-              Assign Task
-            </button>
-          ) : null
-        }
-      />
-
-      {roleBase !== "owner" ? (
-        <div className="mb-4 flex gap-2">
-          <button type="button" onClick={() => setTab("assigned")} className={`acm-btn ${tab === "assigned" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>
-            Assigned Tasks
-          </button>
-          <button type="button" onClick={() => setTab("approved")} className={`acm-btn ${tab === "approved" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>
-            Approved By Me
-          </button>
-        </div>
-      ) : null}
-
-      <InlineMessage error={tasks.error || error} message={message} />
-
-      <section className="mt-4 space-y-3">
-        {visibleTasks.map((task) => (
-          <CompactListRow
-            key={task.id}
-            primary={task.title}
-            secondary={`${task.project?.name || "-"} | ${task.approval_role || "-"}`}
-            tertiary={`${formatDate(task.start_date)} to ${formatDate(task.end_date)} | ${task.assignments?.length || 0} assignment(s)`}
-            onClick={() => setSelectedTask(task)}
-            actions={
-              <div className="flex flex-wrap gap-2">
-                {canCreateTask && (roleBase === "owner" || task.creator?.user_id === currentUserId) ? (
-                  <>
-                    <button type="button" onClick={(event) => { event.stopPropagation(); openEdit(task); }} className="acm-btn acm-btn-secondary h-9 px-3 text-xs">
-                      Edit
-                    </button>
-                    <BusyButton
-                      type="button"
-                      busy={deleteTaskId === task.id}
-                      className="acm-btn acm-btn-secondary h-9 px-3 text-xs"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        deleteTask(task);
-                      }}
-                    >
-                      Delete
-                    </BusyButton>
-                  </>
-                ) : null}
-                {(task.my_assignments ?? []).map((assignment) =>
-                  ["assigned", "rejected"].includes(assignment.status) ? (
-                    <button
-                      key={assignment.id}
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openSubmit(assignment);
-                      }}
-                      className="acm-btn acm-btn-primary h-9 px-3 text-xs"
-                    >
-                      {assignment.status === "rejected" ? "Resubmit" : "Submit"}
-                    </button>
-                  ) : null
-                )}
-                {task.can_approve
-                  ? (task.assignments ?? [])
-                      .filter((assignment) => assignment.status === "submitted")
-                      .map((assignment) => (
-                        <button
-                          key={`review-${assignment.id}`}
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openReview(task, assignment);
-                          }}
-                          className="acm-btn acm-btn-primary h-9 px-3 text-xs"
-                        >
-                          Review
-                        </button>
-                      ))
-                  : null}
-              </div>
-            }
-          />
-        ))}
-        {!visibleTasks.length ? (
-          <div className={cardClass("text-sm text-[color:var(--acm-muted-fg)]")}>
-            No tasks available in this workflow tab yet.
-          </div>
-        ) : null}
-      </section>
-
-      <ProfileModal
-        open={Boolean(selectedTask) && !reviewOpen}
-        title="Task Profile"
-        details={selectedTask ? buildTaskDetails(selectedTask) : []}
-        onClose={() => setSelectedTask(null)}
-      />
-
-      <Modal open={open} title={editingTask ? "Edit Task" : "Create Task"} onClose={() => setOpen(false)}>
-        <form onSubmit={saveTask} className="grid gap-3">
-          {!fixedProjectId ? (
-            <select className={fieldClass()} value={activeProjectId} onChange={(e) => setForm((prev) => ({ ...prev, projectId: e.target.value }))}>
-              <option value="">Project</option>
-              {availableProjects.map((project) => (
-                <option key={project.id} value={project.id}>{project.name}</option>
-              ))}
-            </select>
-          ) : null}
-          <input className={fieldClass()} placeholder="Task title" value={form.title} onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))} />
-          <textarea className={fieldClass()} placeholder="Description" value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} />
-          <input className={fieldClass()} type="date" value={form.startDate} onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))} />
-          <input className={fieldClass()} type="date" value={form.endDate} onChange={(e) => setForm((prev) => ({ ...prev, endDate: e.target.value }))} />
-          <select className={fieldClass()} value={form.approvalRole} onChange={(e) => setForm((prev) => ({ ...prev, approvalRole: e.target.value }))}>
-            <option value="manager">Manager Approval</option>
-            <option value="employee">Employee Approval</option>
-          </select>
-          <select className={fieldClass()} value={form.approverUserId} onChange={(e) => setForm((prev) => ({ ...prev, approverUserId: e.target.value }))}>
-            <option value="">Select Approving Person</option>
-            {availableApprovers.map((item) => (
-              <option key={item.user_id} value={item.user_id}>
-                {getTaskAssigneeLabel(item, activeProjectId)}
-              </option>
-            ))}
-          </select>
-          <select
-            multiple
-            className={fieldClass()}
-            value={form.assigneeUserIds}
-            onChange={(e) =>
-              setForm((prev) => ({
-                ...prev,
-                assigneeUserIds: Array.from(e.target.selectedOptions).map((option) => option.value),
-              }))
-            }
-          >
-            {availableAssignees.map((item) => (
-              <option key={item.user_id} value={item.user_id}>
-                {getTaskAssigneeLabel(item, activeProjectId)}
-              </option>
-            ))}
-          </select>
-          <div className="text-sm text-[color:var(--acm-muted-fg)]">
-            {availableAssignees.length ? "Only staff already assigned to this project are shown." : "No eligible project staff found for this task."}
-          </div>
-          <div className="text-sm text-[color:var(--acm-muted-fg)]">
-            {canAssignManagers ? "Owner can assign to managers and employees." : "Manager can assign to employees only."}
-          </div>
-          <BusyButton type="submit" busy={saveBusy} className="acm-btn acm-btn-primary">Save</BusyButton>
-        </form>
-      </Modal>
-
-      <Modal open={submitOpen} title="Submit Task" onClose={() => setSubmitOpen(false)}>
-        <form onSubmit={submitTask} className="grid gap-3">
-          <textarea className={fieldClass()} placeholder="Work description" value={submitForm.workDescription} onChange={(e) => setSubmitForm((prev) => ({ ...prev, workDescription: e.target.value }))} />
-          <input
-            className={fieldClass()}
-            type="file"
-            accept="image/*"
-            multiple
-            onChange={async (e) => {
-              if (!e.target.files?.length) return;
-              try {
-                await handlePhotoInput(e.target.files);
-              } catch (err) {
-                setError(err.message || "photo_read_failed");
-              }
-            }}
-          />
-          <div className="text-sm text-[color:var(--acm-muted-fg)]">
-            {submitForm.photos.length ? `${submitForm.photos.length} photo(s) ready` : "No photos selected"}
-          </div>
-          <textarea className={fieldClass()} placeholder="Blocker (optional)" value={submitForm.blocker} onChange={(e) => setSubmitForm((prev) => ({ ...prev, blocker: e.target.value }))} />
-          <BusyButton type="submit" busy={submitBusy} className="acm-btn acm-btn-primary">Submit</BusyButton>
-        </form>
-      </Modal>
-
-      <Modal open={reviewOpen} title="Review Submission" onClose={() => setReviewOpen(false)}>
-        <form onSubmit={submitReview} className="grid gap-3">
-          <select className={fieldClass()} value={reviewForm.action} onChange={(e) => setReviewForm((prev) => ({ ...prev, action: e.target.value }))}>
-            <option value="approved">Approve</option>
-            <option value="rejected">Reject</option>
-          </select>
-          <textarea className={fieldClass()} placeholder="Review comment" value={reviewForm.comment} onChange={(e) => setReviewForm((prev) => ({ ...prev, comment: e.target.value }))} />
-          <BusyButton type="submit" busy={reviewBusy} className="acm-btn acm-btn-primary">Save Review</BusyButton>
-        </form>
-      </Modal>
-    </>
+    <TaskModulePage
+      roleBase={roleBase}
+      canAssignManagers={canAssignManagers}
+      canCreateTask={canCreateTask}
+      fixedProjectId={fixedProjectId}
+      currentUserId={currentUserId}
+    />
   );
 }
 

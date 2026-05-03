@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
-import { canApproveTask, insertActivityLog } from "@/lib/server/taskWorkflow";
+import { canApproveTask, insertActivityLog, syncTaskStatus } from "@/lib/server/taskWorkflow";
 
 const TaskApprovalSchema = z.object({
   taskAssignmentId: z.string().uuid(),
@@ -76,6 +76,7 @@ export default async function handler(req, res) {
     .eq("id", assignment.id);
 
   if (assignmentUpdateError) return sendError(res, 500, "task_status_update_failed", assignmentUpdateError.message);
+  await syncTaskStatus(ctx.admin, assignment.task_id);
 
   await insertActivityLog(ctx.admin, {
     company_id: ctx.company.id,

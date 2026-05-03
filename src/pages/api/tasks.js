@@ -9,6 +9,7 @@ import {
   loadUserDirectory,
   normalizeProjectRole,
   PROJECT_ASSIGNABLE_ROLES,
+  syncTaskStatus,
 } from "@/lib/server/taskWorkflow";
 
 const ProjectScopedQuerySchema = z.object({
@@ -163,6 +164,7 @@ async function syncTaskAssignments(ctx, task, assigneeRows) {
 }
 
 function canEditOrDeleteTask(ctx, task) {
+  if (task.approver_user_id === ctx.user.id) return false;
   if (ctx.role === "owner") return true;
   return task.created_by === ctx.user.id;
 }
@@ -205,8 +207,9 @@ export default async function handler(req, res) {
           approval_role: payload.approvalRole,
           approver_user_id: approverUserId,
           created_by: ctx.user.id,
+          status: "assigned",
         })
-        .select("id, project_id, title, approval_role, approver_user_id")
+        .select("*")
         .single();
 
       if (error || !task) return sendError(res, 500, "task_create_failed", error?.message);
@@ -222,6 +225,7 @@ export default async function handler(req, res) {
       );
 
       if (assignmentError) return sendError(res, 500, "task_assignment_create_failed", assignmentError.message);
+      await syncTaskStatus(ctx.admin, task.id);
 
       const [{ data: project }, directory] = await Promise.all([
         ctx.admin
@@ -263,7 +267,7 @@ export default async function handler(req, res) {
     const payload = parsed.data;
     const { data: existingTask } = await ctx.admin
       .from("tasks")
-      .select("id, company_id, project_id, created_by")
+      .select("id, company_id, project_id, created_by, approver_user_id")
       .eq("id", payload.id)
       .maybeSingle();
 
@@ -288,11 +292,12 @@ export default async function handler(req, res) {
         })
         .eq("id", payload.id)
         .eq("company_id", ctx.company.id)
-        .select("id, project_id, title, approval_role, approver_user_id")
+        .select("*")
         .single();
 
       if (error || !task) return sendError(res, 500, "task_update_failed", error?.message);
       await syncTaskAssignments(ctx, task, assigneeRows);
+      await syncTaskStatus(ctx.admin, task.id);
       return sendOk(res, { task });
     } catch (error) {
       return sendError(res, 400, error.message, error.message);
@@ -305,7 +310,7 @@ export default async function handler(req, res) {
 
     const { data: task } = await ctx.admin
       .from("tasks")
-      .select("id, project_id, created_by")
+      .select("id, project_id, created_by, approver_user_id")
       .eq("id", parsed.data.id)
       .maybeSingle();
 

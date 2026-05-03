@@ -1,0 +1,99 @@
+
+> web@0.1.0 build
+> next build
+
+▲ Next.js 16.2.4 (Turbopack)
+- Environments: .env.local
+
+  Running TypeScript ...
+  Finished TypeScript in 375ms ...
+  Creating an optimized production build ...
+✓ Compiled successfully in 33.0s
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/4) ...
+  Generating static pages using 7 workers (1/4) 
+  Generating static pages using 7 workers (2/4) 
+  Generating static pages using 7 workers (3/4) 
+✓ Generating static pages using 7 workers (4/4) in 565ms
+  Finalizing page optimization ...
+
+Route (pages)
+┌ ○ / (318 ms)
+├   /_app
+├ ○ /404
+├ ƒ /api/activity-logs
+├ ƒ /api/auth/authorize
+├ ƒ /api/auth/diagnose-owner
+├ ƒ /api/auth/forgot-username
+├ ƒ /api/auth/resolve-login
+├ ƒ /api/clients
+├ ƒ /api/companies
+├ ƒ /api/dashboard
+├ ƒ /api/estimates
+├ ƒ /api/estimates/preview
+├ ƒ /api/field-reports
+├ ƒ /api/followups
+├ ƒ /api/lead
+├ ƒ /api/lead-followups
+├ ƒ /api/leads
+├ ƒ /api/me
+├ ƒ /api/project
+├ ƒ /api/project-assignments
+├ ƒ /api/projects
+├ ƒ /api/send-credentials
+├ ƒ /api/settings
+├ ƒ /api/staff
+├ ƒ /api/supabase/config
+├ ƒ /api/task-approvals
+├ ƒ /api/task-submissions
+├ ƒ /api/tasks
+├ ƒ /auth/callback
+├ ƒ /employee
+├ ƒ /employee/followups
+├ ƒ /employee/project/[id]
+├ ƒ /employee/project/[id]/estimates
+├ ƒ /employee/project/[id]/overview
+├ ƒ /employee/project/[id]/reports
+├ ƒ /employee/project/[id]/staff
+├ ƒ /employee/project/[id]/tasks
+├ ƒ /employee/projects
+├ ƒ /employee/settings
+├ ƒ /employee/tasks
+├ ƒ /login
+├ ƒ /login/[role]
+├ ƒ /login/employee
+├ ƒ /login/manager
+├ ƒ /login/owner
+├ ƒ /manager
+├ ƒ /manager/followups
+├ ƒ /manager/project/[id]
+├ ƒ /manager/project/[id]/estimates
+├ ƒ /manager/project/[id]/overview
+├ ƒ /manager/project/[id]/reports
+├ ƒ /manager/project/[id]/staff
+├ ƒ /manager/project/[id]/tasks
+├ ƒ /manager/projects
+├ ƒ /manager/settings
+├ ƒ /manager/tasks
+├ ƒ /owner
+├ ƒ /owner/clients
+├ ƒ /owner/followups
+├ ƒ /owner/leads
+├ ƒ /owner/project/[id]
+├ ƒ /owner/project/[id]/estimates
+├ ƒ /owner/project/[id]/expenses
+├ ƒ /owner/project/[id]/overview
+├ ƒ /owner/project/[id]/reports
+├ ƒ /owner/project/[id]/staff
+├ ƒ /owner/project/[id]/tasks
+├ ƒ /owner/projects
+├ ƒ /owner/settings
+├ ƒ /owner/staff
+├ ƒ /owner/tasks
+└ ○ /reset-password (303 ms)
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

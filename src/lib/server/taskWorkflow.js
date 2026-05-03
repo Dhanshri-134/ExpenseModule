@@ -27,6 +27,41 @@ export function canApproveTask(ctx, task) {
   );
 }
 
+export function deriveTaskStatus(assignments = []) {
+  if ((assignments ?? []).some((assignment) => assignment.status === "rejected")) return "rejected";
+  if ((assignments ?? []).length && (assignments ?? []).every((assignment) => assignment.status === "approved")) {
+    return "approved";
+  }
+  if ((assignments ?? []).some((assignment) => assignment.status === "submitted")) return "submitted";
+  return "assigned";
+}
+
+export async function syncTaskStatus(admin, taskId) {
+  const { data: assignments, error: assignmentError } = await admin
+    .from("task_assignments")
+    .select("status")
+    .eq("task_id", taskId);
+
+  if (assignmentError) {
+    throw new Error(assignmentError.message || "task_assignments_fetch_failed");
+  }
+
+  const status = deriveTaskStatus(assignments ?? []);
+  const { error } = await admin
+    .from("tasks")
+    .update({
+      status,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", taskId);
+
+  if (error) {
+    throw new Error(error.message || "task_status_sync_failed");
+  }
+
+  return status;
+}
+
 export async function loadUserDirectory(admin, companyId, userIds) {
   const dedupedUserIds = [...new Set((userIds ?? []).filter(Boolean))];
   if (!dedupedUserIds.length) return new Map();
@@ -131,7 +166,7 @@ export async function getTaskWorkspace(admin, ctx, options = {}) {
 
   let taskQuery = admin
     .from("tasks")
-    .select("id, company_id, project_id, title, description, start_date, end_date, approval_role, approver_user_id, created_by, created_at, updated_at")
+    .select("id, company_id, project_id, title, description, start_date, end_date, approval_role, approver_user_id, created_by, status, created_at, updated_at")
     .eq("company_id", ctx.company.id)
     .order("created_at", { ascending: false });
 
@@ -166,7 +201,7 @@ export async function getTaskWorkspace(admin, ctx, options = {}) {
         .in("task_id", taskIds),
       admin
         .from("task_submissions")
-        .select("id, task_assignment_id, task_id, project_id, submitted_by_user_id, work_description, photos, blocker, created_at")
+        .select("id, task_assignment_id, task_id, project_id, submitted_by_user_id, work_description, photos, files, blocker, created_at")
         .in("task_id", taskIds),
       admin
         .from("task_approvals")
@@ -205,6 +240,7 @@ export async function getTaskWorkspace(admin, ctx, options = {}) {
 
     return {
       ...task,
+      status: task.status || deriveTaskStatus(taskAssignments),
       project: projectMap.get(task.project_id) ?? null,
       creator: directory.get(task.created_by) ?? null,
       approver: task.approver_user_id ? directory.get(task.approver_user_id) ?? null : null,
@@ -220,6 +256,9 @@ export async function getTaskWorkspace(admin, ctx, options = {}) {
   return {
     tasks,
     assignedTasks: tasks.filter((task) => task.my_assignments.length > 0),
+    pendingApprovals: tasks.filter((task) =>
+      task.can_approve && (task.assignments ?? []).some((assignment) => assignment.status === "submitted")
+    ),
     approvedByMe: tasks.filter((task) =>
       task.assignments.some((assignment) => assignment.latest_approval?.approved_by_user_id === ctx.user.id)
     ),

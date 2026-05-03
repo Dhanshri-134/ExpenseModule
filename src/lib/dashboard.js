@@ -1,7 +1,9 @@
 import {
   AccentSparkIcon,
+  ClientsIcon,
   DashboardIcon,
   InsightsIcon,
+  LeadsIcon,
   ProjectsIcon,
   TeamIcon,
   CalendarIcon,
@@ -32,6 +34,9 @@ export const DASHBOARD_ROLE_META = {
 export const DASHBOARD_NAVIGATION = {
   owner: [
     { href: "/owner", label: "Overview", icon: DashboardIcon, match: /^\/owner$/ },
+    { href: "/owner/leads", label: "Leads", icon: LeadsIcon, match: /^\/owner\/leads$/ },
+    { href: "/owner/clients", label: "Clients", icon: ClientsIcon, match: /^\/owner\/clients$/ },
+    // { href: "/owner/followups", label: "Follow-ups", icon: CalendarIcon, match: /^\/owner\/followups$/ },
     {
       href: "/owner/projects",
       label: "Projects",
@@ -44,14 +49,18 @@ export const DASHBOARD_NAVIGATION = {
   ],
   manager: [
     { href: "/manager", label: "Overview", icon: DashboardIcon, match: /^\/manager$/ },
+    { href: "/owner/leads", label: "Leads", icon: LeadsIcon, match: /^\/manager\/leads$/ },
+    { href: "/owner/clients", label: "Clients", icon: ClientsIcon, match: /^\/manager\/clients$/ },
     { href: "/manager/projects", label: "Projects", icon: ProjectsIcon, match: /^\/manager\/projects/ },
     { href: "/manager/tasks", label: "Tasks", icon: InsightsIcon, match: /^\/manager\/tasks$/ },
+    // { href: "/manager/followups", label: "Follow-ups", icon: CalendarIcon, match: /^\/manager\/followups$/ },
     { href: "/manager/settings", label: "Profile", icon: SettingsIcon, match: /^\/manager\/settings$/ },
   ],
   employee: [
     { href: "/employee", label: "Overview", icon: DashboardIcon, match: /^\/employee$/ },
     { href: "/employee/projects", label: "Projects", icon: ProjectsIcon, match: /^\/employee\/projects$/ },
     { href: "/employee/tasks", label: "Tasks", icon: InsightsIcon, match: /^\/employee\/tasks$/ },
+    // { href: "/employee/followups", label: "Follow-ups", icon: CalendarIcon, match: /^\/employee\/followups$/ },
     { href: "/employee/settings", label: "Profile", icon: SettingsIcon, match: /^\/employee\/settings$/ },
   ],
 };
@@ -74,7 +83,7 @@ export function getProjectNavigation(roleBase, projectId) {
       { href: `${base}/overview`, label: "Overview", icon: DashboardIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/overview$`) },
       { href: `${base}/staff`, label: "Staff", icon: TeamIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/staff$`) },
       { href: `${base}/tasks`, label: "Tasks", icon: CalendarIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/tasks$`) },
-      { href: `${base}/estimates`, label: "Estimates", icon: ExpenseIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/estimates$`) },
+      // { href: `${base}/estimates`, label: "Estimates", icon: ExpenseIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/estimates$`) },
       { href: `${base}/reports`, label: "Field Reports", icon: ReportIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/reports$`) },
     ];
   }
@@ -83,7 +92,7 @@ export function getProjectNavigation(roleBase, projectId) {
     { href: `${base}/overview`, label: "Overview", icon: DashboardIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/overview$`) },
     { href: `${base}/staff`, label: "Staff", icon: TeamIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/staff$`) },
     { href: `${base}/tasks`, label: "Tasks", icon: CalendarIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/tasks$`) },
-    { href: `${base}/estimates`, label: "Estimates", icon: ExpenseIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/estimates$`) },
+    // { href: `${base}/estimates`, label: "Estimates", icon: ExpenseIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/estimates$`) },
     { href: `${base}/reports`, label: "Field Reports", icon: ReportIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/reports$`) },
   ];
 }

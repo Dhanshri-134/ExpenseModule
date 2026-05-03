@@ -31,7 +31,16 @@ export default async function handler(req, res) {
   });
 
   const visibleTasks = taskWorkspace.tasks ?? [];
-  const visibleAssignments = visibleTasks.flatMap((task) => task.assignments ?? []);
+  const visibleProjectIds = new Set(visibleProjects.map((project) => project.id));
+  const visibleProjectIdList = [...visibleProjectIds];
+  const { data: assignmentRows } = visibleProjectIdList.length
+    ? await ctx.admin
+        .from("task_assignments")
+        .select("id, status, created_at, user_id, assigned_by_user_id, project_id", { count: "exact" })
+        .in("project_id", visibleProjectIdList)
+    : { data: [] };
+
+  const visibleAssignments = assignmentRows ?? [];
   const myAssignments = visibleAssignments.filter((assignment) => assignment.user_id === ctx.user.id);
   const submittedForMyRole = visibleTasks.flatMap((task) =>
     task.approval_role === ctx.role && (!task.approver_user_id || task.approver_user_id === ctx.user.id)
@@ -47,7 +56,6 @@ export default async function handler(req, res) {
     (assignment) => assignment.assigned_by_user_id === ctx.user.id
   );
 
-  const visibleProjectIds = new Set(visibleProjects.map((project) => project.id));
   const visibleStaffUserIds = new Set(
     ctx.role === "owner"
       ? (companyUsers ?? []).map((item) => item.user_id)
