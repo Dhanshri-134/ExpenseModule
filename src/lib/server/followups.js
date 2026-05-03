@@ -13,11 +13,15 @@ export const FollowUpInputSchema = z.object({
   status: z.enum(FOLLOW_UP_STATUSES).default("pending"),
 });
 
-function normalizeFollowUpRow(row, createdByDirectory) {
+function normalizeFollowUpRow(row, createdByDirectory, referenceDirectory = new Map(), canModify = false) {
   const createdBy = row?.created_by ? createdByDirectory.get(row.created_by) ?? null : null;
+  const referenceKey = `${row?.ref_type}:${row?.ref_id}`;
+  const reference = referenceDirectory.get(referenceKey) ?? null;
 
   return {
     ...row,
+    refName: reference?.name ?? "-",
+    canModify,
     createdBy: createdBy
       ? {
           id: createdBy.user_id,
@@ -27,6 +31,25 @@ function normalizeFollowUpRow(row, createdByDirectory) {
         }
       : null,
   };
+}
+
+async function loadReferenceDirectory(ctx, rows) {
+  const referenceDirectory = new Map();
+  const leadIds = [...new Set(rows.filter((row) => row.ref_type === "lead").map((row) => row.ref_id))];
+  const clientIds = [...new Set(rows.filter((row) => row.ref_type === "client").map((row) => row.ref_id))];
+  const taskIds = [...new Set(rows.filter((row) => row.ref_type === "task").map((row) => row.ref_id))];
+
+  const [{ data: leads }, { data: clients }, { data: tasks }] = await Promise.all([
+    leadIds.length ? ctx.admin.from("leads").select("id, name").in("id", leadIds) : Promise.resolve({ data: [] }),
+    clientIds.length ? ctx.admin.from("clients").select("id, name").in("id", clientIds) : Promise.resolve({ data: [] }),
+    taskIds.length ? ctx.admin.from("tasks").select("id, title").in("id", taskIds) : Promise.resolve({ data: [] }),
+  ]);
+
+  (leads ?? []).forEach((lead) => referenceDirectory.set(`lead:${lead.id}`, { name: lead.name || "-" }));
+  (clients ?? []).forEach((client) => referenceDirectory.set(`client:${client.id}`, { name: client.name || "-" }));
+  (tasks ?? []).forEach((task) => referenceDirectory.set(`task:${task.id}`, { name: task.title || "-" }));
+
+  return referenceDirectory;
 }
 
 async function ensureReferenceAccess(ctx, refType, refId) {
@@ -91,8 +114,77 @@ export async function createFollowUp(ctx, payload) {
     throw new Error(error?.message || "followup_create_failed");
   }
 
-  const directory = await loadUserDirectory(ctx.admin, ctx.company.id, [data.created_by].filter(Boolean));
-  return normalizeFollowUpRow(data, directory);
+  const [directory, referenceDirectory] = await Promise.all([
+    loadUserDirectory(ctx.admin, ctx.company.id, [data.created_by].filter(Boolean)),
+    loadReferenceDirectory(ctx, [data]),
+  ]);
+
+  return normalizeFollowUpRow(data, directory, referenceDirectory, true);
+}
+
+async function loadFollowUpForMutation(ctx, followUpId) {
+  const { data, error } = await ctx.admin
+    .from("followups")
+    .select("*")
+    .eq("id", followUpId)
+    .eq("company_id", ctx.company.id)
+    .maybeSingle();
+
+  if (error || !data) {
+    throw new Error("followup_not_found");
+  }
+
+  await ensureReferenceAccess(ctx, data.ref_type, data.ref_id);
+
+  if (ctx.role !== "owner" && data.created_by !== ctx.user.id) {
+    throw new Error("forbidden");
+  }
+
+  return data;
+}
+
+export async function updateFollowUp(ctx, followUpId, payload) {
+  const existing = await loadFollowUpForMutation(ctx, followUpId);
+
+  const { data, error } = await ctx.admin
+    .from("followups")
+    .update({
+      date: payload.date,
+      note: payload.note,
+      status: payload.status ?? existing.status,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", followUpId)
+    .eq("company_id", ctx.company.id)
+    .select("*")
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message || "followup_update_failed");
+  }
+
+  const [directory, referenceDirectory] = await Promise.all([
+    loadUserDirectory(ctx.admin, ctx.company.id, [data.created_by].filter(Boolean)),
+    loadReferenceDirectory(ctx, [data]),
+  ]);
+
+  return normalizeFollowUpRow(data, directory, referenceDirectory, true);
+}
+
+export async function deleteFollowUp(ctx, followUpId) {
+  await loadFollowUpForMutation(ctx, followUpId);
+
+  const { error } = await ctx.admin
+    .from("followups")
+    .delete()
+    .eq("id", followUpId)
+    .eq("company_id", ctx.company.id);
+
+  if (error) {
+    throw new Error(error.message || "followup_delete_failed");
+  }
+
+  return { deleted: true };
 }
 
 export async function listFollowUps(ctx, options = {}) {
@@ -135,7 +227,17 @@ export async function listFollowUps(ctx, options = {}) {
   }
 
   const createdByIds = [...new Set(rows.map((row) => row.created_by).filter(Boolean))];
-  const directory = await loadUserDirectory(ctx.admin, ctx.company.id, createdByIds);
+  const [directory, referenceDirectory] = await Promise.all([
+    loadUserDirectory(ctx.admin, ctx.company.id, createdByIds),
+    loadReferenceDirectory(ctx, rows),
+  ]);
 
-  return rows.map((row) => normalizeFollowUpRow(row, directory));
+  return rows.map((row) =>
+    normalizeFollowUpRow(
+      row,
+      directory,
+      referenceDirectory,
+      ctx.role === "owner" || row.created_by === ctx.user.id
+    )
+  );
 }

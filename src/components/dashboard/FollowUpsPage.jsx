@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/router";
+import Modal from "@/components/dashboard/Modal";
+import { BusyButton } from "@/components/dashboard/DashboardUi";
 import { useApiQuery } from "@/lib/client/apiQuery";
 
 function formatDate(value) {
@@ -17,19 +19,117 @@ function getStatusClass(status) {
 }
 
 function getRefLabel(refType) {
-  if (refType === "lead") return "Enquiry";
-  if (refType === "client") return "Customer";
+  if (refType === "lead") return "Lead";
+  if (refType === "client") return "Client";
   if (refType === "task") return "Task";
   return "Follow-up";
+}
+
+function fieldClass(error = false) {
+  return `acm-input mt-0 ${error ? "border-rose-400 focus:border-rose-500 focus:ring-rose-200" : ""}`.trim();
 }
 
 export default function FollowUpsPage({ roleBase }) {
   const router = useRouter();
   const [activeFilter, setActiveFilter] = useState("today");
+  const [editingItem, setEditingItem] = useState(null);
+  const [deleteItem, setDeleteItem] = useState(null);
+  const [form, setForm] = useState({ id: "", date: "", note: "", status: "pending" });
+  const [formErrors, setFormErrors] = useState({});
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const query = activeFilter === "all" ? "/api/followups" : `/api/followups?filter=${activeFilter}`;
   const followUps = useApiQuery(query);
 
   const grouped = useMemo(() => followUps.data?.followUps ?? [], [followUps.data?.followUps]);
+
+  function openEdit(item) {
+    setEditingItem(item);
+    setFormErrors({});
+    setForm({
+      id: item.id,
+      date: item.date ?? "",
+      note: item.note ?? "",
+      status: item.status ?? "pending",
+    });
+  }
+
+  function validateForm() {
+    const nextErrors = {};
+    if (!form.date) nextErrors.date = "Date is required.";
+    if (!form.note.trim()) nextErrors.note = "Note is required.";
+    return nextErrors;
+  }
+
+  async function refreshList() {
+    await followUps.refresh();
+  }
+
+  async function saveFollowUp(event) {
+    event.preventDefault();
+    if (saveBusy) return;
+
+    const nextErrors = validateForm();
+    if (Object.keys(nextErrors).length) {
+      setFormErrors(nextErrors);
+      return;
+    }
+
+    setSaveBusy(true);
+    setError("");
+    setMessage("");
+
+    const res = await fetch("/api/followups", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: form.id,
+        date: form.date,
+        note: form.note.trim(),
+        status: form.status,
+      }),
+    });
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setError(json?.error || "followup_update_failed");
+      setSaveBusy(false);
+      return;
+    }
+
+    setMessage("Follow-up updated.");
+    setEditingItem(null);
+    setSaveBusy(false);
+    await refreshList();
+  }
+
+  async function confirmDelete() {
+    if (!deleteItem || deleteBusy) return;
+
+    setDeleteBusy(true);
+    setError("");
+    setMessage("");
+
+    const res = await fetch("/api/followups", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: deleteItem.id }),
+    });
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setError(json?.error || "followup_delete_failed");
+      setDeleteBusy(false);
+      return;
+    }
+
+    setMessage("Follow-up deleted.");
+    setDeleteBusy(false);
+    setDeleteItem(null);
+    await refreshList();
+  }
 
   return (
     <div className="space-y-4">
@@ -57,6 +157,7 @@ export default function FollowUpsPage({ roleBase }) {
             { key: "today", label: "Today" },
             { key: "upcoming", label: "Upcoming" },
             { key: "completed", label: "Completed" },
+            { key: "all", label: "All" },
           ].map((item) => (
             <button
               key={item.key}
@@ -70,8 +171,13 @@ export default function FollowUpsPage({ roleBase }) {
         </div>
       </div>
 
-      {followUps.error ? (
-        <div className="acm-message-error">{followUps.error}</div>
+      {followUps.error || error ? (
+        <div className="acm-message-error">{followUps.error || error}</div>
+      ) : null}
+      {message ? (
+        <div className="rounded-xl border border-[color:var(--acm-accent-border)] bg-[color:var(--acm-accent-soft)] px-4 py-3 text-sm text-[color:var(--acm-accent-strong)]">
+          {message}
+        </div>
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -85,7 +191,10 @@ export default function FollowUpsPage({ roleBase }) {
                 <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">
                   {getRefLabel(item.ref_type)}
                 </div>
-                <div className="mt-2 text-lg font-bold text-[color:var(--acm-fg)]">{formatDate(item.date)}</div>
+                <div className="mt-2 text-lg font-bold text-[color:var(--acm-fg)]">
+                  {item.ref_type === "lead" ? item.refName : item.refName}
+                </div>
+                <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{formatDate(item.date)}</div>
               </div>
               <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${getStatusClass(item.status)}`}>
                 {item.status ?? "-"}
@@ -99,6 +208,17 @@ export default function FollowUpsPage({ roleBase }) {
               <div>Email: {item.createdBy?.email ?? "-"}</div>
               <div>Created At: {formatDate(item.created_at)}</div>
             </div>
+
+            {item.canModify ? (
+              <div className="mt-4 flex gap-2">
+                <button type="button" onClick={() => openEdit(item)} className="acm-btn acm-btn-secondary h-10 px-4">
+                  Edit
+                </button>
+                <button type="button" onClick={() => setDeleteItem(item)} className="acm-btn acm-btn-secondary h-10 px-4">
+                  Delete
+                </button>
+              </div>
+            ) : null}
           </div>
         ))}
       </div>
@@ -108,6 +228,53 @@ export default function FollowUpsPage({ roleBase }) {
           No follow-ups found for this filter.
         </div>
       ) : null}
+
+      <Modal open={Boolean(editingItem)} title="Edit Follow-up" onClose={() => setEditingItem(null)} maxWidth="max-w-xl">
+        <form onSubmit={saveFollowUp} className="grid gap-4">
+          <label className="grid gap-2">
+            <span className="acm-field-label">Reference</span>
+            <input className={fieldClass()} value={editingItem?.refName ?? "-"} readOnly />
+          </label>
+          <label className="grid gap-2">
+            <span className="acm-field-label">Date</span>
+            <input type="date" className={fieldClass(Boolean(formErrors.date))} value={form.date} onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))} />
+            {formErrors.date ? <span className="text-sm text-rose-700">{formErrors.date}</span> : null}
+          </label>
+          <label className="grid gap-2">
+            <span className="acm-field-label">Status</span>
+            <select className={fieldClass()} value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}>
+              <option value="pending">Pending</option>
+              <option value="done">Done</option>
+            </select>
+          </label>
+          <label className="grid gap-2">
+            <span className="acm-field-label">Note</span>
+            <textarea className={fieldClass(Boolean(formErrors.note))} rows={4} value={form.note} onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))} />
+            {formErrors.note ? <span className="text-sm text-rose-700">{formErrors.note}</span> : null}
+          </label>
+          <div className="flex justify-end">
+            <BusyButton type="submit" busy={saveBusy} className="acm-btn acm-btn-primary h-10 px-5">
+              Save Changes
+            </BusyButton>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal open={Boolean(deleteItem)} title="Delete Follow-up" onClose={() => setDeleteItem(null)} maxWidth="max-w-lg">
+        <div className="space-y-5">
+          <p className="text-sm text-[color:var(--acm-fg)]">
+            Delete the follow-up for <span className="font-semibold">{deleteItem?.refName ?? "-"}</span>?
+          </p>
+          <div className="flex justify-end gap-3">
+            <button type="button" onClick={() => setDeleteItem(null)} className="acm-btn acm-btn-secondary h-10 px-4">
+              Cancel
+            </button>
+            <BusyButton type="button" busy={deleteBusy} onClick={confirmDelete} className="acm-btn acm-btn-primary h-10 px-4">
+              Delete
+            </BusyButton>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
