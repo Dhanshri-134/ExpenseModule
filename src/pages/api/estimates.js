@@ -3,12 +3,21 @@ import { getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
 import { estimateToCsv } from "@/lib/projectModules";
 import { loadUserDirectory } from "@/lib/server/taskWorkflow";
+import { extractCompanyAssetMetadata } from "@/lib/server/companyAssets";
 import {
   buildEstimateComputation,
   composeEstimateRecord,
   loadEstimateGraph,
   persistEstimateGraph,
 } from "@/lib/server/estimating/estimateEngine";
+
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "8mb",
+    },
+  },
+};
 
 const JsonRecordSchema = z.record(z.string(), z.any()).optional().default({});
 
@@ -376,7 +385,7 @@ export default async function handler(req, res) {
           .maybeSingle();
 
         if (company) {
-          const companyMetadata = company.metadata || {};
+          const companyMetadata = extractCompanyAssetMetadata(ctx.admin, company.metadata);
           enrichedEstimate.summary = enrichedEstimate.summary || {};
           const existingMeta = enrichedEstimate.summary.documentMeta || {};
           
@@ -388,10 +397,10 @@ export default async function handler(req, res) {
               contactEmail: company.email,
               contactPhone: company.contact,
               logoText: companyMetadata.logoText || company.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 3),
-              logoDataUrl: companyMetadata.logoDataUrl,
-              signatureDataUrl: companyMetadata.signatureDataUrl,
+              logoDataUrl: companyMetadata.logoUrl,
+              signatureDataUrl: companyMetadata.signatureUrl,
               signatureName: companyMetadata.signatureName,
-              stampDataUrl: companyMetadata.stampDataUrl,
+              stampDataUrl: companyMetadata.stampUrl,
               stampLabel: companyMetadata.stampLabel,
               ...existingMeta.company,
             },
@@ -404,7 +413,7 @@ export default async function handler(req, res) {
           "Content-Disposition",
           `${disposition === "inline" ? "inline" : "attachment"}; filename="estimate-${enrichedEstimate.estimate_number}.pdf"`
         );
-        res.status(200).send(estimateToPdfBuffer(enrichedEstimate));
+        res.status(200).send(await estimateToPdfBuffer(enrichedEstimate));
         return;
       }
 

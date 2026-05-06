@@ -3,6 +3,7 @@ import { z } from "zod";
 import { invalidateAuthUsersCache } from "@/lib/server/authUsers";
 import { getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
+import { extractCompanyAssetMetadata, persistCompanyAsset } from "@/lib/server/companyAssets";
 
 export const config = {
   api: {
@@ -70,7 +71,7 @@ export default async function handler(req, res) {
       .eq("id", ctx.company.id)
       .maybeSingle();
 
-    const companyMetadata = company?.metadata && typeof company.metadata === "object" ? company.metadata : {};
+    const companyMetadata = extractCompanyAssetMetadata(ctx.admin, company?.metadata);
 
     return sendOk(res, {
       profile: {
@@ -92,10 +93,13 @@ export default async function handler(req, res) {
             address: company.address || "",
             contact: company.contact || "",
             email: company.email || "",
-            logoDataUrl: companyMetadata.logoDataUrl || "",
-            signatureDataUrl: companyMetadata.signatureDataUrl || "",
+            logoDataUrl: companyMetadata.logoUrl || "",
+            logoPath: companyMetadata.logoPath || "",
+            signatureDataUrl: companyMetadata.signatureUrl || "",
+            signaturePath: companyMetadata.signaturePath || "",
             signatureName: companyMetadata.signatureName || person?.name || ctx.user.user_metadata?.full_name || "",
-            stampDataUrl: companyMetadata.stampDataUrl || "",
+            stampDataUrl: companyMetadata.stampUrl || "",
+            stampPath: companyMetadata.stampPath || "",
             stampLabel: companyMetadata.stampLabel || company.name || "",
           }
         : null,
@@ -202,11 +206,46 @@ export default async function handler(req, res) {
     }
 
     if (ctx.role === "owner" && payload.company) {
+      const { data: currentCompany } = await ctx.admin
+        .from("companies")
+        .select("metadata")
+        .eq("id", ctx.company.id)
+        .maybeSingle();
+
+      const currentMetadata = extractCompanyAssetMetadata(ctx.admin, currentCompany?.metadata);
+      const [logoAsset, signatureAsset, stampAsset] = await Promise.all([
+        persistCompanyAsset(ctx.admin, {
+          companyId: ctx.company.id,
+          assetName: "logo",
+          value: payload.company.logoDataUrl || "",
+          existingPath: currentMetadata.logoPath || "",
+        }),
+        persistCompanyAsset(ctx.admin, {
+          companyId: ctx.company.id,
+          assetName: "signature",
+          value: payload.company.signatureDataUrl || "",
+          existingPath: currentMetadata.signaturePath || "",
+        }),
+        persistCompanyAsset(ctx.admin, {
+          companyId: ctx.company.id,
+          assetName: "stamp",
+          value: payload.company.stampDataUrl || "",
+          existingPath: currentMetadata.stampPath || "",
+        }),
+      ]);
+
       const companyMetadata = {
-        logoDataUrl: payload.company.logoDataUrl || "",
-        signatureDataUrl: payload.company.signatureDataUrl || "",
+        ...currentMetadata,
+        logoPath: logoAsset.path || "",
+        logoUrl: logoAsset.url || "",
+        logoDataUrl: logoAsset.url || "",
+        signaturePath: signatureAsset.path || "",
+        signatureUrl: signatureAsset.url || "",
+        signatureDataUrl: signatureAsset.url || "",
         signatureName: payload.company.signatureName || payload.name,
-        stampDataUrl: payload.company.stampDataUrl || "",
+        stampPath: stampAsset.path || "",
+        stampUrl: stampAsset.url || "",
+        stampDataUrl: stampAsset.url || "",
         stampLabel: payload.company.stampLabel || payload.company.name,
       };
 

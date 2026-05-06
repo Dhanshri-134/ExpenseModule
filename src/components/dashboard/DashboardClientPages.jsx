@@ -2555,9 +2555,12 @@ export function SettingsPage() {
     contact: settings.data?.company?.contact || "",
     email: settings.data?.company?.email || "",
     logoDataUrl: settings.data?.company?.logoDataUrl || "",
+    logoPath: settings.data?.company?.logoPath || "",
     signatureDataUrl: settings.data?.company?.signatureDataUrl || "",
+    signaturePath: settings.data?.company?.signaturePath || "",
     signatureName: settings.data?.company?.signatureName || settings.data?.profile?.name || "",
     stampDataUrl: settings.data?.company?.stampDataUrl || "",
+    stampPath: settings.data?.company?.stampPath || "",
     stampLabel: settings.data?.company?.stampLabel || settings.data?.company?.name || "",
   };
 
@@ -2573,9 +2576,12 @@ export function SettingsPage() {
         contact: settings.data.company.contact || "",
         email: settings.data.company.email || "",
         logoDataUrl: settings.data.company.logoDataUrl || "",
+        logoPath: settings.data.company.logoPath || "",
         signatureDataUrl: settings.data.company.signatureDataUrl || "",
+        signaturePath: settings.data.company.signaturePath || "",
         signatureName: settings.data.company.signatureName || settings.data?.profile?.name || "",
         stampDataUrl: settings.data.company.stampDataUrl || "",
+        stampPath: settings.data.company.stampPath || "",
         stampLabel: settings.data.company.stampLabel || settings.data.company.name || "",
       };
 

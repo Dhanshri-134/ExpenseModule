@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { BusyButton, CompactListRow } from "@/components/dashboard/DashboardUi";
 import { ChevronRightIcon } from "@/components/dashboard/icons";
@@ -74,6 +74,17 @@ function formatApiError(json, fallback) {
   if (typeof json?.detail === "string" && json.detail.trim()) return json.detail;
   if (typeof json?.error === "string" && json.error.trim()) return json.error;
   return fallback;
+}
+
+function parseApiResponseText(text) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return null;
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return { detail: trimmed };
+  }
 }
 
 function isValidEmail(value) {
@@ -324,34 +335,60 @@ function calculateLabor(entry) {
 
 function calculateMaterial(entry) {
   const quantity = toNumber(entry.quantity);
-  const cost = quantity * toNumber(entry.unitRate);
+  const wasteQty = quantity * toPercent(entry.wastePercent);
+  const unitRate = toNumber(entry.unitRate);
+  const cost = quantity * unitRate;
   const freight = toNumber(entry.freight);
-  const subtotal = cost + freight;
-  const taxAmount = subtotal * toPercent(entry.taxPercent);
+  const costWithFreight = cost + freight;
+  const taxAmount = costWithFreight * toPercent(entry.taxPercent);
   return {
-    subtotal,
+    wasteQty,
+    unitRate,
+    cost,
+    freight,
+    costWithFreight,
+    subtotal: costWithFreight,
     taxAmount,
-    total: subtotal + taxAmount,
+    total: costWithFreight + taxAmount,
   };
 }
 
 function calculateEquipment(entry) {
-  const cost = toNumber(entry.quantity) * Math.max(toNumber(entry.rentalDays), 1) * toNumber(entry.unitRate);
+  const quantity = toNumber(entry.quantity);
+  const rentalDays = Math.max(toNumber(entry.rentalDays), 1);
+  const unitRate = toNumber(entry.unitRate);
+  const cost = quantity * rentalDays * unitRate;
   const freight = toNumber(entry.freight);
   const fuel = (cost + freight) * toPercent(entry.fuelPercent);
-  const subtotal = cost + freight + fuel;
-  const taxAmount = subtotal * toPercent(entry.taxPercent);
+  const costWithFreight = cost + freight;
+  const costWithFuel = costWithFreight + fuel;
+  const taxAmount = costWithFuel * toPercent(entry.taxPercent);
   return {
-    subtotal,
+    quantity,
+    rentalDays,
+    unitRate,
+    cost,
+    freight,
+    fuel,
+    costWithFreight,
+    costWithFuel,
+    subtotal: costWithFuel,
     taxAmount,
-    total: subtotal + taxAmount,
+    total: costWithFuel + taxAmount,
   };
 }
 
 function calculateOverhead(entry) {
-  const cost = toNumber(entry.quantity) * Math.max(toNumber(entry.days), 1) * toNumber(entry.unitRate);
+  const quantity = toNumber(entry.quantity);
+  const days = Math.max(toNumber(entry.days), 1);
+  const unitRate = toNumber(entry.unitRate);
+  const cost = quantity * unitRate * days;
   const taxAmount = cost * toPercent(entry.taxPercent);
   return {
+    quantity,
+    days,
+    unitRate,
+    cost,
     subtotal: cost,
     taxAmount,
     total: cost + taxAmount,
@@ -693,6 +730,16 @@ function MetricCard({ label, value, tone = "default", note }) {
   );
 }
 
+function FormulaGrid({ items = [] }) {
+  return (
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      {items.map((item) => (
+        <MetricCard key={item.label} label={item.label} value={item.value} note={item.note} tone={item.tone || "default"} />
+      ))}
+    </div>
+  );
+}
+
 function StatusPill({ status }) {
   return (
     <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold capitalize ${statusTone(status)}`}>
@@ -768,6 +815,29 @@ function EstimatePreviewCard({ form, selectedTemplate, totals }) {
           <div className="mt-1 flex items-center justify-between text-sm opacity-70"><span>Valid Until</span><span>{formatDate(form.validUntil)}</span></div>
         </div>
       </div>
+
+      <div className="mt-6 grid gap-4 md:grid-cols-2">
+        <div className="rounded-[20px] border border-black/8 p-4" style={{ background: palette.surface }}>
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] opacity-65">{form.signatureLabel || "Signature"}</div>
+          <div className="mt-3 flex min-h-[88px] items-end justify-center rounded-[16px] bg-white/80 p-3">
+            {form.signatureDataUrl ? (
+              <img src={form.signatureDataUrl} alt="Signature" className="max-h-[72px] w-full object-contain" />
+            ) : (
+              <span className="text-sm opacity-60">{form.signatureName || "No signature"}</span>
+            )}
+          </div>
+        </div>
+        <div className="rounded-[20px] border border-black/8 p-4" style={{ background: palette.surface }}>
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] opacity-65">Stamp</div>
+          <div className="mt-3 flex min-h-[88px] items-end justify-center rounded-[16px] bg-white/80 p-3">
+            {form.stampDataUrl ? (
+              <img src={form.stampDataUrl} alt="Stamp" className="max-h-[72px] w-full object-contain" />
+            ) : (
+              <span className="text-sm opacity-60">{form.stampLabel || "No stamp"}</span>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -820,6 +890,7 @@ function SectionTable({
   datalistOptions,
   collapsed,
   onToggle,
+  renderDetails,
 }) {
   const derivedRows = rows.map((row) =>
     sectionKey === "laborEntries"
@@ -860,30 +931,39 @@ function SectionTable({
                 {rows.map((row, index) => {
                   const derived = derivedRows[index];
                   return (
-                    <tr key={row.id} className="border-t border-[color:var(--acm-border)] align-top">
-                      {columns.map((column) => (
-                        <td key={column.key} className="px-1 py-1">
-                          <TableCellInput
-                            value={row[column.key]}
-                            list={column.list ? datalistId : undefined}
-                            type={column.type || "text"}
-                            placeholder={column.placeholder}
-                            onChange={(event) => onChange(row.id, column.key, event.target.value)}
-                            onKeyDown={onKeyDown}
-                          />
+                    <Fragment key={row.id}>
+                      <tr className="border-t border-[color:var(--acm-border)] align-top">
+                        {columns.map((column) => (
+                          <td key={column.key} className="px-1 py-1">
+                            <TableCellInput
+                              value={row[column.key]}
+                              list={column.list ? datalistId : undefined}
+                              type={column.type || "text"}
+                              placeholder={column.placeholder}
+                              onChange={(event) => onChange(row.id, column.key, event.target.value)}
+                              onKeyDown={onKeyDown}
+                            />
+                          </td>
+                        ))}
+                        <td className="px-2 py-3 text-sm font-semibold text-[color:var(--acm-fg)]">{formatCurrency(derived.total)}</td>
+                        <td className="px-2 py-2 text-right">
+                          {rows.length > 1 ? (
+                            <button type="button" onClick={() => onRemove(row.id)} className="rounded-full px-3 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50">
+                              Remove
+                            </button>
+                          ) : (
+                            <span className="px-3 py-1 text-xs text-[color:var(--acm-muted-fg)]">{index + 1}</span>
+                          )}
                         </td>
-                      ))}
-                      <td className="px-2 py-3 text-sm font-semibold text-[color:var(--acm-fg)]">{formatCurrency(derived.total)}</td>
-                      <td className="px-2 py-2 text-right">
-                        {rows.length > 1 ? (
-                          <button type="button" onClick={() => onRemove(row.id)} className="rounded-full px-3 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50">
-                            Remove
-                          </button>
-                        ) : (
-                          <span className="px-3 py-1 text-xs text-[color:var(--acm-muted-fg)]">{index + 1}</span>
-                        )}
-                      </td>
-                    </tr>
+                      </tr>
+                      {renderDetails ? (
+                        <tr className="border-t border-[color:var(--acm-border)]/60">
+                          <td colSpan={columns.length + 2} className="px-2 pb-3 pt-1">
+                            {renderDetails(row, derived)}
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -952,12 +1032,16 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const companyDetails = useMemo(() => {
     const company = settingsQuery.data?.company || null;
     const metadata = company?.metadata && typeof company.metadata === "object" ? company.metadata : {};
-    const name = company?.name || "Your Company";
+    const name =
+      String(company?.name || metadata.name || profile?.name || "Your Company").trim() || "Your Company";
+    const address = String(company?.address || metadata.address || profile?.address || "").trim();
+    const email = String(company?.email || metadata.email || profile?.email || "").trim();
+    const phone = String(company?.contact || metadata.contact || metadata.phone || profile?.mobile || "").trim();
     return {
       name,
-      address: company?.address || profile?.address || "",
-      email: company?.email || profile?.email || "",
-      phone: company?.contact || profile?.mobile || "",
+      address,
+      email,
+      phone,
       logoText: companyInitials(name),
       logoDataUrl: company?.logoDataUrl || metadata.logoDataUrl || "",
       signatureDataUrl: company?.signatureDataUrl || metadata.signatureDataUrl || "",
@@ -1604,11 +1688,12 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       headers: { "content-type": "application/json" },
       body: JSON.stringify(nextPayload),
     });
-    const json = await res.json().catch(() => null);
+    const responseText = await res.text().catch(() => "");
+    const json = parseApiResponseText(responseText);
     setBusy(false);
 
     if (!res.ok) {
-      setError(formatApiError(json, "Unable to save estimate."));
+      setError(formatApiError(json, `Unable to save estimate.${responseText ? ` ${String(responseText).slice(0, 220)}` : ""}`));
       return false;
     }
 
@@ -1765,7 +1850,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                         <div key={rate.id} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
                           <input className={inputClass()} placeholder="Rate name" value={rate.name} onChange={(event) => updateTemplateRate(rate.id, "name", event.target.value)} />
                           <input className={inputClass()} placeholder="Rate value (%)" value={rate.value} onChange={(event) => updateTemplateRate(rate.id, "value", event.target.value)} />
-                          <button type="button" onClick={() => removeTemplateRate(rate.id)} className="flex h-11 w-11 items-center justify-center rounded-[14px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] text-lg font-bold text-rose-600">×</button>
+                          <button type="button" onClick={() => removeTemplateRate(rate.id)} className="flex h-11 w-11 items-center justify-center rounded-[14px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] text-lg font-bold text-rose-600">Ã—</button>
                         </div>
                       ))}
                     </div>
@@ -1788,7 +1873,21 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
               </div>
               </form>
 
-              <EstimatePreviewCard form={{ ...form, companyName: companyDetails.name, companyAddress: companyDetails.address, companyLogoText: companyDetails.logoText, companyLogoUrl: companyDetails.logoDataUrl }} selectedTemplate={{ configuration: normalizeTemplateConfiguration(templateForm.configuration) }} totals={uiTotals} />
+              <EstimatePreviewCard
+                form={{
+                  ...form,
+                  companyName: companyDetails.name,
+                  companyAddress: companyDetails.address,
+                  companyLogoText: companyDetails.logoText,
+                  companyLogoUrl: companyDetails.logoDataUrl,
+                  signatureDataUrl: companyDetails.signatureDataUrl,
+                  signatureName: companyDetails.signatureName,
+                  stampDataUrl: companyDetails.stampDataUrl,
+                  stampLabel: companyDetails.stampLabel,
+                }}
+                selectedTemplate={{ configuration: normalizeTemplateConfiguration(templateForm.configuration) }}
+                totals={uiTotals}
+              />
             </div>
           </section>
           {message ? <div className="rounded-[18px] border border-[color:var(--acm-accent-border)] bg-[color:var(--acm-accent-soft)] px-4 py-3 text-sm text-[color:var(--acm-accent-strong)]">{message}</div> : null}
@@ -1873,42 +1972,87 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
                       <div className="mb-4 text-lg font-bold">Estimate Details</div>
                       <div className="grid gap-4">
-                        <LabeledInput label="Select the Template">
-                          <select className={inputClass()} value={form.templateId || selectedTemplate?.id || ""} onChange={(event) => updateEstimate("templateId", event.target.value)}>
-                            {templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
-                          </select>
-                        </LabeledInput>
-                        <div className="grid gap-4 md:grid-cols-4">
-                        <LabeledInput label="Title">
-                          <input className={inputClass()} value={form.title} onChange={(event) => updateEstimate("title", event.target.value)} />
-                        </LabeledInput>
-                        <LabeledInput label="Date">
-                          <input type="date" className={inputClass()} value={form.estimateDate} onChange={(event) => updateEstimate("estimateDate", event.target.value)} />
-                        </LabeledInput>
-                        <LabeledInput label="Valid Until">
-                          <input type="date" className={inputClass()} value={form.validUntil} onChange={(event) => updateEstimate("validUntil", event.target.value)} />
-                        </LabeledInput>
-                        <LabeledInput label="Customer">
-                          <select className={inputClass()} value={form.clientId} onChange={(event) => updateEstimate("clientId", event.target.value)}>
-                            <option value="">Select a customer</option>
-                            {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-                          </select>
-                        </LabeledInput>
-                        <LabeledInput label="Customer Email">
-                          <input className={inputClass()} value={form.customerEmail} onChange={(event) => updateEstimate("customerEmail", event.target.value)} />
-                        </LabeledInput>
-                        <LabeledInput label="Customer Phone">
-                          <input className={inputClass()} value={form.customerPhone} onChange={(event) => updateEstimate("customerPhone", event.target.value)} />
-                        </LabeledInput>
-                        <div className="md:col-span-2">
-                          <LabeledInput label="Customer Address">
-                            <textarea className={inputClass("min-h-[96px]")} value={form.customerAddress} onChange={(event) => updateEstimate("customerAddress", event.target.value)} />
+                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                          <LabeledInput label="Estimate Title">
+                            <input className={inputClass()} value={form.title} onChange={(event) => updateEstimate("title", event.target.value)} />
+                          </LabeledInput>
+                          <LabeledInput label="Estimate Date">
+                            <input type="date" className={inputClass()} value={form.estimateDate} onChange={(event) => updateEstimate("estimateDate", event.target.value)} />
+                          </LabeledInput>
+                          <LabeledInput label="Valid Until">
+                            <input type="date" className={inputClass()} value={form.validUntil} onChange={(event) => updateEstimate("validUntil", event.target.value)} />
+                          </LabeledInput>
+                          <LabeledInput label="Customer">
+                            <select className={inputClass()} value={form.clientId} onChange={(event) => updateEstimate("clientId", event.target.value)}>
+                              <option value="">Select customer</option>
+                              {clients.map((client) => (
+                                <option key={client.id} value={client.id}>{client.name || client.email || "Customer"}</option>
+                              ))}
+                            </select>
+                          </LabeledInput>
+                          <LabeledInput label="Template">
+                            <select className={inputClass()} value={form.templateId || selectedTemplate?.id || ""} onChange={(event) => updateEstimate("templateId", event.target.value)}>
+                              <option value="">Default template</option>
+                              {templates.map((template) => (
+                                <option key={template.id} value={template.id}>{template.name}</option>
+                              ))}
+                            </select>
                           </LabeledInput>
                         </div>
+
+                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                          <LabeledInput label="Customer Name">
+                            <input className={inputClass()} value={form.customerName} onChange={(event) => updateEstimate("customerName", event.target.value)} />
+                          </LabeledInput>
+                          <LabeledInput label="Customer Email">
+                            <input className={inputClass()} value={form.customerEmail} onChange={(event) => updateEstimate("customerEmail", event.target.value)} />
+                          </LabeledInput>
+                          <LabeledInput label="Customer Phone">
+                            <input className={inputClass()} value={form.customerPhone} onChange={(event) => updateEstimate("customerPhone", event.target.value)} />
+                          </LabeledInput>
+                          <LabeledInput label="Customer Address">
+                            <input className={inputClass()} value={form.customerAddress} onChange={(event) => updateEstimate("customerAddress", event.target.value)} />
+                          </LabeledInput>
                         </div>
-                      </div>
-                    </div>
-                  </div>
+
+                        <div className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
+                          <div className="mb-4 text-sm font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Auto Calculations</div>
+                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                            <LabeledInput label="Overhead %">
+                              <input className={inputClass()} value={form.overheadPercent} onChange={(event) => updateEstimate("overheadPercent", event.target.value)} />
+                            </LabeledInput>
+                            <LabeledInput label="Profit %">
+                              <input className={inputClass()} value={form.profitPercent} onChange={(event) => updateEstimate("profitPercent", event.target.value)} />
+                            </LabeledInput>
+                            <LabeledInput label="Commission %">
+                              <input className={inputClass()} value={form.commissionPercent} onChange={(event) => updateEstimate("commissionPercent", event.target.value)} />
+                            </LabeledInput>
+                            <LabeledInput label="Risk %">
+                              <input className={inputClass()} value={form.riskPercent} onChange={(event) => updateEstimate("riskPercent", event.target.value)} />
+                            </LabeledInput>
+                            <LabeledInput label="Inflation %">
+                              <input className={inputClass()} value={form.inflationRate} onChange={(event) => updateEstimate("inflationRate", event.target.value)} />
+                            </LabeledInput>
+                            <LabeledInput label="Escalation Years">
+                              <input className={inputClass()} value={form.escalationYears} onChange={(event) => updateEstimate("escalationYears", event.target.value)} />
+                            </LabeledInput>
+                            <LabeledInput label="Discount Type">
+                              <select className={inputClass()} value={form.discountType} onChange={(event) => updateEstimate("discountType", event.target.value)}>
+                                <option value="percent">Percent</option>
+                                <option value="fixed">Fixed Amount</option>
+                              </select>
+                            </LabeledInput>
+                            <LabeledInput label="Discount Value">
+                              <input className={inputClass()} value={form.discountValue} onChange={(event) => updateEstimate("discountValue", event.target.value)} />
+                            </LabeledInput>
+                            <LabeledInput label="Shipping Charge">
+                              <input className={inputClass()} value={form.shippingCharge} onChange={(event) => updateEstimate("shippingCharge", event.target.value)} />
+                            </LabeledInput>
+                            <LabeledInput label="Additional Charges">
+                              <input className={inputClass()} value={form.additionalCharges} onChange={(event) => updateEstimate("additionalCharges", event.target.value)} />
+                            </LabeledInput>
+                          </div>
+                        </div>
 
                   <div className="space-y-5">
                     {form.costLines.map((line, lineIndex) => {
@@ -1931,31 +2075,186 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                             </div>
                           </div>
 
-                          <div className="mt-4 overflow-x-auto">
-                            <table className="min-w-full border-separate border-spacing-0 overflow-hidden rounded-[20px] border border-[color:var(--acm-border)]">
-                              <thead>
-                                <tr className="bg-[color:var(--acm-surface-2)] text-left text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
-                                  <th className="px-4 py-3">Labor</th>
-                                  <th className="px-4 py-3">Material</th>
-                                  <th className="px-4 py-3">Equipment</th>
-                                  <th className="px-4 py-3">Overhead</th>
-                                  <th className="px-4 py-3">Total</th>
-                                  <th className="px-4 py-3">Rows</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                <tr className="text-sm text-[color:var(--acm-fg)]">
-                                  <td className="border-t border-[color:var(--acm-border)] px-4 py-4">{formatCurrency(lineSummary.laborCost)}</td>
-                                  <td className="border-t border-[color:var(--acm-border)] px-4 py-4">{formatCurrency(lineSummary.materialCost)}</td>
-                                  <td className="border-t border-[color:var(--acm-border)] px-4 py-4">{formatCurrency(lineSummary.equipmentCost)}</td>
-                                  <td className="border-t border-[color:var(--acm-border)] px-4 py-4">{formatCurrency(lineSummary.overheadCost)}</td>
-                                  <td className="border-t border-[color:var(--acm-border)] px-4 py-4 font-bold">{formatCurrency(lineSummary.total)}</td>
-                                  <td className="border-t border-[color:var(--acm-border)] px-4 py-4 text-[color:var(--acm-muted-fg)]">
-                                    L {lineSummary.laborCount} | M {lineSummary.materialCount} | E {lineSummary.equipmentCount} | O {lineSummary.overheadCount}
-                                  </td>
-                                </tr>
-                              </tbody>
-                            </table>
+                          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                            <MetricCard label="Labor" value={formatCurrency(lineSummary.laborCost)} />
+                            <MetricCard label="Material" value={formatCurrency(lineSummary.materialCost)} />
+                            <MetricCard label="Equipment" value={formatCurrency(lineSummary.equipmentCost)} />
+                            <MetricCard label="Overhead" value={formatCurrency(lineSummary.overheadCost)} />
+                            <MetricCard label="Line Total" value={formatCurrency(lineSummary.total)} tone="accent" />
+                          </div>
+
+                          <div className="mt-4 space-y-4">
+                            <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)]">
+                              <button type="button" onClick={() => toggleSection(line.id, "laborEntries")} className="flex w-full items-center justify-between px-4 py-4 text-left">
+                                <div>
+                                  <div className="text-lg font-bold">Labor</div>
+                                  <div className="text-sm text-[color:var(--acm-muted-fg)]">Classification, wage, rates, crew counts, and target/prevail calculations</div>
+                                </div>
+                                <ChevronRightIcon className={`h-5 w-5 transition ${collapsedSections[`${line.id}:laborEntries`] ? "" : "rotate-90"}`} />
+                              </button>
+                              {!collapsedSections[`${line.id}:laborEntries`] ? (
+                                <div className="border-t border-[color:var(--acm-border)] p-4">
+                                  <div className="space-y-4">
+                                    {line.laborEntries.map((entry, entryIndex) => {
+                                      const derived = calculateLabor(entry);
+                                      return (
+                                        <div key={entry.id} className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
+                                          <div className="mb-4 flex items-center justify-between">
+                                            <div className="text-sm font-bold">Labor Entry {entryIndex + 1}</div>
+                                            {line.laborEntries.length > 1 ? <button type="button" onClick={() => removeEntry(line.id, "laborEntries", entry.id)} className="text-xs font-semibold text-rose-600">Remove Labor</button> : null}
+                                          </div>
+                                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                                            <LabeledInput label="Labor Item"><input list={`labor-options-${line.id}`} className={inputClass()} value={entry.title} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "title", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Classification"><select className={inputClass()} value={entry.classification} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "classification", event.target.value)}><option value="">Select classification</option>{laborClassificationOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></LabeledInput>
+                                            <LabeledInput label="Base Wage ($)"><input className={inputClass()} value={entry.baseWage} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "baseWage", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Tax (%)"><input className={inputClass()} value={entry.taxPercent} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "taxPercent", event.target.value)} /></LabeledInput>
+                                          </div>
+                                          <div className="mt-4 rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
+                                            <div className="flex items-center justify-between">
+                                              <div className="text-sm font-bold">Rates</div>
+                                              <button type="button" onClick={() => addRate(line.id, entry.id)} className="acm-btn acm-btn-secondary h-9 px-3">Add Rate</button>
+                                            </div>
+                                            <div className="mt-3 space-y-3">
+                                              {(entry.rates ?? []).map((rate) => (
+                                                <div key={rate.id} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                                                  <input list={`labor-rate-options-${line.id}`} className={inputClass()} placeholder="Rate name" value={rate.name} onChange={(event) => updateRate(line.id, entry.id, rate.id, "name", event.target.value)} />
+                                                  <input className={inputClass()} placeholder="Rate value (%)" value={rate.value} onChange={(event) => updateRate(line.id, entry.id, rate.id, "value", event.target.value)} />
+                                                  <button type="button" onClick={() => removeRate(line.id, entry.id, rate.id)} className="flex h-10 w-10 items-center justify-center rounded-[14px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] text-lg font-bold text-rose-600">×</button>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                                            <LabeledInput label="Straight Time Hours"><input className={inputClass()} value={entry.stHours} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "stHours", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Straight Time Rate"><input className={inputClass()} value={entry.stRate} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "stRate", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Overtime Hours"><input className={inputClass()} value={entry.otHours} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "otHours", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Overtime Rate"><input className={inputClass()} value={entry.otRate} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "otRate", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="ST Persons"><input className={inputClass()} value={entry.straightTimePersons} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "straightTimePersons", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="ST Days"><input className={inputClass()} value={entry.straightTimeDays} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "straightTimeDays", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="OT Persons"><input className={inputClass()} value={entry.overtimePersons} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "overtimePersons", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="OT Days"><input className={inputClass()} value={entry.overtimeDays} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "overtimeDays", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Target Wage ($)"><input className={inputClass()} value={entry.targetWage} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "targetWage", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Prevail Wage ($)"><input className={inputClass()} value={entry.prevailWage} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "prevailWage", event.target.value)} /></LabeledInput>
+                                          </div>
+                                          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                                            <FormulaCard label="Total Amount" value={formatCurrency(derived.total)} note="(Straight Time Hours x Rate) + (Overtime Hours x Rate)" tone="accent" />
+                                            <FormulaCard label="Target Pay" value={formatCurrency(toNumber(entry.stHours) * toNumber(entry.targetWage))} note="Straight Time Hours x Target Wage" />
+                                            <FormulaCard label="Prevail Pay" value={formatCurrency(toNumber(entry.stHours) * toNumber(entry.prevailWage))} note="Straight Time Hours x Prevail Wage" />
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                  <datalist id={`labor-options-${line.id}`}>{suggestionLibrary.labor.map((option) => <option key={option.label} value={option.label} />)}</datalist>
+                                  <datalist id={`labor-rate-options-${line.id}`}>{laborRateDefaultOptions.map((option) => <option key={`${option.name}-${option.value}`} value={option.name} />)}</datalist>
+                                  <div className="mt-4 flex justify-end">
+                                    <button type="button" onClick={() => addEntry(line.id, "laborEntries")} className="acm-btn acm-btn-secondary h-10 px-4">Add Other Labor</button>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+
+                            <SectionTable
+                              title="Materials"
+                              sectionKey="materialEntries"
+                              rows={line.materialEntries}
+                              columns={[
+                                { key: "code", label: "Code" },
+                                { key: "description", label: "Description", list: true },
+                                { key: "quantity", label: "Quantity" },
+                                { key: "uom", label: "UOM" },
+                                { key: "wastePercent", label: "Waste %" },
+                                { key: "unitRate", label: "Unit Rate" },
+                                { key: "freight", label: "Freight" },
+                                { key: "taxPercent", label: "Tax %" },
+                              ]}
+                              onChange={(rowId, key, value) => updateEntry(line.id, "materialEntries", rowId, key, value)}
+                              onAdd={() => addEntry(line.id, "materialEntries")}
+                              onRemove={(rowId) => removeEntry(line.id, "materialEntries", rowId)}
+                              onKeyDown={handleGridKeyDown}
+                              datalistId={`material-options-${line.id}`}
+                              datalistOptions={suggestionLibrary.material}
+                              collapsed={Boolean(collapsedSections[`${line.id}:materialEntries`])}
+                              onToggle={() => toggleSection(line.id, "materialEntries")}
+                              renderDetails={(row, derived) => (
+                                <FormulaGrid
+                                  items={[
+                                    { label: "Waste Qty", value: derived.wasteQty.toFixed(2), note: "Quantity x Waste %" },
+                                    { label: "Cost", value: formatCurrency(derived.cost), note: "Quantity x Unit Rate" },
+                                    { label: "Cost w/ Freight", value: formatCurrency(derived.costWithFreight), note: "Cost + Freight" },
+                                    { label: "Cost w/ Tax", value: formatCurrency(derived.taxAmount), note: "Tax % x Cost w/ Freight" },
+                                    { label: "Total", value: formatCurrency(derived.total), note: "Cost w/ Freight + Cost w/ Tax", tone: "accent" },
+                                  ]}
+                                />
+                              )}
+                            />
+
+                            <SectionTable
+                              title="Equipment"
+                              sectionKey="equipmentEntries"
+                              rows={line.equipmentEntries}
+                              columns={[
+                                { key: "code", label: "Code" },
+                                { key: "description", label: "Description", list: true },
+                                { key: "quantity", label: "Quantity" },
+                                { key: "rentalDays", label: "Rental Days" },
+                                { key: "unitRate", label: "Unit Rate" },
+                                { key: "freight", label: "Freight" },
+                                { key: "fuelPercent", label: "Fuel %" },
+                                { key: "taxPercent", label: "Tax %" },
+                              ]}
+                              onChange={(rowId, key, value) => updateEntry(line.id, "equipmentEntries", rowId, key, value)}
+                              onAdd={() => addEntry(line.id, "equipmentEntries")}
+                              onRemove={(rowId) => removeEntry(line.id, "equipmentEntries", rowId)}
+                              onKeyDown={handleGridKeyDown}
+                              datalistId={`equipment-options-${line.id}`}
+                              datalistOptions={suggestionLibrary.equipment}
+                              collapsed={Boolean(collapsedSections[`${line.id}:equipmentEntries`])}
+                              onToggle={() => toggleSection(line.id, "equipmentEntries")}
+                              renderDetails={(row, derived) => (
+                                <FormulaGrid
+                                  items={[
+                                    { label: "Cost", value: formatCurrency(derived.cost), note: "Quantity x Rental Days x Unit Rate" },
+                                    { label: "Cost w/ Freight", value: formatCurrency(derived.costWithFreight), note: "Cost + Freight" },
+                                    { label: "Cost w/ Fuel", value: formatCurrency(derived.costWithFuel), note: "Fuel % x Cost w/ Freight + Cost w/ Freight" },
+                                    { label: "Cost w/ Tax", value: formatCurrency(derived.taxAmount), note: "Tax % x Cost w/ Fuel" },
+                                    { label: "Total", value: formatCurrency(derived.total), note: "Cost w/ Fuel + Cost w/ Tax", tone: "accent" },
+                                  ]}
+                                />
+                              )}
+                            />
+
+                            <SectionTable
+                              title="Overheads"
+                              sectionKey="overheadEntries"
+                              rows={line.overheadEntries}
+                              columns={[
+                                { key: "code", label: "Code" },
+                                { key: "description", label: "Description", list: true },
+                                { key: "quantity", label: "Quantity" },
+                                { key: "uom", label: "UOM" },
+                                { key: "unitRate", label: "Unit Rate" },
+                                { key: "days", label: "Days" },
+                                { key: "taxPercent", label: "Tax %" },
+                              ]}
+                              onChange={(rowId, key, value) => updateEntry(line.id, "overheadEntries", rowId, key, value)}
+                              onAdd={() => addEntry(line.id, "overheadEntries")}
+                              onRemove={(rowId) => removeEntry(line.id, "overheadEntries", rowId)}
+                              onKeyDown={handleGridKeyDown}
+                              datalistId={`overhead-options-${line.id}`}
+                              datalistOptions={suggestionLibrary.overhead}
+                              collapsed={Boolean(collapsedSections[`${line.id}:overheadEntries`])}
+                              onToggle={() => toggleSection(line.id, "overheadEntries")}
+                              renderDetails={(row, derived) => (
+                                <FormulaGrid
+                                  items={[
+                                    { label: "Cost", value: formatCurrency(derived.cost), note: "Quantity x Unit Rate x Days" },
+                                    { label: "Cost w/ Tax", value: formatCurrency(derived.taxAmount), note: "Cost x Tax %" },
+                                    { label: "Total", value: formatCurrency(derived.total), note: "Cost + Cost w/ Tax", tone: "accent" },
+                                  ]}
+                                />
+                              )}
+                            />
                           </div>
                         </div>
                       );
@@ -1970,12 +2269,6 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
                       <div className="mb-4 text-lg font-bold">Notes & Terms</div>
                       <div className="grid gap-4 md:grid-cols-2">
-                        <LabeledInput label="Overhead %">
-                          <input className={inputClass()} value={form.overheadPercent} onChange={(event) => updateEstimate("overheadPercent", event.target.value)} />
-                        </LabeledInput>
-                        <LabeledInput label="Profit %">
-                          <input className={inputClass()} value={form.profitPercent} onChange={(event) => updateEstimate("profitPercent", event.target.value)} />
-                        </LabeledInput>
                         <LabeledInput label="Notes">
                           <textarea className={inputClass("min-h-[94px]")} value={form.notes} onChange={(event) => updateEstimate("notes", event.target.value)} />
                         </LabeledInput>
@@ -2010,6 +2303,9 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                   </div>
                 </div>
               </div>
+              </div>
+              </div>
+              </div>
             </section>
           </div>
         </section>
@@ -2019,3 +2315,4 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
 }
 
 export default EstimateDashboardPage;
+

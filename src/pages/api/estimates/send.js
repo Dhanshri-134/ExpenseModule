@@ -77,7 +77,7 @@ export default async function handler(req, res) {
   const recipientEmail = customer.email || enrichedEstimate.client?.email || "";
   if (!recipientEmail) return sendError(res, 400, "customer_email_required");
 
-  const pdfBuffer = estimateToPdfBuffer(enrichedEstimate);
+  const pdfBuffer = await estimateToPdfBuffer(enrichedEstimate);
   const subject = `${enrichedEstimate.title || "Estimate"} from ${company.name || ctx.company.name}`;
   const text = [
     `Hello ${customer.name || enrichedEstimate.client?.name || "Customer"},`,

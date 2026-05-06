@@ -3,6 +3,14 @@ import { getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
 import { buildEstimateComputation } from "@/lib/server/estimating/estimateEngine";
 
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "8mb",
+    },
+  },
+};
+
 const PreviewPayloadSchema = z.object({
   projectId: z.string().uuid().optional(),
   clientId: z.string().uuid().optional(),

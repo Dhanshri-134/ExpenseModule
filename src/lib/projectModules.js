@@ -1,3 +1,5 @@
+import { PDFDocument, rgb } from "pdf-lib";
+
 function normalizeNumber(value) {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -513,19 +515,22 @@ function buildPdfDocument(estimate) {
   drawWrappedText(commands, terms, page.margin + 14, y - 36, page.width - page.margin * 2 - 28, 9, 12);
 
   y -= 102;
-  drawText(commands, signatureLabel, page.margin, y, 10);
-  if (signatureName) {
-    drawText(commands, signatureName, page.margin + 10, y - 12, 13);
-  }
-  commands.push(`${pdfColor(muted)} RG`);
-  commands.push("1 w");
-  commands.push(`${page.margin} ${y - 18} m ${page.margin + 210} ${y - 18} l S`);
-  if (stampLabel) {
-    drawRect(commands, page.margin + 220, y - 42, 110, 40, null, accent, 1);
-    drawText(commands, stampLabel.slice(0, 22), page.margin + 232, y - 24, 9);
-  }
-  drawText(commands, "Date", page.margin + 290, y, 10);
-  commands.push(`${page.margin + 290} ${y - 18} m ${page.margin + 430} ${y - 18} l S`);
+  
+  // commands.push(`${pdfColor(muted)} RG`);
+  // commands.push("1 w");
+  // commands.push(`${page.margin} ${y - 18} m ${page.margin + 210} ${y - 18} l S`);
+  // if (stampLabel) {
+  //   drawRect(commands, page.width - 150, y - 42, 110, 40, null, accent, 1);
+
+  // drawText(
+  //   commands,
+  //   stampLabel.slice(0, 22),
+  //   page.width - 138,
+  //   y - 24,
+  //   9
+  // );  }
+  // drawText(commands, "Date", page.margin + 290, y, 10);
+  // commands.push(`${page.margin + 290} ${y - 18} m ${page.margin + 430} ${y - 18} l S`);
 
   closePage();
 
@@ -575,7 +580,7 @@ function buildPdfDocument(estimate) {
   return pages;
 }
 
-export function estimateToPdfBuffer(estimate) {
+function estimateToRawPdfBuffer(estimate) {
   const pages = buildPdfDocument(estimate);
   const objects = [];
   const pageIds = [];
@@ -615,6 +620,164 @@ export function estimateToPdfBuffer(estimate) {
 
   pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
   return Buffer.from(pdf, "binary");
+}
+
+function decodeDataUrl(value) {
+  const match = String(value || "").match(/^data:(.+?);base64,(.+)$/);
+  if (!match) return null;
+
+  return {
+    mimeType: match[1],
+    bytes: Buffer.from(match[2], "base64"),
+  };
+}
+
+function isPngBytes(bytes) {
+  return (
+    bytes?.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  );
+}
+
+function isJpegBytes(bytes) {
+  return bytes?.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+}
+
+function isSvgBytes(bytes) {
+  const text = Buffer.from(bytes ?? []).toString("utf8", 0, Math.min(bytes?.length ?? 0, 256)).trimStart();
+  return text.startsWith("<svg") || text.startsWith("<?xml");
+}
+
+async function loadPdfImageSource(value) {
+  const source = String(value || "").trim();
+  if (!source) return null;
+
+  const dataUrl = decodeDataUrl(source);
+  if (dataUrl) return dataUrl;
+
+  const response = await fetch(source);
+  if (!response.ok) {
+    throw new Error(`asset_fetch_failed:${response.status}`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  return {
+    mimeType: response.headers.get("content-type") || "",
+    bytes: Buffer.from(arrayBuffer),
+  };
+}
+
+async function rasterizeSvgToPng(bytes) {
+  const { default: sharp } = await import("sharp");
+  return Buffer.from(await sharp(bytes).png().toBuffer());
+}
+
+async function embedPdfImage(pdfDoc, value) {
+  const source = await loadPdfImageSource(value).catch(() => null);
+  if (!source?.bytes?.length) return null;
+
+  const mime = source.mimeType.toLowerCase();
+  if (mime.includes("svg") || isSvgBytes(source.bytes)) {
+    try {
+      const pngBytes = await rasterizeSvgToPng(source.bytes);
+      return await pdfDoc.embedPng(pngBytes);
+    } catch {
+      return null;
+    }
+  }
+  if (mime.includes("png") || isPngBytes(source.bytes)) {
+    return await pdfDoc.embedPng(source.bytes);
+  }
+  if (mime.includes("jpg") || mime.includes("jpeg") || isJpegBytes(source.bytes)) {
+    return await pdfDoc.embedJpg(source.bytes);
+  }
+
+  try {
+    return await pdfDoc.embedPng(source.bytes);
+  } catch {
+    try {
+      return pdfDoc.embedJpg(source.bytes);
+    } catch {
+      return null;
+    }
+  }
+}
+
+export async function estimateToPdfBuffer(estimate) {
+  const baseBuffer = estimateToRawPdfBuffer(estimate);
+  const meta = estimateDocumentMeta(estimate);
+  const company = meta.company || {};
+  const pdfDoc = await PDFDocument.load(baseBuffer);
+  const pages = pdfDoc.getPages();
+  
+  if (!pages.length) {
+    return Buffer.from(await pdfDoc.save());
+  }
+  
+  const firstPage = pages[0];
+  const logoImage = await embedPdfImage(pdfDoc, company.logoDataUrl);
+  if (logoImage) {
+  pages.forEach((page) => {
+    page.drawRectangle({
+      x: 42,
+      y: 748,
+      width: 48,
+      height: 48,
+      color: rgb(1, 1, 1),
+    });
+
+    const dimensions = logoImage.scaleToFit(42, 42);
+
+    page.drawImage(logoImage, {
+      x: 45,
+      y: 751 + (42 - dimensions.height) / 2,
+      width: dimensions.width,
+      height: dimensions.height,
+    });
+  });
+}
+
+  const signatureImage = await embedPdfImage(pdfDoc, company.signatureDataUrl);
+  if (signatureImage) {
+    firstPage.drawRectangle({
+      x: 48,
+      y: 105,
+      width: 180,
+      height: 28,
+      color: rgb(1, 1, 1),
+    });
+    const dimensions = signatureImage.scaleToFit(160, 44);
+    firstPage.drawImage(signatureImage, {
+      x: 54,
+      y: 106 + (44 - dimensions.height) / 2,
+      width: dimensions.width,
+      height: dimensions.height,
+    });
+  }
+
+const stampImage = await embedPdfImage(pdfDoc, company.stampDataUrl);
+
+if (stampImage) {
+  const firstPage = pages[0];
+
+  const dimensions = stampImage.scaleToFit(90, 90);
+
+  firstPage.drawImage(stampImage, {
+    x: 470,
+    y: 40,
+    width: dimensions.width,
+    height: dimensions.height,
+  });
+}
+
+  return Buffer.from(await pdfDoc.save());
 }
 
 export function normalizeTextEntries(items = []) {
