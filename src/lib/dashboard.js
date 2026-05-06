@@ -36,6 +36,8 @@ export const DASHBOARD_NAVIGATION = {
     { href: "/owner", label: "Overview", icon: DashboardIcon, match: /^\/owner$/ },
     { href: "/owner/leads", label: "Leads", icon: LeadsIcon, match: /^\/owner\/leads$/ },
     { href: "/owner/clients", label: "Clients", icon: ClientsIcon, match: /^\/owner\/clients$/ },
+    { href: "/owner/estimates", label: "Estimates", icon: ExpenseIcon, match: /^\/owner\/estimates$/ },
+    { href: "/owner/invoicing", label: "Invoicing", icon: ReportIcon, match: /^\/owner\/invoicing$/ },
     // { href: "/owner/followups", label: "Follow-ups", icon: CalendarIcon, match: /^\/owner\/followups$/ },
     {
       href: "/owner/projects",
@@ -58,6 +60,8 @@ export const DASHBOARD_NAVIGATION = {
   ],
   employee: [
     { href: "/employee", label: "Overview", icon: DashboardIcon, match: /^\/employee$/ },
+    { href: "/employee/estimates", label: "Estimates", icon: ExpenseIcon, match: /^\/employee\/estimates$/ },
+    { href: "/employee/invoicing", label: "Invoicing", icon: ReportIcon, match: /^\/employee\/invoicing$/ },
     { href: "/employee/projects", label: "Projects", icon: ProjectsIcon, match: /^\/employee\/projects$/ },
     { href: "/employee/tasks", label: "Tasks", icon: InsightsIcon, match: /^\/employee\/tasks$/ },
     // { href: "/employee/followups", label: "Follow-ups", icon: CalendarIcon, match: /^\/employee\/followups$/ },
@@ -70,6 +74,7 @@ export function getProjectNavigation(roleBase, projectId) {
 
   if (roleBase === "owner") {
     return [
+      { href: `/${roleBase}`, label: " Go To Main Dashboard", icon: DashboardIcon, match: new RegExp(`^/${roleBase}/`) },
       { href: `${base}/overview`, label: "Overview", icon: DashboardIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/overview$`) },
       { href: `${base}/staff`, label: "Staff", icon: TeamIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/staff$`) },
       { href: `${base}/tasks`, label: "Tasks", icon: CalendarIcon, match: new RegExp(`^/${roleBase}/project/${projectId}/tasks$`) },

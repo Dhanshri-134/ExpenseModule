@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Modal from "@/components/dashboard/Modal";
 import { BusyButton, CompactListRow, DrilldownModal, StatusMetricButton } from "@/components/dashboard/DashboardUi";
 import { ProjectEstimatesPage, ProjectFieldReportsPage } from "@/components/dashboard/Project/ProjectOperationsPanels";
@@ -2458,6 +2458,66 @@ export function TasksManagerPage({
   );
 }
 
+function escapeSvgText(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function svgToDataUrl(svg) {
+  if (typeof window !== "undefined" && typeof window.btoa === "function") {
+    return `data:image/svg+xml;base64,${window.btoa(unescape(encodeURIComponent(svg)))}`;
+  }
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function buildSignatureDataUrl(name) {
+  const safeName = escapeSvgText(name || "Owner Signature");
+  return svgToDataUrl(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="640" height="180" viewBox="0 0 640 180">
+      <rect width="640" height="180" fill="#ffffff"/>
+      <text x="24" y="112" font-family="Segoe Script, Brush Script MT, cursive" font-size="56" fill="#102033">${safeName}</text>
+      <path d="M24 126h410" stroke="#102033" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+  `);
+}
+
+function buildStampDataUrl(companyName) {
+  const safeName = escapeSvgText((companyName || "COMPANY").toUpperCase());
+  return svgToDataUrl(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240">
+      <rect width="240" height="240" fill="#ffffff"/>
+      <circle cx="120" cy="120" r="94" fill="none" stroke="#0f4c81" stroke-width="8"/>
+      <circle cx="120" cy="120" r="72" fill="none" stroke="#0f4c81" stroke-width="2" stroke-dasharray="6 6"/>
+      <text x="120" y="100" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" fill="#0f4c81">APPROVED</text>
+      <text x="120" y="136" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f4c81">${safeName}</text>
+    </svg>
+  `);
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(new Error("file_read_failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function AssetUploadField({ label, helper, onChange }) {
+  return (
+    <div className="mt-3">
+      <label className="inline-flex cursor-pointer items-center rounded-[14px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-2 text-sm font-semibold text-[color:var(--acm-fg)] transition hover:bg-[color:var(--acm-surface-2)]">
+        {label}
+        <input className="hidden" type="file" accept="image/*" onChange={onChange} />
+      </label>
+      <div className="mt-2 text-xs text-[color:var(--acm-muted-fg)]">{helper}</div>
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const settings = useApi("/api/settings");
   const [message, setMessage] = useState("");
@@ -2465,10 +2525,12 @@ export function SettingsPage() {
   const [profileBusy, setProfileBusy] = useState(false);
   const [passwordBusy, setPasswordBusy] = useState(false);
   const [profileForm, setProfileForm] = useState(null);
+  const [companyForm, setCompanyForm] = useState(null);
   const [passwordForm, setPasswordForm] = useState({
     password: "",
     confirmPassword: "",
   });
+  const isOwner = settings.data?.profile?.role === "owner";
   const resolvedProfileForm = profileForm ?? {
     name: settings.data?.profile?.name || "",
     userName: settings.data?.profile?.userName || settings.data?.profile?.userCode || "",
@@ -2477,6 +2539,56 @@ export function SettingsPage() {
     mobile: settings.data?.profile?.mobile || "",
     address: settings.data?.profile?.address || "",
   };
+  const resolvedCompanyForm = companyForm ?? {
+    name: settings.data?.company?.name || "",
+    code: settings.data?.company?.code || "",
+    address: settings.data?.company?.address || "",
+    contact: settings.data?.company?.contact || "",
+    email: settings.data?.company?.email || "",
+    logoDataUrl: settings.data?.company?.logoDataUrl || "",
+    signatureDataUrl: settings.data?.company?.signatureDataUrl || "",
+    signatureName: settings.data?.company?.signatureName || settings.data?.profile?.name || "",
+    stampDataUrl: settings.data?.company?.stampDataUrl || "",
+    stampLabel: settings.data?.company?.stampLabel || settings.data?.company?.name || "",
+  };
+
+  useEffect(() => {
+    if (!isOwner || !settings.data?.company) return;
+
+    setCompanyForm((current) => {
+      if (current) return current;
+      const next = {
+        name: settings.data.company.name || "",
+        code: settings.data.company.code || "",
+        address: settings.data.company.address || "",
+        contact: settings.data.company.contact || "",
+        email: settings.data.company.email || "",
+        logoDataUrl: settings.data.company.logoDataUrl || "",
+        signatureDataUrl: settings.data.company.signatureDataUrl || "",
+        signatureName: settings.data.company.signatureName || settings.data?.profile?.name || "",
+        stampDataUrl: settings.data.company.stampDataUrl || "",
+        stampLabel: settings.data.company.stampLabel || settings.data.company.name || "",
+      };
+
+      return {
+        ...next,
+        signatureDataUrl: next.signatureDataUrl || buildSignatureDataUrl(next.signatureName || settings.data?.profile?.name || ""),
+        stampDataUrl: next.stampDataUrl || buildStampDataUrl(next.stampLabel || next.name),
+      };
+    });
+  }, [isOwner, settings.data?.company, settings.data?.profile?.name]);
+
+  async function handleAssetUpload(field, file) {
+    if (!file) return;
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), [field]: dataUrl }));
+      setMessage("");
+      setError("");
+    } catch (uploadError) {
+      setError(uploadError.message || "Unable to read file.");
+    }
+  }
 
   async function saveProfile(e) {
     e.preventDefault();
@@ -2487,7 +2599,10 @@ export function SettingsPage() {
     const res = await fetch("/api/settings", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(resolvedProfileForm),
+      body: JSON.stringify({
+        ...resolvedProfileForm,
+        ...(isOwner ? { company: resolvedCompanyForm } : {}),
+      }),
     });
     const json = await res.json().catch(() => null);
     if (!res.ok) {
@@ -2495,7 +2610,7 @@ export function SettingsPage() {
       setProfileBusy(false);
       return;
     }
-    setMessage("Personal details updated.");
+    setMessage(isOwner ? "Profile and company details updated." : "Personal details updated.");
     await settings.refresh();
     setProfileBusy(false);
   }
@@ -2523,6 +2638,7 @@ export function SettingsPage() {
       body: JSON.stringify({
         ...resolvedProfileForm,
         password: passwordForm.password,
+        ...(isOwner ? { company: resolvedCompanyForm } : {}),
       }),
     });
     const json = await res.json().catch(() => null);
@@ -2542,10 +2658,12 @@ export function SettingsPage() {
       <SectionHeader title="Profile" />
       <InlineMessage error={settings.error || error} message={message} />
 
-      <section className="grid gap-4 xl:grid-cols-2">
-        <div className={cardClass()}>
-          <SectionHeader title="Personal Details" />
-          <form onSubmit={saveProfile} className="grid gap-3">
+      <section className="grid gap-4">
+        <form onSubmit={saveProfile} className="grid gap-4">
+          <div className={`grid gap-4 ${isOwner ? "xl:grid-cols-2" : ""}`}>
+            <div className={cardClass()}>
+              <SectionHeader title="Personal Details" />
+              <div className="grid gap-3">
             <LabeledField label="Name">
               <input className={fieldClass()} value={resolvedProfileForm.name} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), name: e.target.value }))} />
             </LabeledField>
@@ -2564,9 +2682,72 @@ export function SettingsPage() {
             <LabeledField label="Address">
               <textarea className={fieldClass()} rows={4} value={resolvedProfileForm.address} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), address: e.target.value }))} />
             </LabeledField>
-            <BusyButton type="submit" busy={profileBusy} className="acm-btn acm-btn-primary">Save Details</BusyButton>
-          </form>
-        </div>
+              </div>
+            </div>
+
+            {isOwner ? (
+              <div className={cardClass()}>
+                <SectionHeader title="Company Details" />
+                <div className="mb-3 text-sm text-[color:var(--acm-muted-fg)]">
+                  These details are fetched automatically into estimate PDFs and outgoing email sends.
+                </div>
+                <div className="grid gap-4">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <LabeledField label="Company Name">
+                      <input className={fieldClass()} value={resolvedCompanyForm.name} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), name: e.target.value, stampLabel: e.target.value || (prev ?? resolvedCompanyForm).stampLabel }))} />
+                    </LabeledField>
+                    <LabeledField label="Company Code">
+                      <input className={fieldClass()} value={resolvedCompanyForm.code} readOnly />
+                    </LabeledField>
+                    <LabeledField label="Company Email">
+                      <input className={fieldClass()} type="email" value={resolvedCompanyForm.email} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), email: e.target.value }))} />
+                    </LabeledField>
+                    <LabeledField label="Company Contact">
+                      <input className={fieldClass()} value={resolvedCompanyForm.contact} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), contact: e.target.value }))} />
+                    </LabeledField>
+                  </div>
+                  <LabeledField label="Company Address">
+                    <textarea className={fieldClass()} rows={4} value={resolvedCompanyForm.address} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), address: e.target.value }))} />
+                  </LabeledField>
+
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
+                      <div className="mb-3 text-sm font-semibold text-[color:var(--acm-fg)]">Logo</div>
+                      {resolvedCompanyForm.logoDataUrl ? <img src={resolvedCompanyForm.logoDataUrl} alt="Company logo" className="h-28 w-full rounded-[16px] object-contain bg-white p-2" /> : <div className="flex h-28 items-center justify-center rounded-[16px] bg-[color:var(--acm-surface)] text-sm text-[color:var(--acm-muted-fg)]">No logo uploaded</div>}
+                      <AssetUploadField label="Upload Logo" helper={resolvedCompanyForm.logoDataUrl ? "Logo uploaded." : "Choose a logo image."} onChange={(e) => handleAssetUpload("logoDataUrl", e.target.files?.[0])} />
+                    </div>
+
+                    <div className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Signature</div>
+                        <button type="button" onClick={() => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), signatureDataUrl: buildSignatureDataUrl((prev ?? resolvedCompanyForm).signatureName || resolvedProfileForm.name) }))} className="acm-btn acm-btn-secondary h-9 px-3">Generate</button>
+                      </div>
+                      <LabeledField label="Owner Name">
+                        <input className={fieldClass()} value={resolvedCompanyForm.signatureName} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), signatureName: e.target.value }))} />
+                      </LabeledField>
+                      {resolvedCompanyForm.signatureDataUrl ? <img src={resolvedCompanyForm.signatureDataUrl} alt="Owner signature" className="mt-3 h-28 w-full rounded-[16px] object-contain bg-white p-2" /> : null}
+                      <AssetUploadField label="Upload Signature" helper={resolvedCompanyForm.signatureDataUrl ? "Signature ready." : "Choose a signature image or generate one."} onChange={(e) => handleAssetUpload("signatureDataUrl", e.target.files?.[0])} />
+                    </div>
+
+                    <div className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Stamp</div>
+                        <button type="button" onClick={() => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), stampDataUrl: buildStampDataUrl((prev ?? resolvedCompanyForm).stampLabel || (prev ?? resolvedCompanyForm).name) }))} className="acm-btn acm-btn-secondary h-9 px-3">Generate</button>
+                      </div>
+                      <LabeledField label="Stamp Label">
+                        <input className={fieldClass()} value={resolvedCompanyForm.stampLabel} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), stampLabel: e.target.value }))} />
+                      </LabeledField>
+                      {resolvedCompanyForm.stampDataUrl ? <img src={resolvedCompanyForm.stampDataUrl} alt="Company stamp" className="mt-3 h-28 w-full rounded-[16px] object-contain bg-white p-2" /> : null}
+                      <AssetUploadField label="Upload Stamp" helper={resolvedCompanyForm.stampDataUrl ? "Stamp ready." : "Choose a stamp image or generate one."} onChange={(e) => handleAssetUpload("stampDataUrl", e.target.files?.[0])} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <BusyButton type="submit" busy={profileBusy} className="acm-btn acm-btn-primary w-fit px-5">Save Details</BusyButton>
+        </form>
 
         <div className={cardClass()}>
           <SectionHeader title="Change Credentials" />

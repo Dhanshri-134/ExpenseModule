@@ -11,10 +11,9 @@ export default async function handler(req, res) {
 
   const { data, error } = await supabase
     .from("companies")
-    .select("id,name,code,owner_user_id,address,contact,email,created_at")
+    .select("id,name,code,owner_user_id,address,contact,email,metadata,created_at")
     .order("created_at", { ascending: false });
 
   if (error) return res.status(500).json({ ok: false, error: "db_error" });
   return res.status(200).json({ ok: true, companies: data ?? [] });
 }
-

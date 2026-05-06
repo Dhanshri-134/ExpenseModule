@@ -86,7 +86,7 @@ export default function DashboardSidebar({
           mobileOpen ? styles.sidebarOpen : styles.sidebarClosed,
         ].join(" ")}
       >
-        {showBackButton ? (
+        {/* {showBackButton ? (
           <button
             type="button"
             onClick={() => router.push(backHref || `/${viewer?.role?.toLowerCase() || "login"}`)}
@@ -94,7 +94,7 @@ export default function DashboardSidebar({
           >
             Back
           </button>
-        ) : null}
+        ) : null} */}
 
         <div className={styles.sidebarTop}>
           <button

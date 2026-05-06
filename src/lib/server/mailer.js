@@ -194,3 +194,29 @@ export async function sendUsernameRecoveryOtpEmail({ email, name, otp, role }) {
     mode: "smtp",
   };
 }
+
+export async function sendEstimateEmail({ to, subject, html, text, pdfBuffer, filename }) {
+  const { transporter, smtp } = await createTransporter();
+
+  await transporter.sendMail({
+    from: smtp.from,
+    to,
+    subject,
+    text,
+    html,
+    attachments: pdfBuffer
+      ? [
+          {
+            filename: filename || "estimate.pdf",
+            content: pdfBuffer,
+            contentType: "application/pdf",
+          },
+        ]
+      : [],
+  });
+
+  return {
+    sent: true,
+    mode: "smtp",
+  };
+}

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { canAccessProject, getRequestContext } from "@/lib/server/authz";
+import { getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
 import { estimateToCsv } from "@/lib/projectModules";
 import { loadUserDirectory } from "@/lib/server/taskWorkflow";
@@ -9,6 +9,8 @@ import {
   loadEstimateGraph,
   persistEstimateGraph,
 } from "@/lib/server/estimating/estimateEngine";
+
+const JsonRecordSchema = z.record(z.string(), z.any()).optional().default({});
 
 const optionalUuid = z.preprocess(
   (value) => (value === "" || value == null ? undefined : value),
@@ -21,9 +23,11 @@ const nullableUuid = z.preprocess(
 );
 
 const QuerySchema = z.object({
-  projectId: z.string().uuid(),
+  projectId: optionalUuid,
+  clientId: optionalUuid,
   id: optionalUuid,
   export: z.string().optional(),
+  disposition: z.enum(["attachment", "inline"]).optional(),
 });
 
 const LaborRateSchema = z.object({
@@ -51,6 +55,7 @@ const LaborEntrySchema = z.object({
   otHours: z.coerce.number().nonnegative().optional().default(0),
   otRate: z.coerce.number().nonnegative().optional().default(0),
   rate: LaborRateSchema.optional(),
+  metadata: JsonRecordSchema,
 });
 
 const MaterialEntrySchema = z.object({
@@ -62,6 +67,7 @@ const MaterialEntrySchema = z.object({
   unitRate: z.coerce.number().nonnegative().optional().default(0),
   freight: z.coerce.number().nonnegative().optional().default(0),
   taxPercent: z.coerce.number().nonnegative().optional().default(0),
+  metadata: JsonRecordSchema,
 });
 
 const EquipmentEntrySchema = z.object({
@@ -74,6 +80,7 @@ const EquipmentEntrySchema = z.object({
   freight: z.coerce.number().nonnegative().optional().default(0),
   fuel: z.coerce.number().nonnegative().optional().default(0),
   taxPercent: z.coerce.number().nonnegative().optional().default(0),
+  metadata: JsonRecordSchema,
 });
 
 const DirectOverheadEntrySchema = z.object({
@@ -83,6 +90,7 @@ const DirectOverheadEntrySchema = z.object({
   days: z.coerce.number().nonnegative().optional().default(0),
   rate: z.coerce.number().nonnegative().optional().default(0),
   taxPercent: z.coerce.number().nonnegative().optional().default(0),
+  metadata: JsonRecordSchema,
 });
 
 const EstimateLineItemSchema = z.object({
@@ -119,10 +127,14 @@ const CostCodeInputSchema = z.object({
 
 const EstimatePayloadSchema = z.object({
   id: optionalUuid,
-  projectId: z.string().uuid(),
+  projectId: optionalUuid,
+  clientId: optionalUuid,
+  templateId: optionalUuid,
   title: z.string().optional().nullable(),
   estimateDate: z.string().optional().nullable(),
   status: z.string().min(1).default("draft"),
+  approvalStatus: z.string().optional().default("draft"),
+  invoiceStatus: z.string().optional().default("not_started"),
   scenario: z.enum(["best_case", "expected_case", "worst_case"]).default("expected_case"),
   overheadPercent: z.coerce.number().nonnegative().default(0),
   profitPercent: z.coerce.number().nonnegative().default(0),
@@ -131,15 +143,14 @@ const EstimatePayloadSchema = z.object({
   inflationRate: z.coerce.number().nonnegative().default(0),
   escalationYears: z.coerce.number().nonnegative().default(0),
   notes: z.string().optional().nullable(),
+  documentMeta: z.record(z.string(), z.any()).optional().default({}),
   lineItems: z.array(EstimateLineItemSchema).optional().default([]),
   costCodes: z.array(CostCodeInputSchema).optional().default([]),
 });
 
 function normalizeEstimatePayload(payload) {
-  const estimateDate =
-    String(payload.estimateDate || "").trim() || new Date().toISOString().slice(0, 10);
-  const title =
-    String(payload.title || "").trim() || `Estimate ${estimateDate}`;
+  const estimateDate = String(payload.estimateDate || "").trim() || new Date().toISOString().slice(0, 10);
+  const title = String(payload.title || "").trim() || `Estimate ${estimateDate}`;
 
   return {
     ...payload,
@@ -148,62 +159,125 @@ function normalizeEstimatePayload(payload) {
   };
 }
 
-function canManageEstimates(ctx, projectId) {
-  if (!canAccessProject(ctx, projectId)) return false;
-  return ctx.role === "owner" || ctx.role === "manager";
+async function resolveClientId(ctx, payload) {
+  if (payload.clientId) return payload.clientId;
+  if (!payload.projectId) throw new Error("client_required");
+
+  const { data: project, error } = await ctx.admin
+    .from("projects")
+    .select("client_id")
+    .eq("company_id", ctx.company.id)
+    .eq("id", payload.projectId)
+    .maybeSingle();
+
+  if (error || !project?.client_id) {
+    throw new Error(error?.message || "project_client_not_found");
+  }
+
+  return project.client_id;
+}
+
+function canReadEstimateScope(ctx, estimate) {
+  if (ctx.role === "owner") return true;
+  if (estimate.project_id) return ctx.projectIds.includes(estimate.project_id);
+  return true;
+}
+
+function canManageEstimates(ctx) {
+  return ["owner", "manager", "employee"].includes(ctx.role);
 }
 
 async function enrichEstimates(admin, companyId, rows) {
   const preparedByIds = [...new Set((rows ?? []).map((item) => item.prepared_by_user_id).filter(Boolean))];
-  const directory = await loadUserDirectory(admin, companyId, preparedByIds);
+  const approvedByIds = [...new Set((rows ?? []).map((item) => item.approved_by_user_id).filter(Boolean))];
+  const directory = await loadUserDirectory(admin, companyId, [...new Set([...preparedByIds, ...approvedByIds])]);
 
   return (rows ?? []).map((item) => ({
     ...item,
     prepared_by: item.prepared_by_user_id ? directory.get(item.prepared_by_user_id) ?? null : null,
+    approved_by: item.approved_by_user_id ? directory.get(item.approved_by_user_id) ?? null : null,
   }));
 }
 
 async function attachEstimateGraphs(admin, estimates) {
   try {
-    const graph = await loadEstimateGraph(
-      admin,
-      (estimates ?? []).map((estimate) => estimate.id).filter(Boolean)
-    );
-
+    const graph = await loadEstimateGraph(admin, (estimates ?? []).map((estimate) => estimate.id).filter(Boolean));
     return (estimates ?? []).map((estimate) => composeEstimateRecord(estimate, graph.get(estimate.id) ?? []));
   } catch {
     return estimates ?? [];
   }
 }
 
+async function attachEstimateRelations(ctx, estimates) {
+  const projectIds = [...new Set((estimates ?? []).map((item) => item.project_id).filter(Boolean))];
+  const clientIds = [...new Set((estimates ?? []).map((item) => item.client_id).filter(Boolean))];
+  const templateIds = [...new Set((estimates ?? []).map((item) => item.template_id).filter(Boolean))];
+
+  const [{ data: projects }, { data: clients }, { data: templates }] = await Promise.all([
+    projectIds.length
+      ? ctx.admin.from("projects").select("id, name, client_id").in("id", projectIds)
+      : Promise.resolve({ data: [] }),
+    clientIds.length ? ctx.admin.from("clients").select("id, name, contact, email, address").in("id", clientIds) : Promise.resolve({ data: [] }),
+    templateIds.length ? ctx.admin.from("estimate_templates").select("id, name, is_default").in("id", templateIds) : Promise.resolve({ data: [] }),
+  ]);
+
+  const clientMap = new Map((clients ?? []).map((client) => [client.id, client]));
+  const templateMap = new Map((templates ?? []).map((template) => [template.id, template]));
+  const projectMap = new Map(
+    (projects ?? []).map((project) => [
+      project.id,
+      {
+        ...project,
+        client: project.client_id ? clientMap.get(project.client_id) ?? null : null,
+      },
+    ])
+  );
+
+  return (estimates ?? []).map((estimate) => ({
+    ...estimate,
+    client: estimate.client_id ? clientMap.get(estimate.client_id) ?? null : null,
+    template: estimate.template_id ? templateMap.get(estimate.template_id) ?? null : null,
+    project: estimate.project_id ? projectMap.get(estimate.project_id) ?? null : null,
+  }));
+}
+
 async function createEstimateHeader(ctx, payload, computed) {
   const { data: latestEstimate } = await ctx.admin
     .from("project_estimates")
     .select("estimate_number")
-    .eq("project_id", payload.projectId)
+    .eq("company_id", ctx.company.id)
     .order("estimate_number", { ascending: false })
     .limit(1)
     .maybeSingle();
+
+  const summary = {
+    ...computed.summary,
+    documentMeta: payload.documentMeta || {},
+  };
 
   const { data, error } = await ctx.admin
     .from("project_estimates")
     .insert({
       company_id: ctx.company.id,
-      project_id: payload.projectId,
+      project_id: payload.projectId || null,
+      client_id: payload.clientId,
+      template_id: payload.templateId || null,
       estimate_number: (latestEstimate?.estimate_number || 0) + 1,
       title: payload.title,
       estimate_date: payload.estimateDate,
       status: payload.status,
+      approval_status: payload.approvalStatus || "draft",
+      invoice_status: payload.invoiceStatus || "not_started",
       scenario: payload.scenario,
-      overhead_percent: computed.summary.overheadPercent,
-      profit_percent: computed.summary.profitPercent,
-      commission_percent: computed.summary.commissionPercent,
-      risk_percent: computed.summary.riskPercent,
-      inflation_rate: computed.summary.inflationRate,
-      escalation_years: computed.summary.escalationYears,
+      overhead_percent: summary.overheadPercent,
+      profit_percent: summary.profitPercent,
+      commission_percent: summary.commissionPercent,
+      risk_percent: summary.riskPercent,
+      inflation_rate: summary.inflationRate,
+      escalation_years: summary.escalationYears,
       notes: payload.notes || null,
       line_items: [],
-      summary: computed.summary,
+      summary,
       prepared_by_user_id: ctx.user.id,
     })
     .select("*")
@@ -214,27 +288,36 @@ async function createEstimateHeader(ctx, payload, computed) {
 }
 
 async function updateEstimateHeader(ctx, payload, computed) {
+  const summary = {
+    ...computed.summary,
+    documentMeta: payload.documentMeta || {},
+  };
+
   const { data, error } = await ctx.admin
     .from("project_estimates")
     .update({
+      project_id: payload.projectId || null,
+      client_id: payload.clientId,
+      template_id: payload.templateId || null,
       title: payload.title,
       estimate_date: payload.estimateDate,
       status: payload.status,
+      approval_status: payload.approvalStatus || "draft",
+      invoice_status: payload.invoiceStatus || "not_started",
       scenario: payload.scenario,
-      overhead_percent: computed.summary.overheadPercent,
-      profit_percent: computed.summary.profitPercent,
-      commission_percent: computed.summary.commissionPercent,
-      risk_percent: computed.summary.riskPercent,
-      inflation_rate: computed.summary.inflationRate,
-      escalation_years: computed.summary.escalationYears,
+      overhead_percent: summary.overheadPercent,
+      profit_percent: summary.profitPercent,
+      commission_percent: summary.commissionPercent,
+      risk_percent: summary.riskPercent,
+      inflation_rate: summary.inflationRate,
+      escalation_years: summary.escalationYears,
       notes: payload.notes || null,
       line_items: [],
-      summary: computed.summary,
+      summary,
       updated_at: new Date().toISOString(),
       prepared_by_user_id: ctx.user.id,
     })
     .eq("company_id", ctx.company.id)
-    .eq("project_id", payload.projectId)
     .eq("id", payload.id)
     .select("*")
     .single();
@@ -262,56 +345,66 @@ export default async function handler(req, res) {
 
   if (req.method === "GET") {
     const parsed = QuerySchema.safeParse(req.query);
-    if (!parsed.success) return sendError(res, 400, "invalid_project_id");
+    if (!parsed.success) return sendError(res, 400, "invalid_query", parsed.error.flatten());
 
-    const { projectId, id, export: exportType } = parsed.data;
-    if (!canAccessProject(ctx, projectId)) return sendError(res, 403, "forbidden");
+    const { projectId, clientId, id, export: exportType, disposition } = parsed.data;
 
-    if (exportType === "csv" && id) {
-      const { data: estimate, error } = await ctx.admin
-        .from("project_estimates")
-        .select("*")
-        .eq("company_id", ctx.company.id)
-        .eq("project_id", projectId)
-        .eq("id", id)
-        .maybeSingle();
+    let query = ctx.admin.from("project_estimates").select("*").eq("company_id", ctx.company.id);
+    if (id) query = query.eq("id", id);
+    if (projectId) query = query.eq("project_id", projectId);
+    if (clientId) query = query.eq("client_id", clientId);
 
-      if (error || !estimate) return sendError(res, 404, "estimate_not_found");
+    const { data, error } = await query.order("estimate_number", { ascending: false });
+    if (error) return sendError(res, 500, "estimates_fetch_failed", error.message);
 
-      const [composedEstimate] = await attachEstimateGraphs(ctx.admin, [estimate]);
+    const visible = (data ?? []).filter((estimate) => canReadEstimateScope(ctx, estimate));
+    if (id && !visible.length) return sendError(res, 404, "estimate_not_found");
+
+    if ((exportType === "csv" || exportType === "pdf") && id) {
+      const [composedEstimate] = await attachEstimateGraphs(ctx.admin, visible.slice(0, 1));
+      if (!composedEstimate) return sendError(res, 404, "estimate_not_found");
+      const [estimateWithRelations] = await attachEstimateRelations(ctx, [composedEstimate]);
+      const [enrichedEstimate] = await enrichEstimates(ctx.admin, ctx.company.id, [estimateWithRelations]);
+
+      if (exportType === "pdf") {
+        const { estimateToPdfBuffer } = await import("@/lib/projectModules");
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+          "Content-Disposition",
+          `${disposition === "inline" ? "inline" : "attachment"}; filename="estimate-${enrichedEstimate.estimate_number}.pdf"`
+        );
+        res.status(200).send(estimateToPdfBuffer(enrichedEstimate));
+        return;
+      }
+
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
-      res.setHeader("Content-Disposition", `attachment; filename="estimate-${estimate.estimate_number}.csv"`);
-      res.status(200).send(estimateToCsv(composedEstimate));
+      res.setHeader("Content-Disposition", `attachment; filename="estimate-${enrichedEstimate.estimate_number}.csv"`);
+      res.status(200).send(estimateToCsv(enrichedEstimate));
       return;
     }
 
-    const { data, error } = await ctx.admin
-      .from("project_estimates")
-      .select("*")
-      .eq("company_id", ctx.company.id)
-      .eq("project_id", projectId)
-      .order("estimate_number", { ascending: false });
-
-    if (error) return sendError(res, 500, "estimates_fetch_failed", error.message);
-
-    const estimatesWithGraph = await attachEstimateGraphs(ctx.admin, data ?? []);
-    const estimates = await enrichEstimates(ctx.admin, ctx.company.id, estimatesWithGraph);
+    const estimatesWithGraph = await attachEstimateGraphs(ctx.admin, visible);
+    const estimatesWithRelations = await attachEstimateRelations(ctx, estimatesWithGraph);
+    const estimates = await enrichEstimates(ctx.admin, ctx.company.id, estimatesWithRelations);
     return sendOk(res, { estimates });
   }
 
   if (req.method === "POST") {
     const parsed = EstimatePayloadSchema.safeParse(req.body);
     if (!parsed.success) return sendError(res, 400, "invalid_payload", parsed.error.flatten());
+    if (!canManageEstimates(ctx)) return sendError(res, 403, "forbidden");
+
     const payload = normalizeEstimatePayload(parsed.data);
-    if (!canManageEstimates(ctx, payload.projectId)) return sendError(res, 403, "forbidden");
 
     try {
+      payload.clientId = await resolveClientId(ctx, payload);
       const computed = buildEstimateComputation(payload);
       const estimate = await createEstimateHeader(ctx, payload, computed);
       await persistEstimateGraph(ctx.admin, ctx, estimate, computed);
       const [composedEstimate] = await attachEstimateGraphs(ctx.admin, [estimate]);
       await syncEstimateSnapshot(ctx.admin, composedEstimate);
-      const [enrichedEstimate] = await enrichEstimates(ctx.admin, ctx.company.id, [composedEstimate]);
+      const [withRelations] = await attachEstimateRelations(ctx, [composedEstimate]);
+      const [enrichedEstimate] = await enrichEstimates(ctx.admin, ctx.company.id, [withRelations]);
       return sendOk(res, { estimate: enrichedEstimate });
     } catch (error) {
       return sendError(res, 500, "estimate_create_failed", error.message);
@@ -323,16 +416,19 @@ export default async function handler(req, res) {
     if (!parsed.success || !parsed.data.id) {
       return sendError(res, 400, "invalid_payload", parsed.error?.flatten?.() ?? null);
     }
+    if (!canManageEstimates(ctx)) return sendError(res, 403, "forbidden");
+
     const payload = normalizeEstimatePayload(parsed.data);
-    if (!canManageEstimates(ctx, payload.projectId)) return sendError(res, 403, "forbidden");
 
     try {
+      payload.clientId = await resolveClientId(ctx, payload);
       const computed = buildEstimateComputation(payload);
       const estimate = await updateEstimateHeader(ctx, payload, computed);
       await persistEstimateGraph(ctx.admin, ctx, estimate, computed);
       const [composedEstimate] = await attachEstimateGraphs(ctx.admin, [estimate]);
       await syncEstimateSnapshot(ctx.admin, composedEstimate);
-      const [enrichedEstimate] = await enrichEstimates(ctx.admin, ctx.company.id, [composedEstimate]);
+      const [withRelations] = await attachEstimateRelations(ctx, [composedEstimate]);
+      const [enrichedEstimate] = await enrichEstimates(ctx.admin, ctx.company.id, [withRelations]);
       return sendOk(res, { estimate: enrichedEstimate });
     } catch (error) {
       return sendError(res, 500, "estimate_update_failed", error.message);
@@ -340,15 +436,14 @@ export default async function handler(req, res) {
   }
 
   if (req.method === "DELETE") {
-    const parsed = z.object({ id: z.string().uuid(), projectId: z.string().uuid() }).safeParse(req.body);
+    const parsed = z.object({ id: z.string().uuid() }).safeParse(req.body);
     if (!parsed.success) return sendError(res, 400, "invalid_payload", parsed.error.flatten());
-    if (!canManageEstimates(ctx, parsed.data.projectId)) return sendError(res, 403, "forbidden");
+    if (!canManageEstimates(ctx)) return sendError(res, 403, "forbidden");
 
     const { error } = await ctx.admin
       .from("project_estimates")
       .delete()
       .eq("company_id", ctx.company.id)
-      .eq("project_id", parsed.data.projectId)
       .eq("id", parsed.data.id);
 
     if (error) return sendError(res, 500, "estimate_delete_failed", error.message);

@@ -6,19 +6,19 @@
 - Environments: .env.local
 
   Running TypeScript ...
-  Finished TypeScript in 375ms ...
+  Finished TypeScript in 220ms ...
   Creating an optimized production build ...
-✓ Compiled successfully in 33.0s
+✓ Compiled successfully in 22.7s
   Collecting page data using 7 workers ...
   Generating static pages using 7 workers (0/4) ...
   Generating static pages using 7 workers (1/4) 
   Generating static pages using 7 workers (2/4) 
   Generating static pages using 7 workers (3/4) 
-✓ Generating static pages using 7 workers (4/4) in 565ms
+✓ Generating static pages using 7 workers (4/4) in 210ms
   Finalizing page optimization ...
 
 Route (pages)
-┌ ○ / (318 ms)
+┌ ○ /
 ├   /_app
 ├ ○ /404
 ├ ƒ /api/activity-logs
@@ -29,7 +29,11 @@ Route (pages)
 ├ ƒ /api/clients
 ├ ƒ /api/companies
 ├ ƒ /api/dashboard
+├ ƒ /api/estimate-project
+├ ƒ /api/estimate-templates
+├ ƒ /api/estimate-workflow
 ├ ƒ /api/estimates
+├ ƒ /api/estimates-index
 ├ ƒ /api/estimates/preview
 ├ ƒ /api/field-reports
 ├ ƒ /api/followups
@@ -49,7 +53,9 @@ Route (pages)
 ├ ƒ /api/tasks
 ├ ƒ /auth/callback
 ├ ƒ /employee
+├ ƒ /employee/estimates
 ├ ƒ /employee/followups
+├ ƒ /employee/invoicing
 ├ ƒ /employee/project/[id]
 ├ ƒ /employee/project/[id]/estimates
 ├ ƒ /employee/project/[id]/overview
@@ -77,7 +83,9 @@ Route (pages)
 ├ ƒ /manager/tasks
 ├ ƒ /owner
 ├ ƒ /owner/clients
+├ ƒ /owner/estimates
 ├ ƒ /owner/followups
+├ ƒ /owner/invoicing
 ├ ƒ /owner/leads
 ├ ƒ /owner/project/[id]
 ├ ƒ /owner/project/[id]/estimates
@@ -90,7 +98,7 @@ Route (pages)
 ├ ƒ /owner/settings
 ├ ƒ /owner/staff
 ├ ƒ /owner/tasks
-└ ○ /reset-password (303 ms)
+└ ○ /reset-password
 
 ƒ Proxy (Middleware)
 

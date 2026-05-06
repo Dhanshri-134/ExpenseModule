@@ -11,6 +11,19 @@ const UpdateSettingsSchema = z.object({
   mobile: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
   password: z.string().min(8).optional().or(z.literal("")),
+  company: z
+    .object({
+      name: z.string().min(1),
+      address: z.string().optional().nullable(),
+      contact: z.string().optional().nullable(),
+      email: z.union([z.string().email(), z.literal(""), z.null()]).optional(),
+      logoDataUrl: z.string().optional().nullable(),
+      signatureDataUrl: z.string().optional().nullable(),
+      signatureName: z.string().optional().nullable(),
+      stampDataUrl: z.string().optional().nullable(),
+      stampLabel: z.string().optional().nullable(),
+    })
+    .optional(),
 });
 
 export default async function handler(req, res) {
@@ -35,6 +48,14 @@ export default async function handler(req, res) {
           .maybeSingle()
       : { data: null };
 
+    const { data: company } = await ctx.admin
+      .from("companies")
+      .select("id, name, code, address, contact, email, metadata")
+      .eq("id", ctx.company.id)
+      .maybeSingle();
+
+    const companyMetadata = company?.metadata && typeof company.metadata === "object" ? company.metadata : {};
+
     return sendOk(res, {
       profile: {
         userId: ctx.user.id,
@@ -47,6 +68,21 @@ export default async function handler(req, res) {
         address: person?.address || "",
         hourlyRate: membership.hourly_rate || 0,
       },
+      company: company
+        ? {
+            id: company.id,
+            code: company.code || "",
+            name: company.name || "",
+            address: company.address || "",
+            contact: company.contact || "",
+            email: company.email || "",
+            logoDataUrl: companyMetadata.logoDataUrl || "",
+            signatureDataUrl: companyMetadata.signatureDataUrl || "",
+            signatureName: companyMetadata.signatureName || person?.name || ctx.user.user_metadata?.full_name || "",
+            stampDataUrl: companyMetadata.stampDataUrl || "",
+            stampLabel: companyMetadata.stampLabel || company.name || "",
+          }
+        : null,
     });
   }
 
@@ -147,6 +183,30 @@ export default async function handler(req, res) {
         email: payload.email,
         userName: payload.userName.trim(),
       });
+    }
+
+    if (ctx.role === "owner" && payload.company) {
+      const companyMetadata = {
+        logoDataUrl: payload.company.logoDataUrl || "",
+        signatureDataUrl: payload.company.signatureDataUrl || "",
+        signatureName: payload.company.signatureName || payload.name,
+        stampDataUrl: payload.company.stampDataUrl || "",
+        stampLabel: payload.company.stampLabel || payload.company.name,
+      };
+
+      const { error: companyError } = await ctx.admin
+        .from("companies")
+        .update({
+          name: payload.company.name.trim(),
+          address: payload.company.address || null,
+          contact: payload.company.contact || null,
+          email: payload.company.email || null,
+          metadata: companyMetadata,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", ctx.company.id);
+
+      if (companyError) return sendError(res, 500, "company_update_failed", companyError.message);
     }
 
     return sendOk(res, { updated: true });

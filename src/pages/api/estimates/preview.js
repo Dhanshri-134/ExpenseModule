@@ -1,10 +1,11 @@
 import { z } from "zod";
-import { canAccessProject, getRequestContext } from "@/lib/server/authz";
+import { getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
 import { buildEstimateComputation } from "@/lib/server/estimating/estimateEngine";
 
 const PreviewPayloadSchema = z.object({
-  projectId: z.string().uuid(),
+  projectId: z.string().uuid().optional(),
+  clientId: z.string().uuid().optional(),
   overheadPercent: z.coerce.number().nonnegative().default(0),
   profitPercent: z.coerce.number().nonnegative().default(0),
   commissionPercent: z.coerce.number().nonnegative().default(0),
@@ -22,7 +23,6 @@ export default async function handler(req, res) {
 
   const parsed = PreviewPayloadSchema.safeParse(req.body);
   if (!parsed.success) return sendError(res, 400, "invalid_payload", parsed.error.flatten());
-  if (!canAccessProject(ctx, parsed.data.projectId)) return sendError(res, 403, "forbidden");
 
   try {
     const computed = buildEstimateComputation(parsed.data);

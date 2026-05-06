@@ -2,6 +2,7 @@ import { CalculationService } from "@/lib/server/estimating/calculationService";
 import { RateService } from "@/lib/server/estimating/rateService";
 import { TabulationService } from "@/lib/server/estimating/tabulationService";
 import { roundCurrency, sumBy, toNumber, toPercent } from "@/lib/server/estimating/math";
+import { mergeEstimateSummaryMeta } from "@/lib/projectModules";
 
 function normalizeText(value) {
   return String(value ?? "").trim();
@@ -105,6 +106,7 @@ function processLaborEntries(entries = []) {
       stRate: rateSource?.stRate ?? entry.stRate,
       otHours: entry.otHours,
       otRate: rateSource?.otRate ?? entry.otRate,
+      metadata: entry.metadata ?? {},
     });
   });
 
@@ -121,6 +123,7 @@ function processMaterialEntries(entries = []) {
       unitRate: entry.unitRate,
       freight: entry.freight,
       taxPercent: entry.taxPercent,
+      metadata: entry.metadata ?? {},
     })
   );
 }
@@ -136,6 +139,7 @@ function processEquipmentEntries(entries = []) {
       freight: entry.freight,
       fuel: entry.fuel,
       taxPercent: entry.taxPercent,
+      metadata: entry.metadata ?? {},
     })
   );
 }
@@ -148,6 +152,7 @@ function processOverheadEntries(entries = []) {
       days: entry.days,
       rate: entry.rate,
       taxPercent: entry.taxPercent,
+      metadata: entry.metadata ?? {},
     })
   );
 }
@@ -390,6 +395,7 @@ export async function persistEstimateGraph(admin, ctx, estimate, computed) {
           ot_rate: entry.otRate,
           ot_cost: entry.otCost,
           total_cost: entry.totalCost,
+          metadata: entry.metadata ?? {},
         }))
       );
 
@@ -414,6 +420,7 @@ export async function persistEstimateGraph(admin, ctx, estimate, computed) {
           freight: entry.freight,
           tax_percent: entry.taxPercent,
           total_cost: entry.totalCost,
+          metadata: entry.metadata ?? {},
         }))
       );
 
@@ -439,6 +446,7 @@ export async function persistEstimateGraph(admin, ctx, estimate, computed) {
           subtotal: entry.subtotal,
           tax_percent: entry.taxPercent,
           total_cost: entry.totalCost,
+          metadata: entry.metadata ?? {},
         }))
       );
 
@@ -460,6 +468,7 @@ export async function persistEstimateGraph(admin, ctx, estimate, computed) {
           base: entry.base,
           tax_percent: entry.taxPercent,
           total_cost: entry.totalCost,
+          metadata: entry.metadata ?? {},
         }))
       );
 
@@ -546,6 +555,7 @@ export async function loadEstimateGraph(admin, estimateIds = []) {
       otRate: toNumber(entry.ot_rate),
       otCost: toNumber(entry.ot_cost),
       totalCost: toNumber(entry.total_cost),
+      metadata: entry.metadata ?? {},
     });
     byCostCodeItemId.labor.set(entry.cost_code_item_id, list);
   }
@@ -564,6 +574,7 @@ export async function loadEstimateGraph(admin, estimateIds = []) {
       freight: toNumber(entry.freight),
       taxPercent: toNumber(entry.tax_percent),
       totalCost: toNumber(entry.total_cost),
+      metadata: entry.metadata ?? {},
     });
     byCostCodeItemId.material.set(entry.cost_code_item_id, list);
   }
@@ -583,6 +594,7 @@ export async function loadEstimateGraph(admin, estimateIds = []) {
       subtotal: toNumber(entry.subtotal),
       taxPercent: toNumber(entry.tax_percent),
       totalCost: toNumber(entry.total_cost),
+      metadata: entry.metadata ?? {},
     });
     byCostCodeItemId.equipment.set(entry.cost_code_item_id, list);
   }
@@ -598,6 +610,7 @@ export async function loadEstimateGraph(admin, estimateIds = []) {
       base: toNumber(entry.base),
       taxPercent: toNumber(entry.tax_percent),
       totalCost: toNumber(entry.total_cost),
+      metadata: entry.metadata ?? {},
     });
     byCostCodeItemId.overhead.set(entry.cost_code_item_id, list);
   }
@@ -644,7 +657,7 @@ export async function loadEstimateGraph(admin, estimateIds = []) {
 }
 
 export function composeEstimateRecord(estimate, costCodes = []) {
-  const summary =
+  const summaryBase =
     costCodes.length || !estimate.summary || !Object.keys(estimate.summary).length
       ? buildEstimateComputation({
           projectId: estimate.project_id,
@@ -657,6 +670,8 @@ export function composeEstimateRecord(estimate, costCodes = []) {
           costCodes,
         }).summary
       : estimate.summary;
+
+  const summary = mergeEstimateSummaryMeta(summaryBase, estimate.summary);
 
   return {
     ...estimate,
