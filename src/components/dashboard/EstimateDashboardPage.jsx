@@ -1427,10 +1427,17 @@ export function EstimateDashboardPage() {
     event.preventDefault();
     setTemplateBusy(true);
     setError("");
+    const templatePayload = {
+      name: templateForm.name,
+      isDefault: templateForm.isDefault,
+      templateKind: templateForm.templateKind,
+      configuration: normalizeTemplateConfiguration(templateForm.configuration),
+      ...(templateForm.id ? { id: templateForm.id } : {}),
+    };
     const res = await fetch("/api/estimate-templates", {
       method: templateForm.id ? "PUT" : "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(templateForm),
+      body: JSON.stringify(templatePayload),
     });
     const json = await res.json().catch(() => null);
     setTemplateBusy(false);
@@ -1439,6 +1446,23 @@ export function EstimateDashboardPage() {
       return;
     }
     invalidateApiQuery("/api/estimate-templates");
+    if (json?.template) {
+      const savedTemplate = {
+        ...json.template,
+        configuration: normalizeTemplateConfiguration(json.template.configuration),
+      };
+      templatesQuery.setData((current) => {
+        const currentTemplates = current?.templates ?? [];
+        const nextTemplates = currentTemplates.some((template) => template.id === savedTemplate.id)
+          ? currentTemplates.map((template) => (template.id === savedTemplate.id ? savedTemplate : template))
+          : [...currentTemplates, savedTemplate];
+        return { ...(current || {}), templates: nextTemplates };
+      });
+      openTemplate(savedTemplate);
+      if (!form.templateId || templateForm.id === form.templateId || json.template.is_default) {
+        setForm((current) => ({ ...current, templateId: savedTemplate.id }));
+      }
+    }
     setMessage("Template saved.");
   }
 

@@ -211,6 +211,22 @@ function formatPdfCurrency(value) {
   }).format(normalizeNumber(value));
 }
 
+function compactDetailParts(parts = []) {
+  return parts
+    .filter(([, value]) => {
+      if (value === undefined || value === null) return false;
+      if (typeof value === "number") return value !== 0;
+      return String(value).trim() !== "";
+    })
+    .map(([label, value]) => `${label}: ${value}`)
+    .join(" | ");
+}
+
+function formatPdfPercent(value) {
+  const percent = normalizePercent(value) * 100;
+  return `${percent.toFixed(1)}%`;
+}
+
 function formatPdfDate(value) {
   if (!value) return "-";
   const date = new Date(value);
@@ -241,12 +257,21 @@ function flattenEstimateRows(estimate) {
 
   (estimate?.cost_codes ?? []).forEach((costCode, index) => {
     const groupLabel = costCode.costCode?.name || costCode.costCode?.code || `Cost Line ${index + 1}`;
+    const groupCode = costCode.costCode?.code || "";
+    const beforeCount = rows.length;
 
     (costCode.laborEntries ?? []).forEach((entry) => {
       const meta = entry.metadata ?? {};
+      const details = compactDetailParts([
+        ["Class", meta.classification],
+        ["ST", `${normalizeNumber(entry.stHours)} hrs @ ${formatPdfCurrency(entry.stRate)}`],
+        ["OT", `${normalizeNumber(entry.otHours)} hrs @ ${formatPdfCurrency(entry.otRate)}`],
+        ["Base wage", meta.baseWage ? formatPdfCurrency(meta.baseWage) : ""],
+        ["Tax", meta.taxPercent ? formatPdfPercent(meta.taxPercent) : ""],
+      ]);
       rows.push({
-        item: meta.title || groupLabel,
-        description: `${meta.classification || "Labor"}${entry.description ? ` | ${entry.description}` : ""}`,
+        item: meta.title || entry.description || groupCode || groupLabel,
+        description: ["Labor", entry.description || groupLabel, details].filter(Boolean).join(" | "),
         qty: normalizeNumber(entry.stHours) + normalizeNumber(entry.otHours),
         rate: normalizeNumber(entry.stRate) || meta.derivedStraightRate || 0,
         tax: 0,
@@ -256,9 +281,16 @@ function flattenEstimateRows(estimate) {
 
     (costCode.materialEntries ?? []).forEach((entry) => {
       const meta = entry.metadata ?? {};
+      const details = compactDetailParts([
+        ["Code", meta.code],
+        ["UOM", meta.uom],
+        ["Waste", entry.wastePercent ? formatPdfPercent(entry.wastePercent) : ""],
+        ["Adj qty", entry.adjustedQty],
+        ["Freight", entry.freight ? formatPdfCurrency(entry.freight) : ""],
+      ]);
       rows.push({
-        item: meta.code || groupLabel,
-        description: entry.description || groupLabel,
+        item: meta.code || groupCode || groupLabel,
+        description: ["Material", entry.description || groupLabel, details].filter(Boolean).join(" | "),
         qty: normalizeNumber(entry.quantity),
         rate: normalizeNumber(entry.unitRate),
         tax: normalizePercent(entry.taxPercent) * 100,
@@ -268,9 +300,16 @@ function flattenEstimateRows(estimate) {
 
     (costCode.equipmentEntries ?? []).forEach((entry) => {
       const meta = entry.metadata ?? {};
+      const details = compactDetailParts([
+        ["Code", meta.code],
+        ["Qty", entry.qty],
+        ["Days", entry.days],
+        ["Freight", entry.freight ? formatPdfCurrency(entry.freight) : ""],
+        ["Fuel", entry.fuel ? formatPdfCurrency(entry.fuel) : ""],
+      ]);
       rows.push({
-        item: meta.code || groupLabel,
-        description: entry.description || groupLabel,
+        item: meta.code || groupCode || groupLabel,
+        description: ["Equipment", entry.description || groupLabel, details].filter(Boolean).join(" | "),
         qty: normalizeNumber(entry.qty) * Math.max(normalizeNumber(entry.days), 1),
         rate: normalizeNumber(entry.rate),
         tax: normalizePercent(entry.taxPercent) * 100,
@@ -280,35 +319,67 @@ function flattenEstimateRows(estimate) {
 
     (costCode.overheadEntries ?? []).forEach((entry) => {
       const meta = entry.metadata ?? {};
+      const details = compactDetailParts([
+        ["Code", meta.code],
+        ["UOM", meta.uom],
+        ["Qty", entry.qty],
+        ["Days", entry.days],
+      ]);
       rows.push({
-        item: meta.code || groupLabel,
-        description: entry.description || groupLabel,
+        item: meta.code || groupCode || groupLabel,
+        description: ["Overhead", entry.description || groupLabel, details].filter(Boolean).join(" | "),
         qty: normalizeNumber(entry.qty) * Math.max(normalizeNumber(entry.days), 1),
         rate: normalizeNumber(entry.rate),
         tax: normalizePercent(entry.taxPercent) * 100,
         amount: normalizeNumber(entry.totalCost),
       });
     });
+
+    if (rows.length === beforeCount && normalizeNumber(costCode.totalCost)) {
+      rows.push({
+        item: groupCode || groupLabel,
+        description: costCode.description || costCode.costCode?.description || groupLabel,
+        qty: 1,
+        rate: normalizeNumber(costCode.totalCost),
+        tax: 0,
+        amount: normalizeNumber(costCode.totalCost),
+      });
+    }
   });
 
-  return rows.length ? rows : [
+  if (rows.length) return rows;
+
+  const lineItems = normalizeEstimateLineItems(estimate?.line_items ?? []);
+  if (lineItems.length) {
+    return lineItems.map((item) => ({
+      item: item.costCode || item.scope || "Line Item",
+      description: [item.description, item.notes].filter(Boolean).join(" | ") || item.scope || estimate?.title || "Estimate",
+      qty: item.quantity || 1,
+      rate: item.quantity ? item.totalCost / item.quantity : item.totalCost,
+      tax: 0,
+      amount: item.totalCost,
+    }));
+  }
+
+  return [
     { item: "Estimate", description: estimate?.title || "Estimate", qty: 1, rate: 0, tax: 0, amount: normalizeNumber(estimate?.summary?.finalBid || estimate?.summary?.totalPrice) },
   ];
 }
 
-function drawText(commands, text, x, y, size = 10) {
+function drawText(commands, text, x, y, size = 10, fillRgb = [15, 23, 42]) {
   commands.push("BT");
+  commands.push(`${pdfColor(fillRgb)} rg`);
   commands.push(`/F1 ${size} Tf`);
   commands.push(`1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm`);
   commands.push(`(${escapePdfText(text)}) Tj`);
   commands.push("ET");
 }
 
-function drawWrappedText(commands, text, x, y, width, size = 10, leading = 13) {
+function drawWrappedText(commands, text, x, y, width, size = 10, leading = 13, fillRgb = [15, 23, 42]) {
   const maxLength = Math.max(12, Math.floor(width / (size * 0.56)));
   const lines = wrapPdfLine(text, maxLength);
   lines.forEach((line, index) => {
-    drawText(commands, line, x, y - index * leading, size);
+    drawText(commands, line, x, y - index * leading, size, fillRgb);
   });
   return lines.length * leading;
 }
@@ -337,6 +408,7 @@ function buildPdfDocument(estimate) {
   const accentSoft = accent.map((value) => Math.min(255, Math.round(value + (255 - value) * 0.86)));
   const ink = [15, 23, 42];
   const muted = [100, 116, 139];
+  const white = [255, 255, 255];
   const line = [222, 229, 239];
   const page = { width: 595, height: 842, margin: 42 };
   const headerHeight = 92;
@@ -363,17 +435,17 @@ function buildPdfDocument(estimate) {
     drawRect(commands, 0, page.height - 112, page.width, 112, accent, null);
     drawRect(commands, page.margin, page.height - 94, 48, 48, [255, 255, 255], null);
     drawText(commands, company.logoText || "ACM", page.margin + 10, page.height - 77, 16);
-    drawText(commands, company.name || branding.companyName || "Your Company", page.margin + 62, page.height - 62, 18);
-    drawText(commands, company.address || "Company address", page.margin + 62, page.height - 79, 10);
-    drawText(commands, [company.contactPhone, company.contactEmail].filter(Boolean).join(" | ") || "Phone | Email", page.margin + 62, page.height - 94, 10);
-    drawText(commands, estimate?.title || "Estimate", page.width - 180, page.height - 62, 18);
-    drawText(commands, `#${estimate?.estimate_number || "Draft"}`, page.width - 180, page.height - 80, 11);
-    drawText(commands, formatPdfDate(estimate?.estimate_date), page.width - 180, page.height - 95, 10);
+    drawText(commands, company.name || branding.companyName || "Your Company", page.margin + 62, page.height - 62, 18, white);
+    drawText(commands, company.address || "Company address", page.margin + 62, page.height - 79, 10, white);
+    drawText(commands, [company.contactPhone, company.contactEmail].filter(Boolean).join(" | ") || "Phone | Email", page.margin + 62, page.height - 94, 10, white);
+    drawText(commands, estimate?.title || "Estimate", page.width - 180, page.height - 62, 18, white);
+    drawText(commands, `#${estimate?.estimate_number || "Draft"}`, page.width - 180, page.height - 80, 11, white);
+    drawText(commands, formatPdfDate(estimate?.estimate_date), page.width - 180, page.height - 95, 10, white);
 
     y = page.height - headerHeight - 40;
     drawRect(commands, page.margin, y - 84, 266, 84, [255, 255, 255], line);
     drawRect(commands, page.width - page.margin - 216, y - 84, 216, 84, [255, 255, 255], line);
-    drawText(commands, "Customer / Client Details", page.margin + 14, y - 20, 11);
+    drawText(commands, "Customer Details", page.margin + 14, y - 20, 11);
     drawText(commands, customer.name || estimate?.client?.name || "Client name", page.margin + 14, y - 38, 12);
     drawWrappedText(commands, customer.address || estimate?.client?.address || "-", page.margin + 14, y - 54, 238, 9, 12);
     drawText(commands, [customer.email || estimate?.client?.email, customer.phone || estimate?.client?.contact].filter(Boolean).join(" | ") || "-", page.margin + 14, y - 92, 9);
@@ -387,7 +459,7 @@ function buildPdfDocument(estimate) {
     y -= 108;
     drawRect(commands, page.margin, y - 22, page.width - page.margin * 2, 22, accent, null);
     [["Item", page.margin + 10], ["Description", page.margin + 112], ["Qty", 370], ["Rate", 420], ["Tax", 482], ["Amount", 530]].forEach(([label, x]) => {
-      drawText(commands, label, x, y - 15, 9);
+      drawText(commands, label, x, y - 15, 9, white);
     });
     y -= 28;
   }

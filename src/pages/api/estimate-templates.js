@@ -2,6 +2,11 @@ import { z } from "zod";
 import { getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
 
+const optionalUuid = z.preprocess(
+  (value) => (value === "" || value == null ? undefined : value),
+  z.string().uuid().optional()
+);
+
 function defaultTemplateConfiguration() {
   return {
     sections: {
@@ -136,7 +141,7 @@ function normalizeTemplateConfiguration(configuration) {
 }
 
 const TemplateSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: optionalUuid,
   name: z.string().trim().min(1),
   isDefault: z.boolean().optional().default(false),
   templateKind: z.string().trim().optional().default("standard"),
@@ -219,7 +224,7 @@ export default async function handler(req, res) {
         .single();
 
       if (error || !data) return sendError(res, 500, "template_create_failed", error?.message);
-      return sendOk(res, { template: data });
+      return sendOk(res, { template: { ...data, configuration: normalizeTemplateConfiguration(data.configuration) } });
     } catch (error) {
       return sendError(res, 500, "template_create_failed", error.message);
     }
@@ -249,7 +254,7 @@ export default async function handler(req, res) {
         .single();
 
       if (error || !data) return sendError(res, 500, "template_update_failed", error?.message);
-      return sendOk(res, { template: data });
+      return sendOk(res, { template: { ...data, configuration: normalizeTemplateConfiguration(data.configuration) } });
     } catch (error) {
       return sendError(res, 500, "template_update_failed", error.message);
     }

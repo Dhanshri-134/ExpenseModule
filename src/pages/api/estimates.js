@@ -218,7 +218,7 @@ async function attachEstimateRelations(ctx, estimates) {
       ? ctx.admin.from("projects").select("id, name, client_id").in("id", projectIds)
       : Promise.resolve({ data: [] }),
     clientIds.length ? ctx.admin.from("clients").select("id, name, contact, email, address").in("id", clientIds) : Promise.resolve({ data: [] }),
-    templateIds.length ? ctx.admin.from("estimate_templates").select("id, name, is_default").in("id", templateIds) : Promise.resolve({ data: [] }),
+    templateIds.length ? ctx.admin.from("estimate_templates").select("id, name, is_default, configuration").in("id", templateIds) : Promise.resolve({ data: [] }),
   ]);
 
   const clientMap = new Map((clients ?? []).map((client) => [client.id, client]));
@@ -369,6 +369,7 @@ export default async function handler(req, res) {
       if (exportType === "pdf") {
         const { estimateToPdfBuffer } = await import("@/lib/projectModules");
         res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Cache-Control", "no-store, max-age=0");
         res.setHeader(
           "Content-Disposition",
           `${disposition === "inline" ? "inline" : "attachment"}; filename="estimate-${enrichedEstimate.estimate_number}.pdf"`
