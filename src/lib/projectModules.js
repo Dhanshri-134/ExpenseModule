@@ -258,93 +258,14 @@ function flattenEstimateRows(estimate) {
   (estimate?.cost_codes ?? []).forEach((costCode, index) => {
     const groupLabel = costCode.costCode?.name || costCode.costCode?.code || `Cost Line ${index + 1}`;
     const groupCode = costCode.costCode?.code || "";
-    const beforeCount = rows.length;
-
-    (costCode.laborEntries ?? []).forEach((entry) => {
-      const meta = entry.metadata ?? {};
-      const details = compactDetailParts([
-        ["Class", meta.classification],
-        ["ST", `${normalizeNumber(entry.stHours)} hrs @ ${formatPdfCurrency(entry.stRate)}`],
-        ["OT", `${normalizeNumber(entry.otHours)} hrs @ ${formatPdfCurrency(entry.otRate)}`],
-        ["Base wage", meta.baseWage ? formatPdfCurrency(meta.baseWage) : ""],
-        ["Tax", meta.taxPercent ? formatPdfPercent(meta.taxPercent) : ""],
-      ]);
-      rows.push({
-        item: meta.title || entry.description || groupCode || groupLabel,
-        description: ["Labor", entry.description || groupLabel, details].filter(Boolean).join(" | "),
-        qty: normalizeNumber(entry.stHours) + normalizeNumber(entry.otHours),
-        rate: normalizeNumber(entry.stRate) || meta.derivedStraightRate || 0,
-        tax: 0,
-        amount: normalizeNumber(entry.totalCost),
-      });
+    rows.push({
+      item: groupCode || `CL-${index + 1}`,
+      description: costCode.description || groupLabel,
+      qty: `${(costCode.laborEntries ?? []).length}/${(costCode.materialEntries ?? []).length}/${(costCode.equipmentEntries ?? []).length}/${(costCode.overheadEntries ?? []).length}`,
+      rate: normalizeNumber(costCode.laborCost) + normalizeNumber(costCode.materialCost) + normalizeNumber(costCode.equipmentCost) + normalizeNumber(costCode.directOverhead),
+      tax: 0,
+      amount: normalizeNumber(costCode.totalCost),
     });
-
-    (costCode.materialEntries ?? []).forEach((entry) => {
-      const meta = entry.metadata ?? {};
-      const details = compactDetailParts([
-        ["Code", meta.code],
-        ["UOM", meta.uom],
-        ["Waste", entry.wastePercent ? formatPdfPercent(entry.wastePercent) : ""],
-        ["Adj qty", entry.adjustedQty],
-        ["Freight", entry.freight ? formatPdfCurrency(entry.freight) : ""],
-      ]);
-      rows.push({
-        item: meta.code || groupCode || groupLabel,
-        description: ["Material", entry.description || groupLabel, details].filter(Boolean).join(" | "),
-        qty: normalizeNumber(entry.quantity),
-        rate: normalizeNumber(entry.unitRate),
-        tax: normalizePercent(entry.taxPercent) * 100,
-        amount: normalizeNumber(entry.totalCost),
-      });
-    });
-
-    (costCode.equipmentEntries ?? []).forEach((entry) => {
-      const meta = entry.metadata ?? {};
-      const details = compactDetailParts([
-        ["Code", meta.code],
-        ["Qty", entry.qty],
-        ["Days", entry.days],
-        ["Freight", entry.freight ? formatPdfCurrency(entry.freight) : ""],
-        ["Fuel", entry.fuel ? formatPdfCurrency(entry.fuel) : ""],
-      ]);
-      rows.push({
-        item: meta.code || groupCode || groupLabel,
-        description: ["Equipment", entry.description || groupLabel, details].filter(Boolean).join(" | "),
-        qty: normalizeNumber(entry.qty) * Math.max(normalizeNumber(entry.days), 1),
-        rate: normalizeNumber(entry.rate),
-        tax: normalizePercent(entry.taxPercent) * 100,
-        amount: normalizeNumber(entry.totalCost),
-      });
-    });
-
-    (costCode.overheadEntries ?? []).forEach((entry) => {
-      const meta = entry.metadata ?? {};
-      const details = compactDetailParts([
-        ["Code", meta.code],
-        ["UOM", meta.uom],
-        ["Qty", entry.qty],
-        ["Days", entry.days],
-      ]);
-      rows.push({
-        item: meta.code || groupCode || groupLabel,
-        description: ["Overhead", entry.description || groupLabel, details].filter(Boolean).join(" | "),
-        qty: normalizeNumber(entry.qty) * Math.max(normalizeNumber(entry.days), 1),
-        rate: normalizeNumber(entry.rate),
-        tax: normalizePercent(entry.taxPercent) * 100,
-        amount: normalizeNumber(entry.totalCost),
-      });
-    });
-
-    if (rows.length === beforeCount && normalizeNumber(costCode.totalCost)) {
-      rows.push({
-        item: groupCode || groupLabel,
-        description: costCode.description || costCode.costCode?.description || groupLabel,
-        qty: 1,
-        rate: normalizeNumber(costCode.totalCost),
-        tax: 0,
-        amount: normalizeNumber(costCode.totalCost),
-      });
-    }
   });
 
   if (rows.length) return rows;
@@ -364,6 +285,65 @@ function flattenEstimateRows(estimate) {
   return [
     { item: "Estimate", description: estimate?.title || "Estimate", qty: 1, rate: 0, tax: 0, amount: normalizeNumber(estimate?.summary?.finalBid || estimate?.summary?.totalPrice) },
   ];
+}
+
+function buildCostLineDetailSections(estimate) {
+  return (estimate?.cost_codes ?? []).map((costCode, index) => {
+    const label = costCode.costCode?.name || costCode.costCode?.code || `Cost Line ${index + 1}`;
+    const code = costCode.costCode?.code || "";
+
+    return {
+      label,
+      code,
+      description: costCode.description || costCode.costCode?.description || "",
+      groups: [
+        {
+          title: "Labour",
+          columns: ["Item", "Classification", "Hours", "Rate", "Total"],
+          rows: (costCode.laborEntries ?? []).map((entry) => [
+            entry.metadata?.title || entry.description || "Labour",
+            entry.metadata?.classification || "-",
+            `${entry.stHours || 0} ST / ${entry.otHours || 0} OT`,
+            `${formatPdfCurrency(entry.stRate || 0)} / ${formatPdfCurrency(entry.otRate || 0)}`,
+            formatPdfCurrency(entry.totalCost || 0),
+          ]),
+        },
+        {
+          title: "Material",
+          columns: ["Code", "Description", "Qty", "Rate", "Total"],
+          rows: (costCode.materialEntries ?? []).map((entry) => [
+            entry.metadata?.code || "-",
+            entry.description || label,
+            `${entry.quantity || 0} ${entry.metadata?.uom || ""}`.trim(),
+            formatPdfCurrency(entry.unitRate || 0),
+            formatPdfCurrency(entry.totalCost || 0),
+          ]),
+        },
+        {
+          title: "Equipment",
+          columns: ["Code", "Description", "Usage", "Rate", "Total"],
+          rows: (costCode.equipmentEntries ?? []).map((entry) => [
+            entry.metadata?.code || "-",
+            entry.description || label,
+            `${entry.qty || 0} x ${entry.days || 0} days`,
+            formatPdfCurrency(entry.rate || 0),
+            formatPdfCurrency(entry.totalCost || 0),
+          ]),
+        },
+        {
+          title: "Overhead",
+          columns: ["Code", "Description", "Qty", "Rate", "Total"],
+          rows: (costCode.overheadEntries ?? []).map((entry) => [
+            entry.metadata?.code || "-",
+            entry.description || label,
+            `${entry.qty || 0} ${entry.metadata?.uom || ""}`.trim(),
+            formatPdfCurrency(entry.rate || 0),
+            formatPdfCurrency(entry.totalCost || 0),
+          ]),
+        },
+      ],
+    };
+  });
 }
 
 function drawText(commands, text, x, y, size = 10, fillRgb = [15, 23, 42]) {
@@ -416,18 +396,20 @@ function buildPdfDocument(estimate) {
   const company = meta.company || {};
   const totals = meta.totals || {};
   const rows = flattenEstimateRows(estimate);
+  const detailSections = buildCostLineDetailSections(estimate);
   const summary = estimate?.summary || {};
   const notes = meta.notes || estimate?.notes || "";
   const terms = meta.terms || "This estimate is valid for the period shown above and is subject to final site conditions.";
   const signatureLabel = meta.signatureLabel || "Accepted By";
   const signatureName = company.signatureName || "";
+  const stampLabel = company.stampLabel || company.name || "";
   const validUntil = meta.validUntil || "";
   const pages = [];
   let commands = [];
   let y = page.height - page.margin;
   let pageIndex = 0;
 
-  function startPage() {
+  function startPage(mode = "summary") {
     commands = [];
     y = page.height - page.margin;
     pageIndex += 1;
@@ -443,25 +425,34 @@ function buildPdfDocument(estimate) {
     drawText(commands, formatPdfDate(estimate?.estimate_date), page.width - 180, page.height - 95, 10, white);
 
     y = page.height - headerHeight - 40;
-    drawRect(commands, page.margin, y - 84, 266, 84, [255, 255, 255], line);
-    drawRect(commands, page.width - page.margin - 216, y - 84, 216, 84, [255, 255, 255], line);
-    drawText(commands, "Customer Details", page.margin + 14, y - 20, 11);
-    drawText(commands, customer.name || estimate?.client?.name || "Client name", page.margin + 14, y - 38, 12);
-    drawWrappedText(commands, customer.address || estimate?.client?.address || "-", page.margin + 14, y - 54, 238, 9, 12);
-    drawText(commands, [customer.email || estimate?.client?.email, customer.phone || estimate?.client?.contact].filter(Boolean).join(" | ") || "-", page.margin + 14, y - 92, 9);
+    if (mode === "summary") {
+      drawRect(commands, page.margin, y - 104, 266, 104, [255, 255, 255], line);
+      drawRect(commands, page.width - page.margin - 216, y - 104, 216, 104, [255, 255, 255], line);
+      drawText(commands, "Customer Details", page.margin + 14, y - 20, 11);
+      drawText(commands, customer.name || estimate?.client?.name || "Client name", page.margin + 14, y - 36, 12);
+      // drawRect(commands, page.margin + 14, y - 96, 112, 18, accentSoft, line, 0.7);
+      // drawRect(commands, page.margin + 136, y - 96, 116, 18, accentSoft, line, 0.7);
+      drawText(commands, customer.email || estimate?.client?.email || "-", page.margin + 18, y - 89, 8);
+      drawText(commands, customer.phone || estimate?.client?.contact || "-", page.margin + 140, y - 89, 8);
+      drawWrappedText(commands, customer.address || estimate?.client?.address || "-", page.margin + 14, y - 50, 238, 9, 12);
 
-    drawText(commands, "Estimate Details", page.width - page.margin - 202, y - 20, 11);
-    drawText(commands, `Title: ${estimate?.title || "Estimate"}`, page.width - page.margin - 202, y - 36, 10);
-    drawText(commands, `Estimate No: #${estimate?.estimate_number || "Draft"}`, page.width - page.margin - 202, y - 50, 10);
-    drawText(commands, `Date: ${formatPdfDate(estimate?.estimate_date)}`, page.width - page.margin - 202, y - 64, 10);
-    drawText(commands, `Valid Until: ${formatPdfDate(validUntil)}`, page.width - page.margin - 202, y - 78, 10);
+      drawText(commands, "Estimate Details", page.width - page.margin - 202, y - 20, 11);
+      drawText(commands, `Title: ${estimate?.title || "Estimate"}`, page.width - page.margin - 202, y - 36, 10);
+      drawText(commands, `Estimate No: #${estimate?.estimate_number || "Draft"}`, page.width - page.margin - 202, y - 50, 10);
+      drawText(commands, `Date: ${formatPdfDate(estimate?.estimate_date)}`, page.width - page.margin - 202, y - 64, 10);
+      drawText(commands, `Valid Until: ${formatPdfDate(validUntil)}`, page.width - page.margin - 202, y - 78, 10);
 
-    y -= 108;
-    drawRect(commands, page.margin, y - 22, page.width - page.margin * 2, 22, accent, null);
-    [["Item", page.margin + 10], ["Description", page.margin + 112], ["Qty", 370], ["Rate", 420], ["Tax", 482], ["Amount", 530]].forEach(([label, x]) => {
-      drawText(commands, label, x, y - 15, 9, white);
-    });
-    y -= 28;
+      y -= 128;
+      drawRect(commands, page.margin, y - 22, page.width - page.margin * 2, 22, accent, null);
+      [["Code", page.margin + 10], ["Cost Line", page.margin + 112], ["Rows", 370], ["Subtotal", 420], ["Tax", 482], ["Amount", 530]].forEach(([label, x]) => {
+        drawText(commands, label, x, y - 15, 9, white);
+      });
+      y -= 28;
+    } else {
+      drawRect(commands, page.margin, y - 34, page.width - page.margin * 2, 34, accentSoft, line);
+      drawText(commands, "Each Cost Line Details", page.margin + 14, y - 22, 13);
+      y -= 52;
+    }
   }
 
   function closePage() {
@@ -470,7 +461,7 @@ function buildPdfDocument(estimate) {
     pages.push(commands.join("\n"));
   }
 
-  startPage();
+  startPage("summary");
 
   rows.forEach((row) => {
     const descriptionLines = wrapPdfLine(row.description || "-", 34);
@@ -529,10 +520,58 @@ function buildPdfDocument(estimate) {
   commands.push(`${pdfColor(muted)} RG`);
   commands.push("1 w");
   commands.push(`${page.margin} ${y - 18} m ${page.margin + 210} ${y - 18} l S`);
+  if (stampLabel) {
+    drawRect(commands, page.margin + 220, y - 42, 110, 40, null, accent, 1);
+    drawText(commands, stampLabel.slice(0, 22), page.margin + 232, y - 24, 9);
+  }
   drawText(commands, "Date", page.margin + 290, y, 10);
   commands.push(`${page.margin + 290} ${y - 18} m ${page.margin + 430} ${y - 18} l S`);
 
   closePage();
+
+  detailSections.forEach((section) => {
+    startPage("detail");
+    drawText(commands, `${section.code ? `${section.code} - ` : ""}${section.label}`, page.margin, y, 14);
+    if (section.description) {
+      y -= 18;
+      drawWrappedText(commands, section.description, page.margin, y, page.width - page.margin * 2, 9, 12);
+      y -= 12;
+    }
+    y -= 18;
+
+    section.groups.forEach((group) => {
+      if (!group.rows.length) return;
+      if (y < 120) {
+        closePage();
+        startPage("detail");
+      }
+
+      drawRect(commands, page.margin, y - 20, page.width - page.margin * 2, 20, accent, null);
+      drawText(commands, group.title, page.margin + 10, y - 13, 9, white);
+      y -= 24;
+      drawRect(commands, page.margin, y - 18, page.width - page.margin * 2, 18, accentSoft, line);
+      group.columns.forEach((column, index) => {
+        drawText(commands, column, page.margin + 8 + index * 100, y - 12, 8);
+      });
+      y -= 22;
+
+      group.rows.forEach((row) => {
+        if (y < 100) {
+          closePage();
+          startPage("detail");
+        }
+        drawRect(commands, page.margin, y - 18, page.width - page.margin * 2, 18, [255, 255, 255], line, 0.5);
+        row.forEach((cell, index) => {
+          drawText(commands, String(cell || "-"), page.margin + 8 + index * 100, y - 12, 8);
+        });
+        y -= 20;
+      });
+
+      y -= 8;
+    });
+
+    closePage();
+  });
   return pages;
 }
 

@@ -798,7 +798,9 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
     }
 
     setMessage(editingProject ? "Project updated" : `Created ${json.project.job_number}`);
-    setOpen(false);
+    if (editingProject) {
+      setOpen(false);
+    }
     invalidateApiQuery("/api/dashboard");
     await projects.refresh();
     setFormBusy(false);
@@ -955,41 +957,48 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
 
       <Modal open={open} title={editingProject ? "Edit Project" : "Create Project"} onClose={() => setOpen(false)}>
         <form onSubmit={saveProject} className="grid gap-3">
-          <FieldGroup title="Client Info">
-            <LabeledField label="Client Name">
-              <input className={fieldClass()} value={form.clientName} disabled={Boolean(filteredClient && !editingProject)} onChange={(e) => setForm((prev) => ({ ...prev, clientName: e.target.value }))} />
-            </LabeledField>
-            <LabeledField label="Client Contact">
-              <input className={fieldClass()} value={form.clientContact} disabled={Boolean(filteredClient && !editingProject)} onChange={(e) => setForm((prev) => ({ ...prev, clientContact: e.target.value }))} />
-            </LabeledField>
-            <LabeledField label="Client Email">
-              <input className={fieldClass()} type="email" value={form.clientEmail} disabled={Boolean(filteredClient && !editingProject)} onChange={(e) => setForm((prev) => ({ ...prev, clientEmail: e.target.value }))} />
-            </LabeledField>
-            <LabeledField label="Client Address">
-              <textarea className={fieldClass()} rows={3} value={form.clientAddress} disabled={Boolean(filteredClient && !editingProject)} onChange={(e) => setForm((prev) => ({ ...prev, clientAddress: e.target.value }))} />
-            </LabeledField>
-          </FieldGroup>
+          <InlineMessage error={error} message={message} />
 
-          <FieldGroup title="Project Info">
-            <LabeledField label="Project Name">
-              <input className={fieldClass()} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
-            </LabeledField>
-            <LabeledField label="Location">
-              <input className={fieldClass()} value={form.location} onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))} />
-            </LabeledField>
-            <LabeledField label="Start Date">
-              <input className={fieldClass()} type="date" value={form.startDate} onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))} />
-            </LabeledField>
-            <LabeledField label="End Date">
-              <input className={fieldClass()} type="date" value={form.endDate} onChange={(e) => setForm((prev) => ({ ...prev, endDate: e.target.value }))} />
-            </LabeledField>
-            <LabeledField label="Estimate Budget">
-              <input className={fieldClass()} inputMode="decimal" value={form.contractValue} onChange={(e) => setForm((prev) => ({ ...prev, contractValue: e.target.value }))} />
-            </LabeledField>
-          </FieldGroup>
-          <BusyButton type="submit" busy={formBusy} className="acm-btn acm-btn-primary">
-            Save
-          </BusyButton>
+          <fieldset disabled={Boolean(message && !editingProject && !error)} className="contents">
+            <FieldGroup title="Client Info">
+              <LabeledField label="Client Name">
+                <input className={fieldClass()} value={form.clientName} disabled={Boolean(filteredClient && !editingProject)} onChange={(e) => setForm((prev) => ({ ...prev, clientName: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="Client Contact">
+                <input className={fieldClass()} value={form.clientContact} disabled={Boolean(filteredClient && !editingProject)} onChange={(e) => setForm((prev) => ({ ...prev, clientContact: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="Client Email">
+                <input className={fieldClass()} type="email" value={form.clientEmail} disabled={Boolean(filteredClient && !editingProject)} onChange={(e) => setForm((prev) => ({ ...prev, clientEmail: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="Client Address">
+                <textarea className={fieldClass()} rows={3} value={form.clientAddress} disabled={Boolean(filteredClient && !editingProject)} onChange={(e) => setForm((prev) => ({ ...prev, clientAddress: e.target.value }))} />
+              </LabeledField>
+            </FieldGroup>
+
+            <FieldGroup title="Project Info">
+              <LabeledField label="Project Name">
+                <input className={fieldClass()} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="Location">
+                <input className={fieldClass()} value={form.location} onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="Start Date">
+                <input className={fieldClass()} type="date" value={form.startDate} onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="End Date">
+                <input className={fieldClass()} type="date" value={form.endDate} onChange={(e) => setForm((prev) => ({ ...prev, endDate: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="Estimate Budget">
+                <input className={fieldClass()} inputMode="decimal" value={form.contractValue} onChange={(e) => setForm((prev) => ({ ...prev, contractValue: e.target.value }))} />
+              </LabeledField>
+            </FieldGroup>
+
+            {!(message && !editingProject && !error) && (
+              <BusyButton type="submit" busy={formBusy} className="acm-btn acm-btn-primary">
+                Save
+              </BusyButton>
+            )}
+          </fieldset>
         </form>
       </Modal>
     </>

@@ -4,6 +4,14 @@ import { invalidateAuthUsersCache } from "@/lib/server/authUsers";
 import { getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
 
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "8mb",
+    },
+  },
+};
+
 const UpdateSettingsSchema = z.object({
   name: z.string().min(1),
   userName: z.string().min(1),
@@ -25,6 +33,14 @@ const UpdateSettingsSchema = z.object({
     })
     .optional(),
 });
+
+function syncDemoCredential(userId, updates) {
+  try {
+    updateDemoCredential(userId, updates);
+  } catch (error) {
+    console.error("settings_demo_credential_sync_failed", error);
+  }
+}
 
 export default async function handler(req, res) {
   const ctx = await getRequestContext(req, res);
@@ -173,13 +189,13 @@ export default async function handler(req, res) {
     invalidateAuthUsersCache();
 
     if (payload.password) {
-      updateDemoCredential(ctx.user.id, {
+      syncDemoCredential(ctx.user.id, {
         email: payload.email,
         password: payload.password,
         userName: payload.userName.trim(),
       });
     } else {
-      updateDemoCredential(ctx.user.id, {
+      syncDemoCredential(ctx.user.id, {
         email: payload.email,
         userName: payload.userName.trim(),
       });

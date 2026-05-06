@@ -368,6 +368,36 @@ export default async function handler(req, res) {
 
       if (exportType === "pdf") {
         const { estimateToPdfBuffer } = await import("@/lib/projectModules");
+
+        const { data: company } = await ctx.admin
+          .from("companies")
+          .select("id, name, address, contact, email, metadata")
+          .eq("id", ctx.company.id)
+          .maybeSingle();
+
+        if (company) {
+          const companyMetadata = company.metadata || {};
+          enrichedEstimate.summary = enrichedEstimate.summary || {};
+          const existingMeta = enrichedEstimate.summary.documentMeta || {};
+          
+          enrichedEstimate.summary.documentMeta = {
+            ...existingMeta,
+            company: {
+              name: company.name,
+              address: company.address,
+              contactEmail: company.email,
+              contactPhone: company.contact,
+              logoText: companyMetadata.logoText || company.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 3),
+              logoDataUrl: companyMetadata.logoDataUrl,
+              signatureDataUrl: companyMetadata.signatureDataUrl,
+              signatureName: companyMetadata.signatureName,
+              stampDataUrl: companyMetadata.stampDataUrl,
+              stampLabel: companyMetadata.stampLabel,
+              ...existingMeta.company,
+            },
+          };
+        }
+
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Cache-Control", "no-store, max-age=0");
         res.setHeader(
