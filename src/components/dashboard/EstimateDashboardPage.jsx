@@ -2017,7 +2017,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
 
                         <div className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
                           <div className="mb-4 text-sm font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Auto Calculations</div>
-                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                          <div className="grid gap-4 md:grid-cols-3">
                             <LabeledInput label="Overhead %">
                               <input className={inputClass()} value={form.overheadPercent} onChange={(event) => updateEstimate("overheadPercent", event.target.value)} />
                             </LabeledInput>
@@ -2027,30 +2027,17 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                             <LabeledInput label="Commission %">
                               <input className={inputClass()} value={form.commissionPercent} onChange={(event) => updateEstimate("commissionPercent", event.target.value)} />
                             </LabeledInput>
-                            <LabeledInput label="Risk %">
-                              <input className={inputClass()} value={form.riskPercent} onChange={(event) => updateEstimate("riskPercent", event.target.value)} />
-                            </LabeledInput>
-                            <LabeledInput label="Inflation %">
-                              <input className={inputClass()} value={form.inflationRate} onChange={(event) => updateEstimate("inflationRate", event.target.value)} />
-                            </LabeledInput>
-                            <LabeledInput label="Escalation Years">
-                              <input className={inputClass()} value={form.escalationYears} onChange={(event) => updateEstimate("escalationYears", event.target.value)} />
-                            </LabeledInput>
-                            <LabeledInput label="Discount Type">
-                              <select className={inputClass()} value={form.discountType} onChange={(event) => updateEstimate("discountType", event.target.value)}>
-                                <option value="percent">Percent</option>
-                                <option value="fixed">Fixed Amount</option>
-                              </select>
-                            </LabeledInput>
-                            <LabeledInput label="Discount Value">
-                              <input className={inputClass()} value={form.discountValue} onChange={(event) => updateEstimate("discountValue", event.target.value)} />
-                            </LabeledInput>
-                            <LabeledInput label="Shipping Charge">
-                              <input className={inputClass()} value={form.shippingCharge} onChange={(event) => updateEstimate("shippingCharge", event.target.value)} />
-                            </LabeledInput>
-                            <LabeledInput label="Additional Charges">
-                              <input className={inputClass()} value={form.additionalCharges} onChange={(event) => updateEstimate("additionalCharges", event.target.value)} />
-                            </LabeledInput>
+                          </div>
+                          <div className="mt-4">
+                            <FormulaGrid
+                              items={[
+                                { label: "Total Cost", value: formatCurrency(previewSummary.baseCost), note: "Labor + Material + Equipment + Overhead", tone: "accent" },
+                                { label: "Overhead", value: formatCurrency(previewSummary.overheadAmount), note: `Total Cost x ${form.overheadPercent || 0}%` },
+                                { label: "Profit", value: formatCurrency(previewSummary.profitAmount), note: `(Total Cost + Overhead) x ${form.profitPercent || 0}%` },
+                                { label: "Commission", value: formatCurrency(previewSummary.commissionAmount), note: `(Total Cost + Overhead + Profit) x ${form.commissionPercent || 0}%` },
+                                { label: "Total Price", value: formatCurrency(previewSummary.totalPrice), note: "Total Cost + Overhead + Profit + Commission", tone: "accent" },
+                              ]}
+                            />
                           </div>
                         </div>
 
@@ -2332,11 +2319,11 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                      <MetricCard label="Subtotal" value={formatCurrency(uiTotals.subtotal)} />
-                      <MetricCard label="Discount" value={formatCurrency(uiTotals.discountAmount)} />
-                      <MetricCard label="Tax Breakdown" value={formatCurrency(uiTotals.taxAmount)} note="Calculated inline from section rates" />
-                      <MetricCard label="Additional Charges" value={formatCurrency(uiTotals.additionalCharges)} />
-                      <MetricCard label="Grand Total" value={formatCurrency(uiTotals.grandTotal)} tone="accent" />
+                      <MetricCard label="Man Hours" value={String(form.costLines.reduce((sum, costLine) => sum + (costLine.laborEntries ?? []).reduce((entrySum, entry) => entrySum + toNumber(entry.stHours) + toNumber(entry.otHours), 0), 0).toFixed(2))} />
+                      <MetricCard label="Overhead Costs" value={formatCurrency(previewSummary.directOverheadCost)} />
+                      <MetricCard label="Overhead" value={formatCurrency(previewSummary.overheadAmount)} />
+                      <MetricCard label="Profit" value={formatCurrency(previewSummary.profitAmount)} />
+                      <MetricCard label="Total Price" value={formatCurrency(previewSummary.totalPrice)} tone="accent" />
                     </div>
 
                     
