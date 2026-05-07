@@ -74,7 +74,7 @@ export default function LandingHero() {
         aria-hidden="true"
         className="pointer-events-none fixed inset-0 z-0"
         style={{
-          background: `radial-gradient(600px circle at ${pos.x}px ${pos.y}px, rgba(224,33,138,0.12), transparent 42%)`,
+          background: `radial-gradient(600px circle at ${pos.x}px ${pos.y}px, rgba(33, 62, 224, 0.12), transparent 42%)`,
         }}
       />
 

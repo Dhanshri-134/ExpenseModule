@@ -213,10 +213,10 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="text-sm font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Invoicing</div>
-            <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">QuickBooks-style invoice control</h1>
-            <div className="mt-3 max-w-3xl text-sm leading-6 text-[color:var(--acm-muted-fg)]">
+            <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">Invoice control</h1>
+            {/* <div className="mt-3 max-w-3xl text-sm leading-6 text-[color:var(--acm-muted-fg)]">
               Approved estimates now move through invoice draft and completed stages here, instead of landing on a placeholder screen.
-            </div>
+            </div> */}
           </div>
           <Link href={`/${roleBase}/estimates`} className="acm-btn acm-btn-secondary h-10 px-4">
             Open Estimates
@@ -226,7 +226,7 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
 
       <InlineMessage error={estimatesQuery.error || settingsQuery.error || error} message={message} />
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <section className="hidden sm:flex grid gap-4 md:grid-cols-2 xl:grid-cols-5 ">
         <MetricCard label="Approved Estimates" value={metrics.total} helper="Ready to invoice" />
         <MetricCard label="Not Started" value={metrics.ready} helper="Awaiting draft invoice" />
         <MetricCard label="Draft Invoices" value={metrics.draft} helper="Need final completion" />
