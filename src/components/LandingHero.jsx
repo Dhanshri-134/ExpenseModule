@@ -78,15 +78,13 @@ export default function LandingHero() {
         }}
       />
 
-      <div className="relative z-10 w-full px-6 py-20 sm:px-10">
+      <div className="relative z-10 w-full px-6 py20 sm:px-10 py-0">
         <div className="grid gap-16 lg:grid-cols-2 lg:items-center">
           <div>
             <div className="acm-badge">Construction App System</div>
 
-            <h1 className="mt-6 text-5xl font-semibold leading-tight tracking-tight">
-              Build smarter.
-              <br />
-              Manage everything in one place.
+            <h1 className="mt-6 text-3xl font-semibold leading-tight tracking-tight xl:text-5xl">
+              Build smarter. Manage everything in one place.
             </h1>
 
             <p className="mt-6 max-w-2xl text-[color:var(--acm-muted-fg)]">
@@ -95,8 +93,8 @@ export default function LandingHero() {
               powerful system.
             </p>
 
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-              <Link
+            <div className="hidden mt-8 gap-3 sm:flex sm:flex-row sm:flex-wrap sm:items-center">
+  <Link
                 href="/login/owner"
                 className="acm-btn acm-btn-primary acm-btn-lift"
               >

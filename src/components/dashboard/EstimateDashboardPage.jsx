@@ -2068,7 +2068,6 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                               <input className={inputClass("min-w-[220px]")} value={line.description} onChange={(event) => updateLine(line.id, "description", event.target.value)} placeholder="Cost line title" />
                             </div>
                             <div className="flex flex-wrap gap-2">
-                              <button type="button" onClick={() => openCostLineDetails(line.id)} className="acm-btn acm-btn-primary h-10 px-4">Open Details Page</button>
                               {form.costLines.length > 1 ? (
                                 <button type="button" onClick={() => removeCostLine(line.id)} className="acm-btn acm-btn-secondary h-10 px-4">Remove Line</button>
                               ) : null}
@@ -2154,107 +2153,158 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                               ) : null}
                             </div>
 
-                            <SectionTable
-                              title="Materials"
-                              sectionKey="materialEntries"
-                              rows={line.materialEntries}
-                              columns={[
-                                { key: "code", label: "Code" },
-                                { key: "description", label: "Description", list: true },
-                                { key: "quantity", label: "Quantity" },
-                                { key: "uom", label: "UOM" },
-                                { key: "wastePercent", label: "Waste %" },
-                                { key: "unitRate", label: "Unit Rate" },
-                                { key: "freight", label: "Freight" },
-                                { key: "taxPercent", label: "Tax %" },
-                              ]}
-                              onChange={(rowId, key, value) => updateEntry(line.id, "materialEntries", rowId, key, value)}
-                              onAdd={() => addEntry(line.id, "materialEntries")}
-                              onRemove={(rowId) => removeEntry(line.id, "materialEntries", rowId)}
-                              onKeyDown={handleGridKeyDown}
-                              datalistId={`material-options-${line.id}`}
-                              datalistOptions={suggestionLibrary.material}
-                              collapsed={Boolean(collapsedSections[`${line.id}:materialEntries`])}
-                              onToggle={() => toggleSection(line.id, "materialEntries")}
-                              renderDetails={(row, derived) => (
-                                <FormulaGrid
-                                  items={[
-                                    { label: "Waste Qty", value: derived.wasteQty.toFixed(2), note: "Quantity x Waste %" },
-                                    { label: "Cost", value: formatCurrency(derived.cost), note: "Quantity x Unit Rate" },
-                                    { label: "Cost w/ Freight", value: formatCurrency(derived.costWithFreight), note: "Cost + Freight" },
-                                    { label: "Cost w/ Tax", value: formatCurrency(derived.taxAmount), note: "Tax % x Cost w/ Freight" },
-                                    { label: "Total", value: formatCurrency(derived.total), note: "Cost w/ Freight + Cost w/ Tax", tone: "accent" },
-                                  ]}
-                                />
-                              )}
-                            />
+                            <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)]">
+                              <button type="button" onClick={() => toggleSection(line.id, "materialEntries")} className="flex w-full items-center justify-between px-4 py-4 text-left">
+                                <div>
+                                  <div className="text-lg font-bold">Material</div>
+                                  <div className="text-sm text-[color:var(--acm-muted-fg)]">Code, quantity, waste, freight, tax, and total material calculations</div>
+                                </div>
+                                <ChevronRightIcon className={`h-5 w-5 transition ${collapsedSections[`${line.id}:materialEntries`] ? "" : "rotate-90"}`} />
+                              </button>
+                              {!collapsedSections[`${line.id}:materialEntries`] ? (
+                                <div className="border-t border-[color:var(--acm-border)] p-4">
+                                  <div className="space-y-4">
+                                    {line.materialEntries.map((entry, entryIndex) => {
+                                      const derived = calculateMaterial(entry);
+                                      return (
+                                        <div key={entry.id} className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
+                                          <div className="mb-4 flex items-center justify-between">
+                                            <div className="text-sm font-bold">Material Entry {entryIndex + 1}</div>
+                                            {line.materialEntries.length > 1 ? <button type="button" onClick={() => removeEntry(line.id, "materialEntries", entry.id)} className="text-xs font-semibold text-rose-600">Remove Material</button> : null}
+                                          </div>
+                                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                                            <LabeledInput label="Code"><input className={inputClass()} value={entry.code} onChange={(event) => updateEntry(line.id, "materialEntries", entry.id, "code", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Description"><input list={`material-options-${line.id}`} className={inputClass()} value={entry.description} onChange={(event) => updateEntry(line.id, "materialEntries", entry.id, "description", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Quantity"><input className={inputClass()} value={entry.quantity} onChange={(event) => updateEntry(line.id, "materialEntries", entry.id, "quantity", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="UOM"><input className={inputClass()} value={entry.uom} onChange={(event) => updateEntry(line.id, "materialEntries", entry.id, "uom", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Waste %"><input className={inputClass()} value={entry.wastePercent} onChange={(event) => updateEntry(line.id, "materialEntries", entry.id, "wastePercent", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Unit Rate ($)"><input className={inputClass()} value={entry.unitRate} onChange={(event) => updateEntry(line.id, "materialEntries", entry.id, "unitRate", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Freight ($)"><input className={inputClass()} value={entry.freight} onChange={(event) => updateEntry(line.id, "materialEntries", entry.id, "freight", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Tax (%)"><input className={inputClass()} value={entry.taxPercent} onChange={(event) => updateEntry(line.id, "materialEntries", entry.id, "taxPercent", event.target.value)} /></LabeledInput>
+                                          </div>
+                                          <div className="mt-4">
+                                            <FormulaGrid
+                                              items={[
+                                                { label: "Waste Qty", value: derived.wasteQty.toFixed(2), note: "Quantity x Waste %" },
+                                                { label: "Cost", value: formatCurrency(derived.cost), note: "Quantity x Unit Rate" },
+                                                { label: "Cost w/ Freight", value: formatCurrency(derived.costWithFreight), note: "Cost + Freight" },
+                                                { label: "Cost w/ Tax", value: formatCurrency(derived.taxAmount), note: "Tax % x Cost w/ Freight" },
+                                                { label: "Total", value: formatCurrency(derived.total), note: "Cost w/ Freight + Cost w/ Tax", tone: "accent" },
+                                              ]}
+                                            />
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                  <datalist id={`material-options-${line.id}`}>{suggestionLibrary.material.map((option) => <option key={option.label} value={option.label} />)}</datalist>
+                                  <div className="mt-4 flex justify-end">
+                                    <button type="button" onClick={() => addEntry(line.id, "materialEntries")} className="acm-btn acm-btn-secondary h-10 px-4">Add Other Material</button>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
 
-                            <SectionTable
-                              title="Equipment"
-                              sectionKey="equipmentEntries"
-                              rows={line.equipmentEntries}
-                              columns={[
-                                { key: "code", label: "Code" },
-                                { key: "description", label: "Description", list: true },
-                                { key: "quantity", label: "Quantity" },
-                                { key: "rentalDays", label: "Rental Days" },
-                                { key: "unitRate", label: "Unit Rate" },
-                                { key: "freight", label: "Freight" },
-                                { key: "fuelPercent", label: "Fuel %" },
-                                { key: "taxPercent", label: "Tax %" },
-                              ]}
-                              onChange={(rowId, key, value) => updateEntry(line.id, "equipmentEntries", rowId, key, value)}
-                              onAdd={() => addEntry(line.id, "equipmentEntries")}
-                              onRemove={(rowId) => removeEntry(line.id, "equipmentEntries", rowId)}
-                              onKeyDown={handleGridKeyDown}
-                              datalistId={`equipment-options-${line.id}`}
-                              datalistOptions={suggestionLibrary.equipment}
-                              collapsed={Boolean(collapsedSections[`${line.id}:equipmentEntries`])}
-                              onToggle={() => toggleSection(line.id, "equipmentEntries")}
-                              renderDetails={(row, derived) => (
-                                <FormulaGrid
-                                  items={[
-                                    { label: "Cost", value: formatCurrency(derived.cost), note: "Quantity x Rental Days x Unit Rate" },
-                                    { label: "Cost w/ Freight", value: formatCurrency(derived.costWithFreight), note: "Cost + Freight" },
-                                    { label: "Cost w/ Fuel", value: formatCurrency(derived.costWithFuel), note: "Fuel % x Cost w/ Freight + Cost w/ Freight" },
-                                    { label: "Cost w/ Tax", value: formatCurrency(derived.taxAmount), note: "Tax % x Cost w/ Fuel" },
-                                    { label: "Total", value: formatCurrency(derived.total), note: "Cost w/ Fuel + Cost w/ Tax", tone: "accent" },
-                                  ]}
-                                />
-                              )}
-                            />
+                            <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)]">
+                              <button type="button" onClick={() => toggleSection(line.id, "equipmentEntries")} className="flex w-full items-center justify-between px-4 py-4 text-left">
+                                <div>
+                                  <div className="text-lg font-bold">Equipment</div>
+                                  <div className="text-sm text-[color:var(--acm-muted-fg)]">Rental days, freight, fuel, tax, and total equipment calculations</div>
+                                </div>
+                                <ChevronRightIcon className={`h-5 w-5 transition ${collapsedSections[`${line.id}:equipmentEntries`] ? "" : "rotate-90"}`} />
+                              </button>
+                              {!collapsedSections[`${line.id}:equipmentEntries`] ? (
+                                <div className="border-t border-[color:var(--acm-border)] p-4">
+                                  <div className="space-y-4">
+                                    {line.equipmentEntries.map((entry, entryIndex) => {
+                                      const derived = calculateEquipment(entry);
+                                      return (
+                                        <div key={entry.id} className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
+                                          <div className="mb-4 flex items-center justify-between">
+                                            <div className="text-sm font-bold">Equipment Entry {entryIndex + 1}</div>
+                                            {line.equipmentEntries.length > 1 ? <button type="button" onClick={() => removeEntry(line.id, "equipmentEntries", entry.id)} className="text-xs font-semibold text-rose-600">Remove Equipment</button> : null}
+                                          </div>
+                                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                                            <LabeledInput label="Code"><input className={inputClass()} value={entry.code} onChange={(event) => updateEntry(line.id, "equipmentEntries", entry.id, "code", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Description"><input list={`equipment-options-${line.id}`} className={inputClass()} value={entry.description} onChange={(event) => updateEntry(line.id, "equipmentEntries", entry.id, "description", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Quantity"><input className={inputClass()} value={entry.quantity} onChange={(event) => updateEntry(line.id, "equipmentEntries", entry.id, "quantity", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Rental Days"><input className={inputClass()} value={entry.rentalDays} onChange={(event) => updateEntry(line.id, "equipmentEntries", entry.id, "rentalDays", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Unit Rate ($)"><input className={inputClass()} value={entry.unitRate} onChange={(event) => updateEntry(line.id, "equipmentEntries", entry.id, "unitRate", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Freight ($)"><input className={inputClass()} value={entry.freight} onChange={(event) => updateEntry(line.id, "equipmentEntries", entry.id, "freight", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Fuel (%)"><input className={inputClass()} value={entry.fuelPercent} onChange={(event) => updateEntry(line.id, "equipmentEntries", entry.id, "fuelPercent", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Tax (%)"><input className={inputClass()} value={entry.taxPercent} onChange={(event) => updateEntry(line.id, "equipmentEntries", entry.id, "taxPercent", event.target.value)} /></LabeledInput>
+                                          </div>
+                                          <div className="mt-4">
+                                            <FormulaGrid
+                                              items={[
+                                                { label: "Cost", value: formatCurrency(derived.cost), note: "Quantity x Rental Days x Unit Rate" },
+                                                { label: "Cost w/ Freight", value: formatCurrency(derived.costWithFreight), note: "Cost + Freight" },
+                                                { label: "Cost w/ Fuel", value: formatCurrency(derived.costWithFuel), note: "Fuel % x Cost w/ Freight + Cost w/ Freight" },
+                                                { label: "Cost w/ Tax", value: formatCurrency(derived.taxAmount), note: "Tax % x Cost w/ Fuel" },
+                                                { label: "Total", value: formatCurrency(derived.total), note: "Cost w/ Fuel + Cost w/ Tax", tone: "accent" },
+                                              ]}
+                                            />
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                  <datalist id={`equipment-options-${line.id}`}>{suggestionLibrary.equipment.map((option) => <option key={option.label} value={option.label} />)}</datalist>
+                                  <div className="mt-4 flex justify-end">
+                                    <button type="button" onClick={() => addEntry(line.id, "equipmentEntries")} className="acm-btn acm-btn-secondary h-10 px-4">Add Other Equipment</button>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
 
-                            <SectionTable
-                              title="Overheads"
-                              sectionKey="overheadEntries"
-                              rows={line.overheadEntries}
-                              columns={[
-                                { key: "code", label: "Code" },
-                                { key: "description", label: "Description", list: true },
-                                { key: "quantity", label: "Quantity" },
-                                { key: "uom", label: "UOM" },
-                                { key: "unitRate", label: "Unit Rate" },
-                                { key: "days", label: "Days" },
-                                { key: "taxPercent", label: "Tax %" },
-                              ]}
-                              onChange={(rowId, key, value) => updateEntry(line.id, "overheadEntries", rowId, key, value)}
-                              onAdd={() => addEntry(line.id, "overheadEntries")}
-                              onRemove={(rowId) => removeEntry(line.id, "overheadEntries", rowId)}
-                              onKeyDown={handleGridKeyDown}
-                              datalistId={`overhead-options-${line.id}`}
-                              datalistOptions={suggestionLibrary.overhead}
-                              collapsed={Boolean(collapsedSections[`${line.id}:overheadEntries`])}
-                              onToggle={() => toggleSection(line.id, "overheadEntries")}
-                              renderDetails={(row, derived) => (
-                                <FormulaGrid
-                                  items={[
-                                    { label: "Cost", value: formatCurrency(derived.cost), note: "Quantity x Unit Rate x Days" },
-                                    { label: "Cost w/ Tax", value: formatCurrency(derived.taxAmount), note: "Cost x Tax %" },
-                                    { label: "Total", value: formatCurrency(derived.total), note: "Cost + Cost w/ Tax", tone: "accent" },
-                                  ]}
-                                />
-                              )}
-                            />
+                            <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)]">
+                              <button type="button" onClick={() => toggleSection(line.id, "overheadEntries")} className="flex w-full items-center justify-between px-4 py-4 text-left">
+                                <div>
+                                  <div className="text-lg font-bold">Overhead</div>
+                                  <div className="text-sm text-[color:var(--acm-muted-fg)]">Quantity, days, tax, and total overhead calculations</div>
+                                </div>
+                                <ChevronRightIcon className={`h-5 w-5 transition ${collapsedSections[`${line.id}:overheadEntries`] ? "" : "rotate-90"}`} />
+                              </button>
+                              {!collapsedSections[`${line.id}:overheadEntries`] ? (
+                                <div className="border-t border-[color:var(--acm-border)] p-4">
+                                  <div className="space-y-4">
+                                    {line.overheadEntries.map((entry, entryIndex) => {
+                                      const derived = calculateOverhead(entry);
+                                      return (
+                                        <div key={entry.id} className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
+                                          <div className="mb-4 flex items-center justify-between">
+                                            <div className="text-sm font-bold">Overhead Entry {entryIndex + 1}</div>
+                                            {line.overheadEntries.length > 1 ? <button type="button" onClick={() => removeEntry(line.id, "overheadEntries", entry.id)} className="text-xs font-semibold text-rose-600">Remove Overhead</button> : null}
+                                          </div>
+                                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                                            <LabeledInput label="Code"><input className={inputClass()} value={entry.code} onChange={(event) => updateEntry(line.id, "overheadEntries", entry.id, "code", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Description"><input list={`overhead-options-${line.id}`} className={inputClass()} value={entry.description} onChange={(event) => updateEntry(line.id, "overheadEntries", entry.id, "description", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Quantity"><input className={inputClass()} value={entry.quantity} onChange={(event) => updateEntry(line.id, "overheadEntries", entry.id, "quantity", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="UOM"><input className={inputClass()} value={entry.uom} onChange={(event) => updateEntry(line.id, "overheadEntries", entry.id, "uom", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Unit Rate ($)"><input className={inputClass()} value={entry.unitRate} onChange={(event) => updateEntry(line.id, "overheadEntries", entry.id, "unitRate", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Days"><input className={inputClass()} value={entry.days} onChange={(event) => updateEntry(line.id, "overheadEntries", entry.id, "days", event.target.value)} /></LabeledInput>
+                                            <LabeledInput label="Tax (%)"><input className={inputClass()} value={entry.taxPercent} onChange={(event) => updateEntry(line.id, "overheadEntries", entry.id, "taxPercent", event.target.value)} /></LabeledInput>
+                                          </div>
+                                          <div className="mt-4">
+                                            <FormulaGrid
+                                              items={[
+                                                { label: "Cost", value: formatCurrency(derived.cost), note: "Quantity x Unit Rate x Days" },
+                                                { label: "Cost w/ Tax", value: formatCurrency(derived.taxAmount), note: "Cost x Tax %" },
+                                                { label: "Total", value: formatCurrency(derived.total), note: "Cost + Cost w/ Tax", tone: "accent" },
+                                              ]}
+                                            />
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                  <datalist id={`overhead-options-${line.id}`}>{suggestionLibrary.overhead.map((option) => <option key={option.label} value={option.label} />)}</datalist>
+                                  <div className="mt-4 flex justify-end">
+                                    <button type="button" onClick={() => addEntry(line.id, "overheadEntries")} className="acm-btn acm-btn-secondary h-10 px-4">Add Overhead</button>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
                           </div>
                         </div>
                       );
