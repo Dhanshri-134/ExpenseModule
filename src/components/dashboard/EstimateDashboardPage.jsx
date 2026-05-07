@@ -921,7 +921,7 @@ function SectionTable({
               <thead>
                 <tr className="text-left text-xs uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
                   {columns.map((column) => (
-                    <th key={column.key} className="px-2 py-2 font-semibold">{column.label}</th>
+                    <th key={column.key} className="px-2 py-2 font-semibold ">{column.label}</th>
                   ))}
                   <th className="px-2 py-2 font-semibold">Amount</th>
                   <th className="px-2 py-2 font-semibold"></th>

@@ -152,7 +152,7 @@
   border-right: 1px solid var(--acm-border);
   background: var(--acm-sidebar);
   padding: 14px;
-  box-shadow: 18px 0 50px rgba(0, 0, 0, 0.12);
+  /* box-shadow: 18px 0 50px rgba(0, 0, 0, 0.12); */
   transition: transform 0.28s ease;
   overflow-y: auto;
   scrollbar-width: thin;
@@ -188,7 +188,7 @@
   border-radius: 24px;
   background: var(--acm-surface);
   padding: 16px;
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.1);
+  /* box-shadow: 0 18px 42px rgba(0, 0, 0, 0.1); */
 }
 
 .viewerRow {
@@ -277,7 +277,8 @@
 
 .navItem:hover {
   transform: translateY(-1px);
-  background: var(--acm-surface-2);
+  background: #050e36;
+  color: var(--acm-bg);
 }
 
 .navItemActive {
