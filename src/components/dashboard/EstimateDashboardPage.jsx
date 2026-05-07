@@ -732,7 +732,7 @@ function MetricCard({ label, value, tone = "default", note }) {
 
 function FormulaGrid({ items = [] }) {
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
       {items.map((item) => (
         <MetricCard key={item.label} label={item.label} value={item.value} note={item.note} tone={item.tone || "default"} />
       ))}

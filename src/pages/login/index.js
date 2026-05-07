@@ -23,3 +23,7 @@ export async function getServerSideProps(ctx) {
   return { props: {} };
 }
 
+export default function LoginIndexPage() {
+  return null;
+}
+

@@ -10,6 +10,10 @@ function normalizePercent(value) {
   return Math.abs(parsed) > 1 ? parsed / 100 : parsed;
 }
 
+function sumValues(items = [], iteratee = (value) => value) {
+  return (items ?? []).reduce((sum, item) => sum + normalizeNumber(iteratee(item)), 0);
+}
+
 export function normalizeEstimateLineItems(items = []) {
   return (items ?? [])
     .map((item, index) => ({
@@ -260,13 +264,35 @@ function flattenEstimateRows(estimate) {
   (estimate?.cost_codes ?? []).forEach((costCode, index) => {
     const groupLabel = costCode.costCode?.name || costCode.costCode?.code || `Cost Line ${index + 1}`;
     const groupCode = costCode.costCode?.code || "";
+    const manHours = sumValues(costCode.laborEntries ?? [], (entry) => normalizeNumber(entry.stHours) + normalizeNumber(entry.otHours));
+    const overheadCosts = normalizeNumber(costCode.directOverhead);
+    const laborCost = normalizeNumber(costCode.laborCost);
+    const materialCost = normalizeNumber(costCode.materialCost);
+    const equipmentCost = normalizeNumber(costCode.equipmentCost);
+    const totalCost = normalizeNumber(costCode.totalCost);
+    const overheadPercent = normalizePercent(costCode.overheadPercent) * 100;
+    const profitPercent = normalizePercent(costCode.profitPercent) * 100;
+    const commissionPercent = normalizePercent(costCode.commissionPercent) * 100;
+    const overhead = normalizeNumber(costCode.overhead);
+    const profit = normalizeNumber(costCode.profit);
+    const commission = normalizeNumber(costCode.commission);
+    const totalPrice = normalizeNumber(costCode.totalPrice);
     rows.push({
-      item: groupCode || `CL-${index + 1}`,
-      description: costCode.description || groupLabel,
-      qty: `${(costCode.laborEntries ?? []).length}/${(costCode.materialEntries ?? []).length}/${(costCode.equipmentEntries ?? []).length}/${(costCode.overheadEntries ?? []).length}`,
-      rate: normalizeNumber(costCode.laborCost) + normalizeNumber(costCode.materialCost) + normalizeNumber(costCode.equipmentCost) + normalizeNumber(costCode.directOverhead),
-      tax: 0,
-      amount: normalizeNumber(costCode.totalCost),
+      code: groupCode || `CL-${index + 1}`,
+      costCode: costCode.description || groupLabel,
+      manHours,
+      overheadCosts,
+      laborCost,
+      materialCost,
+      equipmentCost,
+      totalCost,
+      overheadPercent,
+      profitPercent,
+      overhead,
+      profit,
+      commissionPercent,
+      commission,
+      totalPrice,
     });
   });
 
@@ -445,11 +471,16 @@ function buildPdfDocument(estimate) {
       drawText(commands, `Valid Until: ${formatPdfDate(validUntil)}`, page.width - page.margin - 202, y - 78, 10);
 
       y -= 128;
-      drawRect(commands, page.margin, y - 22, page.width - page.margin * 2, 22, accent, null);
-      [["Code", page.margin + 10], ["Cost Line", page.margin + 112], ["Rows", 370], ["Subtotal", 420], ["Tax", 482], ["Amount", 530]].forEach(([label, x]) => {
-        drawText(commands, label, x, y - 15, 9, white);
+      drawRect(commands, page.margin, y - 18, page.width - page.margin * 2, 18, accent, null);
+      [["Cost Codes", page.margin + 8], ["Man Hours", page.margin + 100], ["OH Costs", page.margin + 164], ["Labor", page.margin + 224], ["Material", page.margin + 282], ["Equipment", page.margin + 344], ["Total Cost", page.margin + 414]].forEach(([label, x]) => {
+        drawText(commands, label, x, y - 12, 7, white);
       });
-      y -= 28;
+      y -= 22;
+      drawRect(commands, page.margin, y - 18, page.width - page.margin * 2, 18, accent, null);
+      [["OH %", page.margin + 8], ["Profit %", page.margin + 62], ["OH", page.margin + 126], ["Profit", page.margin + 184], ["Comm %", page.margin + 244], ["Commission", page.margin + 304], ["Total Price", page.margin + 388]].forEach(([label, x]) => {
+        drawText(commands, label, x, y - 12, 7, white);
+      });
+      y -= 24;
     } else {
       drawRect(commands, page.margin, y - 34, page.width - page.margin * 2, 34, accentSoft, line);
       drawText(commands, "Each Cost Line Details", page.margin + 14, y - 22, 13);
@@ -466,23 +497,36 @@ function buildPdfDocument(estimate) {
   startPage("summary");
 
   rows.forEach((row) => {
-    const descriptionLines = wrapPdfLine(row.description || "-", 34);
-    const rowHeight = Math.max(18, descriptionLines.length * 12 + 8);
-    if (y - rowHeight < 180) {
+    const codeLines = wrapPdfLine(row.costCode || row.code || "-", 16);
+    const rowHeight = Math.max(34, codeLines.length * 10 + 10);
+    if (y - rowHeight - 18 < 180) {
       closePage();
       startPage();
     }
 
     drawRect(commands, page.margin, y - rowHeight + 4, page.width - page.margin * 2, rowHeight, [255, 255, 255], line, 0.6);
-    drawText(commands, row.item || "-", page.margin + 10, y - 12, 9);
-    descriptionLines.forEach((lineText, index) => {
-      drawText(commands, lineText, page.margin + 112, y - 12 - index * 11, 9);
+    drawText(commands, row.code || "-", page.margin + 8, y - 11, 7);
+    codeLines.forEach((lineText, index) => {
+      drawText(commands, lineText, page.margin + 54, y - 11 - index * 9, 7);
     });
-    drawText(commands, String(row.qty || 0), 370, y - 12, 9);
-    drawText(commands, formatPdfCurrency(row.rate || 0), 412, y - 12, 9);
-    drawText(commands, `${normalizeNumber(row.tax).toFixed(1)}%`, 485, y - 12, 9);
-    drawText(commands, formatPdfCurrency(row.amount || 0), 516, y - 12, 9);
+    drawText(commands, normalizeNumber(row.manHours).toFixed(2), page.margin + 100, y - 11, 7);
+    drawText(commands, formatPdfCurrency(row.overheadCosts || 0), page.margin + 154, y - 11, 7);
+    drawText(commands, formatPdfCurrency(row.laborCost || 0), page.margin + 214, y - 11, 7);
+    drawText(commands, formatPdfCurrency(row.materialCost || 0), page.margin + 272, y - 11, 7);
+    drawText(commands, formatPdfCurrency(row.equipmentCost || 0), page.margin + 334, y - 11, 7);
+    drawText(commands, formatPdfCurrency(row.totalCost || 0), page.margin + 406, y - 11, 7);
     y -= rowHeight;
+
+    drawRect(commands, page.margin, y - 14, page.width - page.margin * 2, 14, [248, 250, 252], line, 0.4);
+    drawText(commands, `${normalizeNumber(row.overheadPercent).toFixed(0)}%`, page.margin + 8, y - 9, 7);
+    drawText(commands, `${normalizeNumber(row.profitPercent).toFixed(0)}%`, page.margin + 62, y - 9, 7);
+    drawText(commands, formatPdfCurrency(row.overhead || 0), page.margin + 110, y - 9, 7);
+    drawText(commands, formatPdfCurrency(row.profit || 0), page.margin + 168, y - 9, 7);
+    drawText(commands, `${normalizeNumber(row.commissionPercent).toFixed(0)}%`, page.margin + 244, y - 9, 7);
+    drawText(commands, formatPdfCurrency(row.commission || 0), page.margin + 292, y - 9, 7);
+    drawText(commands, formatPdfCurrency(row.totalPrice || 0), page.margin + 382, y - 9, 7);
+    y -= 16;
+    y -= 6;
   });
 
   if (y < 230) {
