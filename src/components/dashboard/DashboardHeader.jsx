@@ -57,6 +57,7 @@ export default function DashboardHeader({
             </button>
             <div className={styles.headerText}>
               <div className={styles.company}>{companyName}</div>
+              {title ? <div className={styles.pageTitle}>{title}</div> : null}
             </div>
           </div>
 

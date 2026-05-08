@@ -255,25 +255,6 @@ export async function resolveOrCreateCostCode(admin, companyId, item) {
     .maybeSingle();
 
   if (existingByCode) {
-    const nextName = normalizeText(item.name) || existingByCode.name;
-    const nextDescription = normalizeText(item.description) || existingByCode.description;
-
-    if (nextName !== existingByCode.name || nextDescription !== existingByCode.description) {
-      const { data: updated, error } = await admin
-        .from("cost_codes")
-        .update({
-          name: nextName,
-          description: nextDescription || null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", existingByCode.id)
-        .select("id, code, name, description")
-        .single();
-
-      if (error || !updated) throw new Error(error?.message || "cost_code_update_failed");
-      return updated;
-    }
-
     return existingByCode;
   }
 

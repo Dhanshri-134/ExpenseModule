@@ -77,6 +77,15 @@
   min-width: 0;
 }
 
+.pageTitle {
+  margin-top: 0.2rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.82);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .company {
   overflow: hidden;
   text-overflow: ellipsis;

@@ -1174,18 +1174,7 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
             }}
             actions={
               <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelectedLead(lead);
-                    setFollowUpMessage("");
-                    setFollowUpError("");
-                  }}
-                  className="acm-btn acm-btn-secondary h-9 px-3 text-xs"
-                >
-                  Follow Ups
-                </button>
+                
                 <BusyButton
                   type="button"
                   busy={convertBusyId === lead.id}

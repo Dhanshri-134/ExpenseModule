@@ -136,6 +136,7 @@ const CostCodeInputSchema = z.object({
 
 const EstimatePayloadSchema = z.object({
   id: optionalUuid,
+  estimateNumber: z.coerce.number().int().nonnegative().optional(),
   projectId: optionalUuid,
   clientId: optionalUuid,
   templateId: optionalUuid,
@@ -163,9 +164,58 @@ function normalizeEstimatePayload(payload) {
 
   return {
     ...payload,
+    estimateNumber: payload.estimateNumber ? Number(payload.estimateNumber) : undefined,
     title,
     estimateDate,
   };
+}
+
+function collectSuggestedCostCodes(payload) {
+  const suggestions = [];
+  const pushSuggestion = (code, description = "") => {
+    const normalizedCode = String(code || "").trim();
+    if (!normalizedCode) return;
+    suggestions.push({
+      code: normalizedCode,
+      name: String(description || normalizedCode).trim() || normalizedCode,
+      description: String(description || "").trim() || null,
+    });
+  };
+
+  (payload.costCodes ?? []).forEach((costCode) => {
+    pushSuggestion(costCode.code, costCode.description || costCode.name);
+    (costCode.laborEntries ?? []).forEach((entry) => pushSuggestion(entry.metadata?.code, entry.description));
+    (costCode.materialEntries ?? []).forEach((entry) => pushSuggestion(entry.metadata?.code, entry.description));
+    (costCode.equipmentEntries ?? []).forEach((entry) => pushSuggestion(entry.metadata?.code, entry.description));
+    (costCode.overheadEntries ?? []).forEach((entry) => pushSuggestion(entry.metadata?.code, entry.description));
+  });
+
+  return suggestions;
+}
+
+async function seedCostCodeLibrary(admin, companyId, payload) {
+  const suggestions = collectSuggestedCostCodes(payload);
+  if (!suggestions.length) return;
+
+  const codes = [...new Set(suggestions.map((item) => item.code))];
+  const { data: existing } = await admin
+    .from("cost_codes")
+    .select("code")
+    .eq("company_id", companyId)
+    .in("code", codes);
+
+  const existingCodes = new Set((existing ?? []).map((item) => item.code));
+  const inserts = suggestions.filter((item, index) => !existingCodes.has(item.code) && suggestions.findIndex((candidate) => candidate.code === item.code) === index);
+  if (!inserts.length) return;
+
+  await admin.from("cost_codes").insert(
+    inserts.map((item) => ({
+      company_id: companyId,
+      code: item.code,
+      name: item.name,
+      description: item.description,
+    }))
+  );
 }
 
 async function resolveClientId(ctx, payload) {
@@ -271,7 +321,7 @@ async function createEstimateHeader(ctx, payload, computed) {
       project_id: payload.projectId || null,
       client_id: payload.clientId,
       template_id: payload.templateId || null,
-      estimate_number: (latestEstimate?.estimate_number || 0) + 1,
+      estimate_number: payload.estimateNumber || (latestEstimate?.estimate_number || 0) + 1,
       title: payload.title,
       estimate_date: payload.estimateDate,
       status: payload.status,
@@ -308,6 +358,7 @@ async function updateEstimateHeader(ctx, payload, computed) {
       project_id: payload.projectId || null,
       client_id: payload.clientId,
       template_id: payload.templateId || null,
+      estimate_number: payload.estimateNumber || undefined,
       title: payload.title,
       estimate_date: payload.estimateDate,
       status: payload.status,
@@ -438,6 +489,7 @@ export default async function handler(req, res) {
 
     try {
       payload.clientId = await resolveClientId(ctx, payload);
+      await seedCostCodeLibrary(ctx.admin, ctx.company.id, payload);
       const computed = buildEstimateComputation(payload);
       const estimate = await createEstimateHeader(ctx, payload, computed);
       await persistEstimateGraph(ctx.admin, ctx, estimate, computed);
@@ -462,6 +514,7 @@ export default async function handler(req, res) {
 
     try {
       payload.clientId = await resolveClientId(ctx, payload);
+      await seedCostCodeLibrary(ctx.admin, ctx.company.id, payload);
       const computed = buildEstimateComputation(payload);
       const estimate = await updateEstimateHeader(ctx, payload, computed);
       await persistEstimateGraph(ctx.admin, ctx, estimate, computed);

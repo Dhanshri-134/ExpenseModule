@@ -5,6 +5,7 @@ import { useRouter } from "next/router";
 import { BusyButton, CompactListRow } from "@/components/dashboard/DashboardUi";
 import { ChevronRightIcon } from "@/components/dashboard/icons";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
+import {Trash} from "lucide-react";
 
 const BRAND_PALETTES = {
   accentColor: ["#1e3a8a", "#0f766e", "#b45309", "#7c2d12", "#334155", "#0f766e"],
@@ -19,6 +20,10 @@ function cardClass(extra = "") {
 
 function inputClass(extra = "") {
   return `acm-input mt-0 rounded-[16px] px-3 py-2.5 text-sm ${extra}`.trim();
+}
+
+function sheetInputClass(extra = "") {
+  return `w-full border-0 border-b border-[color:var(--acm-border)] bg-white px-1 py-2 text-sm text-[color:var(--acm-fg)] outline-none focus:border-[color:var(--acm-accent)] focus:ring-0 ${extra}`.trim();
 }
 
 function statusTone(status) {
@@ -113,21 +118,16 @@ function createTemplateRate(index = 1) {
 function createLaborEntry() {
   return {
     id: createId("labor"),
-    title: "",
+    code: "",
+    description: "",
     classification: "",
-    baseWage: "",
-    rates: [createRate()],
-    stHours: "",
-    stRate: "",
-    otHours: "",
-    otRate: "",
     straightTimePersons: "",
     straightTimeDays: "",
     overtimePersons: "",
     overtimeDays: "",
     targetWage: "",
-    prevailWage: "",
-    taxPercent: "",
+    overheadPercent: "",
+    profitPercent: "",
   };
 }
 
@@ -142,6 +142,8 @@ function createMaterialEntry() {
     wastePercent: "",
     freight: "",
     taxPercent: "",
+    overheadPercent: "",
+    profitPercent: "",
   };
 }
 
@@ -156,6 +158,8 @@ function createEquipmentEntry() {
     freight: "",
     fuelPercent: "",
     taxPercent: "",
+    overheadPercent: "",
+    profitPercent: "",
   };
 }
 
@@ -284,6 +288,7 @@ function emptyEstimateForm(clientId = "", templateId = "") {
 
   return {
     id: "",
+    estimateNumber: "",
     clientId,
     templateId,
     title: "Estimate",
@@ -302,9 +307,9 @@ function emptyEstimateForm(clientId = "", templateId = "") {
     companyAddress: "",
     companyEmail: "",
     companyPhone: "",
-    companyLogoText: "ACM",
-    overheadPercent: "10",
-    profitPercent: "10",
+    companyLogoText: "",
+    overheadPercent: "0",
+    profitPercent: "0",
     commissionPercent: "0",
     riskPercent: "0",
     inflationRate: "0",
@@ -313,29 +318,43 @@ function emptyEstimateForm(clientId = "", templateId = "") {
     discountValue: "0",
     shippingCharge: "0",
     additionalCharges: "0",
-    signatureLabel: "Accepted By",
+    signatureLabel: "By",
     costLines: [createCostLine(1)],
   };
 }
 
 function calculateLabor(entry) {
-  const ratePercent = (entry.rates ?? []).reduce((sum, rate) => sum + toNumber(rate.value), 0);
-  const baseWage = toNumber(entry.baseWage);
-  const stRate = toNumber(entry.stRate) || baseWage * (1 + ratePercent / 100);
-  const otRate = toNumber(entry.otRate) || stRate * 1.5;
-  const totalAmount = toNumber(entry.stHours) * stRate + toNumber(entry.otHours) * otRate;
+  const targetWage = toNumber(entry.targetWage);
+  const stHours = toNumber(entry.straightTimePersons) * 8 * toNumber(entry.straightTimeDays);
+  const otHours = toNumber(entry.overtimePersons) * 10 * toNumber(entry.overtimeDays);
+  const stRate = targetWage * 1.55;
+  const otRate = targetWage * 2.24;
+  const totalAmount = stHours * stRate + otHours * otRate;
 
   return {
+    stHours,
     stRate,
+    otHours,
     otRate,
     total: totalAmount,
-    taxAmount: totalAmount * toPercent(entry.taxPercent),
+    targetPay: stHours * targetWage,
+    taxAmount: 0,
+  };
+}
+
+function applyRowMarkup(baseTotal, entry) {
+  const overheadAmount = baseTotal * toPercent(entry?.overheadPercent);
+  const profitAmount = (baseTotal + overheadAmount) * toPercent(entry?.profitPercent);
+  return {
+    overheadAmount,
+    profitAmount,
+    finalTotal: baseTotal + overheadAmount + profitAmount,
   };
 }
 
 function calculateMaterial(entry) {
   const quantity = toNumber(entry.quantity);
-  const wasteQty = quantity * toPercent(entry.wastePercent);
+  const wasteQty = quantity + quantity * toPercent(entry.wastePercent);
   const unitRate = toNumber(entry.unitRate);
   const cost = quantity * unitRate;
   const freight = toNumber(entry.freight);
@@ -355,9 +374,9 @@ function calculateMaterial(entry) {
 
 function calculateEquipment(entry) {
   const quantity = toNumber(entry.quantity);
-  const rentalDays = Math.max(toNumber(entry.rentalDays), 1);
+  const rentalDays = Math.max(toNumber(entry.rentalDays), 0);
   const unitRate = toNumber(entry.unitRate);
-  const cost = quantity * rentalDays * unitRate;
+  const cost = quantity * unitRate;
   const freight = toNumber(entry.freight);
   const fuel = (cost + freight) * toPercent(entry.fuelPercent);
   const costWithFreight = cost + freight;
@@ -376,6 +395,72 @@ function calculateEquipment(entry) {
     taxAmount,
     total: costWithFuel + taxAmount,
   };
+}
+
+function flattenEstimateCostLines(costCodes = []) {
+  const merged = createCostLine(1);
+  merged.code = "ESTIMATE";
+  merged.description = "Estimate";
+  merged.laborEntries = [];
+  merged.materialEntries = [];
+  merged.equipmentEntries = [];
+  merged.overheadEntries = [];
+
+  (costCodes ?? []).forEach((line) => {
+    (line.laborEntries ?? []).forEach((entry) => {
+      merged.laborEntries.push({
+        id: entry.id || createId("labor"),
+        code: entry.metadata?.code || line.costCode?.code || "",
+        description: entry.metadata?.description || entry.metadata?.title || entry.description || "",
+        classification: entry.metadata?.classification || "",
+        straightTimePersons: entry.metadata?.straightTimePersons ?? "",
+        straightTimeDays: entry.metadata?.straightTimeDays ?? "",
+        overtimePersons: entry.metadata?.overtimePersons ?? "",
+        overtimeDays: entry.metadata?.overtimeDays ?? "",
+        targetWage: entry.metadata?.targetWage ?? "",
+        overheadPercent: entry.metadata?.overheadPercent ?? "",
+        profitPercent: entry.metadata?.profitPercent ?? "",
+      });
+    });
+
+    (line.materialEntries ?? []).forEach((entry) => {
+      merged.materialEntries.push({
+        id: entry.id || createId("material"),
+        code: entry.metadata?.code || line.costCode?.code || "",
+        description: entry.description || "",
+        quantity: entry.quantity ?? "",
+        uom: entry.metadata?.uom || "",
+        unitRate: entry.unitRate ?? "",
+        wastePercent: toNumber(entry.wastePercent) * 100,
+        freight: entry.freight ?? "",
+        taxPercent: toNumber(entry.taxPercent) * 100,
+        overheadPercent: entry.metadata?.overheadPercent ?? "",
+        profitPercent: entry.metadata?.profitPercent ?? "",
+      });
+    });
+
+    (line.equipmentEntries ?? []).forEach((entry) => {
+      merged.equipmentEntries.push({
+        id: entry.id || createId("equipment"),
+        code: entry.metadata?.code || line.costCode?.code || "",
+        description: entry.description || "",
+        quantity: entry.qty ?? "",
+        rentalDays: entry.days ?? "",
+        unitRate: entry.rate ?? "",
+        freight: entry.freight ?? "",
+        fuelPercent: entry.metadata?.fuelPercent ?? "",
+        taxPercent: toNumber(entry.taxPercent) * 100,
+        overheadPercent: entry.metadata?.overheadPercent ?? "",
+        profitPercent: entry.metadata?.profitPercent ?? "",
+      });
+    });
+  });
+
+  if (!merged.laborEntries.length) merged.laborEntries = [createLaborEntry()];
+  if (!merged.materialEntries.length) merged.materialEntries = [createMaterialEntry()];
+  if (!merged.equipmentEntries.length) merged.equipmentEntries = [createEquipmentEntry()];
+  merged.overheadEntries = [];
+  return [merged];
 }
 
 function calculateOverhead(entry) {
@@ -440,24 +525,34 @@ function computeCostLineSummary(line) {
 
 function buildClientPreviewSummary(form) {
   const lineSummaries = (form.costLines ?? []).map(computeCostLineSummary);
-  const baseCost = lineSummaries.reduce((sum, line) => sum + line.total, 0);
-  const overheadPercent = toPercent(form.overheadPercent);
-  const profitPercent = toPercent(form.profitPercent);
+  const laborBase = (form.costLines ?? []).reduce((sum, line) => sum + (line.laborEntries ?? []).reduce((entrySum, entry) => entrySum + calculateLabor(entry).total, 0), 0);
+  const materialBase = (form.costLines ?? []).reduce((sum, line) => sum + (line.materialEntries ?? []).reduce((entrySum, entry) => entrySum + calculateMaterial(entry).total, 0), 0);
+  const equipmentBase = (form.costLines ?? []).reduce((sum, line) => sum + (line.equipmentEntries ?? []).reduce((entrySum, entry) => entrySum + calculateEquipment(entry).total, 0), 0);
+  const laborMarkup = (form.costLines ?? []).reduce((sum, line) => sum + (line.laborEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateLabor(entry).total, entry).overheadAmount, 0), 0);
+  const materialMarkup = (form.costLines ?? []).reduce((sum, line) => sum + (line.materialEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateMaterial(entry).total, entry).overheadAmount, 0), 0);
+  const equipmentMarkup = (form.costLines ?? []).reduce((sum, line) => sum + (line.equipmentEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateEquipment(entry).total, entry).overheadAmount, 0), 0);
+  const laborProfit = (form.costLines ?? []).reduce((sum, line) => sum + (line.laborEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateLabor(entry).total, entry).profitAmount, 0), 0);
+  const materialProfit = (form.costLines ?? []).reduce((sum, line) => sum + (line.materialEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateMaterial(entry).total, entry).profitAmount, 0), 0);
+  const equipmentProfit = (form.costLines ?? []).reduce((sum, line) => sum + (line.equipmentEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateEquipment(entry).total, entry).profitAmount, 0), 0);
+  const baseCost = laborBase + materialBase + equipmentBase;
+  const overheadAmount = laborMarkup + materialMarkup + equipmentMarkup;
+  const profitAmount = laborProfit + materialProfit + equipmentProfit;
+  const totalPrice = baseCost + overheadAmount + profitAmount;
+  const overheadPercent = 0;
+  const profitPercent = 0;
   const commissionPercent = toPercent(form.commissionPercent);
   const riskPercent = toPercent(form.riskPercent);
   const inflationRate = toPercent(form.inflationRate);
   const escalationYears = toNumber(form.escalationYears);
-  const overheadAmount = baseCost * overheadPercent;
-  const profitAmount = (baseCost + overheadAmount) * profitPercent;
   const commissionAmount = (baseCost + overheadAmount + profitAmount) * commissionPercent;
   const contingencyAmount = (baseCost + overheadAmount + profitAmount + commissionAmount) * riskPercent;
-  const totalPrice = baseCost + overheadAmount + profitAmount + commissionAmount + contingencyAmount;
-  const futureCost = totalPrice * inflationRate * Math.max(escalationYears, 0);
+  const totalPriceWithAdjustments = totalPrice + commissionAmount + contingencyAmount;
+  const futureCost = totalPriceWithAdjustments * inflationRate * Math.max(escalationYears, 0);
 
   return {
-    laborCost: lineSummaries.reduce((sum, line) => sum + line.laborCost, 0),
-    materialCost: lineSummaries.reduce((sum, line) => sum + line.materialCost, 0),
-    equipmentCost: lineSummaries.reduce((sum, line) => sum + line.equipmentCost, 0),
+    laborCost: laborBase,
+    materialCost: materialBase,
+    equipmentCost: equipmentBase,
     directOverheadCost: lineSummaries.reduce((sum, line) => sum + line.overheadCost, 0),
     baseCost,
     totalCost: baseCost,
@@ -472,19 +567,27 @@ function buildClientPreviewSummary(form) {
     inflationRate,
     escalationYears,
     futureCost,
-    totalPrice,
-    finalBid: totalPrice + futureCost,
+    totalPrice: totalPriceWithAdjustments,
+    finalBid: totalPriceWithAdjustments + futureCost,
   };
 }
 
 function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
   const totals = computeUiTotals(form, previewSummary);
+  const generatedTitle =
+    String(form.customerName || "").trim()
+      ? `${String(form.customerName || "").trim()} Estimate`
+      : form.estimateNumber
+        ? `Estimate #${form.estimateNumber}`
+        : `Estimate ${form.estimateDate || new Date().toISOString().slice(0, 10)}`;
+  const primaryLine = form.costLines?.[0] || createCostLine(1);
 
   return {
     id: form.id || undefined,
+    estimateNumber: form.estimateNumber,
     clientId: form.clientId,
     templateId: form.templateId || selectedTemplate?.id || undefined,
-    title: form.title,
+    title: generatedTitle,
     estimateDate: form.estimateDate,
     status: form.status,
     approvalStatus: form.approvalStatus,
@@ -526,34 +629,41 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
       additionalCharges: form.additionalCharges,
       totals,
     },
-    costCodes: form.costLines.map((line, index) => ({
-      code: line.code?.trim() || `SEC-${String(index + 1).padStart(3, "0")}`,
-      name: line.description?.trim() || `Section ${index + 1}`,
-      description: line.description?.trim() || `Section ${index + 1}`,
-      laborEntries: line.laborEntries.map((entry) => {
+    costCodes: [{
+      code: "ESTIMATE",
+      name: "Estimate",
+      description: "Estimate",
+      laborEntries: primaryLine.laborEntries.map((entry) => {
         const derived = calculateLabor(entry);
+        const markup = applyRowMarkup(derived.total, entry);
         return {
-          description: entry.title,
-          stHours: entry.stHours,
+          description: entry.description,
+          stHours: derived.stHours,
           stRate: derived.stRate,
-          otHours: entry.otHours,
+          otHours: derived.otHours,
           otRate: derived.otRate,
           metadata: {
-            title: entry.title,
+            code: entry.code?.trim() || undefined,
+            description: entry.description,
             classification: entry.classification,
-            baseWage: toNumber(entry.baseWage),
-            rates: entry.rates,
             straightTimePersons: toNumber(entry.straightTimePersons),
             straightTimeDays: toNumber(entry.straightTimeDays),
             overtimePersons: toNumber(entry.overtimePersons),
             overtimeDays: toNumber(entry.overtimeDays),
             targetWage: toNumber(entry.targetWage),
-            prevailWage: toNumber(entry.prevailWage),
-            taxPercent: toNumber(entry.taxPercent),
+            overheadPercent: toNumber(entry.overheadPercent),
+            profitPercent: toNumber(entry.profitPercent),
+            overheadAmount: markup.overheadAmount,
+            profitAmount: markup.profitAmount,
+            finalTotal: markup.finalTotal,
+            targetPay: derived.targetPay,
           },
         };
       }),
-      materialEntries: line.materialEntries.map((entry) => ({
+      materialEntries: primaryLine.materialEntries.map((entry) => {
+        const derived = calculateMaterial(entry);
+        const markup = applyRowMarkup(derived.total, entry);
+        return ({
         description: entry.description,
         quantity: entry.quantity,
         wastePercent: entry.wastePercent,
@@ -563,33 +673,46 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
         metadata: {
           code: entry.code?.trim() || undefined,
           uom: entry.uom,
+          wasteQty: derived.wasteQty,
+          cost: derived.cost,
+          costWithFreight: derived.costWithFreight,
+          taxAmount: derived.taxAmount,
+          total: derived.total,
+          overheadPercent: toNumber(entry.overheadPercent),
+          profitPercent: toNumber(entry.profitPercent),
+          overheadAmount: markup.overheadAmount,
+          profitAmount: markup.profitAmount,
+          finalTotal: markup.finalTotal,
         },
-      })),
-      equipmentEntries: line.equipmentEntries.map((entry) => ({
+      })}),
+      equipmentEntries: primaryLine.equipmentEntries.map((entry) => {
+        const derived = calculateEquipment(entry);
+        const markup = applyRowMarkup(derived.total, entry);
+        return ({
         description: entry.description,
         qty: entry.quantity,
         days: entry.rentalDays,
         rate: entry.unitRate,
         freight: entry.freight,
-        fuel: (toNumber(entry.quantity) * Math.max(toNumber(entry.rentalDays), 1) * toNumber(entry.unitRate) + toNumber(entry.freight)) * toPercent(entry.fuelPercent),
+        fuel: derived.fuel,
         taxPercent: entry.taxPercent,
         metadata: {
           code: entry.code?.trim() || undefined,
           fuelPercent: toNumber(entry.fuelPercent),
+          cost: derived.cost,
+          costWithFreight: derived.costWithFreight,
+          costWithFuel: derived.costWithFuel,
+          taxAmount: derived.taxAmount,
+          total: derived.total,
+          overheadPercent: toNumber(entry.overheadPercent),
+          profitPercent: toNumber(entry.profitPercent),
+          overheadAmount: markup.overheadAmount,
+          profitAmount: markup.profitAmount,
+          finalTotal: markup.finalTotal,
         },
-      })),
-      overheadEntries: line.overheadEntries.map((entry) => ({
-        description: entry.description,
-        qty: entry.quantity,
-        days: entry.days,
-        rate: entry.unitRate,
-        taxPercent: entry.taxPercent,
-        metadata: {
-          code: entry.code?.trim() || undefined,
-          uom: entry.uom,
-        },
-      })),
-    })),
+      })}),
+      overheadEntries: [],
+    }],
   };
 }
 
@@ -603,6 +726,7 @@ function mapEstimateToForm(estimate, templates) {
   return {
     ...emptyEstimateForm(estimate.client_id || "", templateId),
     id: estimate.id,
+    estimateNumber: String(estimate.estimate_number || ""),
     clientId: estimate.client_id || "",
     templateId,
     title: estimate.title || "Estimate",
@@ -633,76 +757,7 @@ function mapEstimateToForm(estimate, templates) {
     riskPercent: String(toNumber(estimate.summary?.riskPercent) * 100 || 0),
     inflationRate: String(toNumber(estimate.summary?.inflationRate) * 100 || 0),
     escalationYears: String(toNumber(estimate.summary?.escalationYears) || 0),
-    costLines:
-      (estimate.cost_codes ?? []).length
-        ? estimate.cost_codes.map((line, index) => ({
-            id: line.id || createId("cost-line"),
-            code: line.costCode?.code || `SEC-${String(index + 1).padStart(3, "0")}`,
-            description: line.costCode?.description || "",
-            laborEntries:
-              (line.laborEntries ?? []).length
-                ? line.laborEntries.map((entry) => ({
-                    id: entry.id || createId("labor"),
-                    title: entry.metadata?.title || entry.description || "",
-                    classification: entry.metadata?.classification || "",
-                    baseWage: entry.metadata?.baseWage ?? "",
-                    rates: (entry.metadata?.rates ?? []).length ? entry.metadata.rates : [createRate()],
-                    stHours: entry.stHours ?? "",
-                    stRate: entry.stRate ?? "",
-                    otHours: entry.otHours ?? "",
-                    otRate: entry.otRate ?? "",
-                    straightTimePersons: entry.metadata?.straightTimePersons ?? "",
-                    straightTimeDays: entry.metadata?.straightTimeDays ?? "",
-                    overtimePersons: entry.metadata?.overtimePersons ?? "",
-                    overtimeDays: entry.metadata?.overtimeDays ?? "",
-                    targetWage: entry.metadata?.targetWage ?? "",
-                    prevailWage: entry.metadata?.prevailWage ?? "",
-                    taxPercent: entry.metadata?.taxPercent ?? "",
-                  }))
-                : [createLaborEntry()],
-            materialEntries:
-              (line.materialEntries ?? []).length
-                ? line.materialEntries.map((entry) => ({
-                    id: entry.id || createId("material"),
-                    code: entry.metadata?.code || "",
-                    description: entry.description || "",
-                    quantity: entry.quantity ?? "",
-                    uom: entry.metadata?.uom || "",
-                    unitRate: entry.unitRate ?? "",
-                    wastePercent: toNumber(entry.wastePercent) * 100,
-                    freight: entry.freight ?? "",
-                    taxPercent: toNumber(entry.taxPercent) * 100,
-                  }))
-                : [createMaterialEntry()],
-            equipmentEntries:
-              (line.equipmentEntries ?? []).length
-                ? line.equipmentEntries.map((entry) => ({
-                    id: entry.id || createId("equipment"),
-                    code: entry.metadata?.code || "",
-                    description: entry.description || "",
-                    quantity: entry.qty ?? "",
-                    rentalDays: entry.days ?? "",
-                    unitRate: entry.rate ?? "",
-                    freight: entry.freight ?? "",
-                    fuelPercent: entry.metadata?.fuelPercent ?? "",
-                    taxPercent: toNumber(entry.taxPercent) * 100,
-                  }))
-                : [createEquipmentEntry()],
-            overheadEntries:
-              (line.overheadEntries ?? []).length
-                ? line.overheadEntries.map((entry) => ({
-                    id: entry.id || createId("overhead"),
-                    code: entry.metadata?.code || "",
-                    description: entry.description || "",
-                    quantity: entry.qty ?? "",
-                    uom: entry.metadata?.uom || "",
-                    unitRate: entry.rate ?? "",
-                    days: entry.days ?? "",
-                    taxPercent: toNumber(entry.taxPercent) * 100,
-                  }))
-                : [createOverheadEntry()],
-          }))
-        : [createCostLine(1)],
+    costLines: (estimate.cost_codes ?? []).length ? flattenEstimateCostLines(estimate.cost_codes) : [createCostLine(1)],
   };
 }
 
@@ -872,7 +927,7 @@ function TableCellInput({ value, onChange, onKeyDown, list, placeholder = "", ty
       onKeyDown={onKeyDown}
       placeholder={placeholder}
       data-grid-input="true"
-      className={inputClass("min-w-[84px] border-transparent bg-transparent px-2 py-2 text-sm focus:border-[color:var(--acm-accent-border)]")}
+      className={sheetInputClass("min-w-[84px] text-[0.7rem]")}
     />
   );
 }
@@ -890,7 +945,8 @@ function SectionTable({
   datalistOptions,
   collapsed,
   onToggle,
-  renderDetails,
+  addLabel,
+  summaryColumns = [],
 }) {
   const derivedRows = rows.map((row) =>
     sectionKey === "laborEntries"
@@ -901,29 +957,28 @@ function SectionTable({
           ? calculateEquipment(row)
           : calculateOverhead(row)
   );
-  const sectionSubtotal = derivedRows.reduce((sum, row) => sum + row.total, 0);
-  const sectionTax = derivedRows.reduce((sum, row) => sum + row.taxAmount, 0);
-
   return (
-    <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)]">
-      <button type="button" onClick={onToggle} className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left">
+    <div className="space-y-3">
+      <button type="button" onClick={onToggle} className="flex w-full items-center justify-between gap-3 py-2 text-left">
         <div>
           <div className="text-base font-bold text-[color:var(--acm-fg)]">{title}</div>
-          <div className="text-sm text-[color:var(--acm-muted-fg)]">{rows.length} inline row{rows.length === 1 ? "" : "s"}</div>
+          <div className="text-sm text-[color:var(--acm-muted-fg)]">{rows.length} row{rows.length === 1 ? "" : "s"}</div>
         </div>
         <ChevronRightIcon className={`h-5 w-5 transition ${collapsed ? "" : "rotate-90"}`} />
       </button>
 
       {!collapsed ? (
-        <div className="border-t border-[color:var(--acm-border)] p-3">
+        <div>
           <div className="overflow-x-auto">
-            <table className="min-w-full border-separate border-spacing-0">
+            <table className="min-w-full table-fixed border-separate border-spacing-0">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
                   {columns.map((column) => (
-                    <th key={column.key} className="px-2 py-2 font-semibold ">{column.label}</th>
+                    <th key={column.key} className={`px-2 py-2 font-semibold text-[0.6rem] ${column.width || ""}`}>{column.label}</th>
                   ))}
-                  <th className="px-2 py-2 font-semibold">Amount</th>
+                  {summaryColumns.map((column) => (
+                    <th key={column.key} className={`px-2 py-2 font-semibold text-[0.6rem] ${column.width || ""}`}>{column.label}</th>
+                  ))}
                   <th className="px-2 py-2 font-semibold"></th>
                 </tr>
               </thead>
@@ -934,10 +989,10 @@ function SectionTable({
                     <Fragment key={row.id}>
                       <tr className="border-t border-[color:var(--acm-border)] align-top">
                         {columns.map((column) => (
-                          <td key={column.key} className="px-1 py-1">
+                          <td key={column.key} className="px-1 py-1 text-[0.6rem]">
                             <TableCellInput
                               value={row[column.key]}
-                              list={column.list ? datalistId : undefined}
+                              list={column.listId || (column.list ? datalistId : undefined)}
                               type={column.type || "text"}
                               placeholder={column.placeholder}
                               onChange={(event) => onChange(row.id, column.key, event.target.value)}
@@ -945,35 +1000,26 @@ function SectionTable({
                             />
                           </td>
                         ))}
-                        <td className="px-2 py-3 text-sm font-semibold text-[color:var(--acm-fg)]">{formatCurrency(derived.total)}</td>
+                        {summaryColumns.map((column) => (
+                          <td key={column.key} className="px-2 py-3 text-sm font-semibold text-[color:var(--acm-fg)]">
+                            {column.render(row, derived)}
+                          </td>
+                        ))}
                         <td className="px-2 py-2 text-right">
                           {rows.length > 1 ? (
                             <button type="button" onClick={() => onRemove(row.id)} className="rounded-full px-3 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50">
-                              Remove
+                              <Trash size={16}/>
                             </button>
                           ) : (
                             <span className="px-3 py-1 text-xs text-[color:var(--acm-muted-fg)]">{index + 1}</span>
                           )}
                         </td>
                       </tr>
-                      {renderDetails ? (
-                        <tr className="border-t border-[color:var(--acm-border)]/60">
-                          <td colSpan={columns.length + 2} className="px-2 pb-3 pt-1">
-                            {renderDetails(row, derived)}
-                          </td>
-                        </tr>
-                      ) : null}
                     </Fragment>
                   );
                 })}
               </tbody>
             </table>
-          </div>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <MetricCard label={`${title} Total`} value={formatCurrency(sectionSubtotal)} />
-            <MetricCard label="Tax" value={formatCurrency(sectionTax)} />
-            <MetricCard label="Net Before Tax" value={formatCurrency(sectionSubtotal - sectionTax)} tone="accent" />
           </div>
 
           {datalistId && datalistOptions?.length ? (
@@ -985,8 +1031,8 @@ function SectionTable({
           ) : null}
 
           <div className="mt-4 flex justify-end">
-            <button type="button" onClick={onAdd} className="acm-btn acm-btn-secondary h-10 rounded-full px-4">
-              Add {title.slice(0, -1) || title}
+            <button type="button" onClick={onAdd} className="text-sm font-semibold text-[color:var(--acm-accent)]">
+              {addLabel || `Add ${title}`}
             </button>
           </div>
         </div>
@@ -1001,6 +1047,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const settingsQuery = useApiQuery("/api/settings");
   const templatesQuery = useApiQuery("/api/estimate-templates");
   const estimatesQuery = useApiQuery("/api/estimates");
+  const costCodesQuery = useApiQuery("/api/cost-codes");
 
   const [tab, setTab] = useState("estimates");
   const [busy, setBusy] = useState(false);
@@ -1016,8 +1063,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const [pdfReviewed, setPdfReviewed] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState({});
   const [selectedCostLineId, setSelectedCostLineId] = useState(initialCostLineId);
-  const saveTimeoutRef = useRef(null);
-  const persistEstimateRef = useRef(null);
+  const [statusDraft, setStatusDraft] = useState("draft");
   const initialDetailHydratedRef = useRef(false);
 
   const clients = useMemo(() => clientsQuery.data?.clients ?? [], [clientsQuery.data?.clients]);
@@ -1027,6 +1073,10 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     [templatesQuery.data?.templates]
   );
   const estimates = useMemo(() => estimatesQuery.data?.estimates ?? [], [estimatesQuery.data?.estimates]);
+  const costCodeSuggestions = useMemo(
+    () => (costCodesQuery.data?.costCodes ?? []).map((item) => ({ label: item.code, description: item.description || item.name || "" })),
+    [costCodesQuery.data?.costCodes]
+  );
 
   const defaultTemplate = useMemo(() => templates.find((item) => item.is_default) || templates[0] || null, [templates]);
   const companyDetails = useMemo(() => {
@@ -1183,15 +1233,8 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   }, [estimates, initialCostLineId, initialEstimateId, templates]);
 
   useEffect(() => {
-    if (!dirty || !canAutoPersist) return undefined;
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(() => {
-      persistEstimateRef.current?.({ silent: true });
-    }, 2500);
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    };
-  }, [canAutoPersist, dirty, payload]);
+    setStatusDraft(form.status || "draft");
+  }, [form.status]);
 
   function setDirtyState() {
     setDirty(true);
@@ -1412,26 +1455,6 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     setDirtyState();
   }
 
-  async function openCostLineDetails(lineId) {
-    const targetLine = form.costLines.find((line) => line.id === lineId);
-    if (!targetLine) return;
-
-    let estimateId = form.id || activeEstimateId;
-    if (!estimateId) {
-      const saved = await persistEstimate({ silent: true });
-      if (!saved?.id) return;
-      estimateId = saved.id;
-    }
-
-    setSelectedCostLineId(lineId);
-    router.push(`/${roleBase}/estimates/${estimateId}/cost-lines/${lineId}`);
-  }
-
-  function closeCostLineDetails() {
-    setSelectedCostLineId("");
-    router.push(`/${roleBase}/estimates`);
-  }
-
   function toggleSection(lineId, sectionKey) {
     setCollapsedSections((current) => ({
       ...current,
@@ -1450,27 +1473,37 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     if (next) next.focus();
   }
 
-  async function handleApprove() {
-    let createdEstimate = null;
-    if (!form.id) {
-      createdEstimate = await persistEstimate();
-      if (!createdEstimate) return;
-    }
-    const estimateId = createdEstimate?.id || form.id || activeEstimateId;
-    const res = await fetch("/api/estimate-workflow", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ estimateId, action: "approve" }),
-    });
-    const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(formatApiError(json, "Unable to approve estimate."));
+  async function handleStatusAction() {
+    const nextStatus = String(statusDraft || form.status || "draft").toLowerCase();
+    if (!["draft", "sent", "approved", "rejected"].includes(nextStatus)) {
+      setError("Select a valid status.");
       return;
     }
-    invalidateApiQuery("/api/estimates");
-    const refreshed = estimates.find((item) => item.id === estimateId);
-    if (refreshed) setForm(mapEstimateToForm({ ...refreshed, ...json?.estimate }, templates));
-    setMessage("Estimate approved.");
+
+    if (nextStatus === "approved") {
+      let createdEstimate = null;
+      if (!form.id) {
+        createdEstimate = await persistEstimate();
+        if (!createdEstimate) return;
+      }
+      const estimateId = createdEstimate?.id || form.id || activeEstimateId;
+      const res = await fetch("/api/estimate-workflow", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ estimateId, action: "approve" }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(formatApiError(json, "Unable to update estimate status."));
+        return;
+      }
+      await estimatesQuery.refresh();
+      setForm((current) => ({ ...current, status: "approved", approvalStatus: "approved" }));
+      setMessage("Estimate approved.");
+      return;
+    }
+
+    await persistEstimate({ status: nextStatus });
   }
 
   async function handleSend() {
@@ -1507,10 +1540,6 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     setMessage("Estimate sent from the configured SMTP account.");
   }
 
-  async function handleReject() {
-    await persistEstimate({ status: "rejected" });
-  }
-
   function newEstimate() {
     setForm(emptyEstimateForm("", defaultTemplate?.id || ""));
     setActiveEstimateId("");
@@ -1519,6 +1548,8 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     setDirty(false);
     setError("");
     setMessage("");
+    setStatusDraft("draft");
+    setTab("estimates");
   }
 
   function loadEstimate(estimate) {
@@ -1529,25 +1560,8 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     setDirty(false);
     setError("");
     setMessage("");
-  }
-
-  function duplicateEstimate() {
-    if (!form.clientId && !form.costLines.some((line) => line.description?.trim())) {
-      setMessage("Add estimate details before duplicating.");
-      return;
-    }
-    setForm((current) => ({
-      ...current,
-      id: "",
-      title: current.title?.trim() ? `${current.title} Copy` : "Estimate Copy",
-      status: "draft",
-      approvalStatus: "draft",
-      estimateDate: new Date().toISOString().slice(0, 10),
-    }));
-    setActiveEstimateId("");
-    setPdfReviewed(false);
-    setDirty(true);
-    setMessage("Estimate duplicated into a new draft.");
+    setStatusDraft(estimate.status || "draft");
+    setTab("estimates");
   }
 
   async function deleteEstimate(id) {
@@ -1643,7 +1657,6 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
 
   const validateEstimate = useCallback(() => {
     if (!form.clientId) return "Select a customer.";
-    if (!form.title.trim()) return "Title is required.";
     if (!form.customerName.trim()) return "Customer name is required.";
     if (!form.customerAddress.trim()) return "Customer address is required.";
     if (!isValidEmail(form.customerEmail)) return "Enter a valid customer email.";
@@ -1655,12 +1668,11 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     if (!form.estimateDate) return "Estimate date is required.";
     if (!form.validUntil) return "Valid until date is required.";
     if (new Date(form.validUntil) < new Date(form.estimateDate)) return "Valid until must be on or after the estimate date.";
-    if (!selectedTemplate?.id) return "Select a template.";
 
     const hasRows = form.costLines.some((line) =>
-      [...(line.laborEntries ?? []), ...(line.materialEntries ?? []), ...(line.equipmentEntries ?? []), ...(line.overheadEntries ?? [])].some((entry) =>
+      [...(line.laborEntries ?? []), ...(line.materialEntries ?? []), ...(line.equipmentEntries ?? [])].some((entry) =>
         Object.entries(entry).some(([key, value]) => {
-          if (key === "id" || key === "rates") return false;
+          if (key === "id") return false;
           if (typeof value === "string") return value.trim().length > 0;
           return Boolean(value);
         })
@@ -1709,22 +1721,57 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     return false;
   }, [payload, form.id, templates, validateEstimate]);
 
-  useEffect(() => {
-    persistEstimateRef.current = persistEstimate;
-  }, [persistEstimate]);
+  const laborColumns = [
+    { key: "code", label: "Category",  placeholder: "Cost code" },
+    // { key: "code", label: "Category", listId: "estimate-cost-code-options", placeholder: "Cost code" },
+    { key: "description", label: "Scope Of Work", placeholder: "Scope of work" },
+    { key: "classification", label: "Classification", placeholder: "Category" },
+    { key: "straightTimePersons", label: "ST Persons",  placeholder: "0" },
+    { key: "straightTimeDays", label: "ST Days",  placeholder: "0" },
+    { key: "overtimePersons", label: "OT Persons",  placeholder: "0" },
+    { key: "overtimeDays", label: "OT Days",  placeholder: "0" },
+    { key: "targetWage", label: "Target Wage",  placeholder: "0" },
+    { key: "overheadPercent", label: "Overhead",  placeholder: "0" },
+    { key: "profitPercent", label: "Profit",  placeholder: "0" },
+  ];
+
+  const materialColumns = [
+    { key: "code", label: "Category", placeholder: "Category" },
+    { key: "description", label: "Item", placeholder: "Item" },
+    { key: "quantity", label: "Quantity",  placeholder: "0" },
+    { key: "uom", label: "UOM", placeholder: "Unit" },
+    { key: "wastePercent", label: "Waste %",  placeholder: "0" },
+    { key: "unitRate", label: "Unit Rate ($)",  placeholder: "0" },
+    { key: "freight", label: "Freight ($)",  placeholder: "0" },
+    { key: "taxPercent", label: "Tax %",  placeholder: "0" },
+    { key: "overheadPercent", label: "Overhead",  placeholder: "0" },
+    { key: "profitPercent", label: "Profit",  placeholder: "0" },
+  ];
+
+  const equipmentColumns = [
+    { key: "code", label: "Category", placeholder: "Category", width: "w-40" },
+    { key: "description", label: "Item",  placeholder: "Item", width: "w-40" },
+    { key: "quantity", label: "Quantity",  placeholder: "0" },
+    { key: "rentalDays", label: "Rental Days",  placeholder: "0" },
+    { key: "unitRate", label: "Unit Rate ($)",  placeholder: "0" },
+    { key: "freight", label: "Freight ($)",  placeholder: "0" },
+    { key: "fuelPercent", label: "Fuel %",  placeholder: "0" },
+    { key: "taxPercent", label: "Tax %",  placeholder: "0" },
+    { key: "overheadPercent", label: "Overhead",  placeholder: "0" },
+    { key: "profitPercent", label: "Profit",  placeholder: "0" },
+  ];
 
   return (
     <div className="space-y-6">
       <section className={cardClass("p-5")}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="text-sm font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Estimate Module</div>
-            <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">Modern estimate workspace</h1>
-            {/* <p className="mt-2 max-w-3xl text-sm text-[color:var(--acm-muted-fg)]">QuickBooks-style document editing, inline line items, dynamic totals, status tracking, duplication, and client-ready export without changing your current backend routes.</p> */}
+            <div className="text-sm font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Estimate Workspace</div>
+            <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">Records And Editor</h1>
           </div>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => setTab("estimates")} className={`acm-btn ${tab === "estimates" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>Estimates</button>
-            <button type="button" onClick={() => setTab("templates")} className={`acm-btn ${tab === "templates" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>Templates</button>
+            <button type="button" onClick={() => setTab("records")} className={`acm-btn ${tab === "records" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>Records</button>
           </div>
         </div>
       </section>
@@ -1734,168 +1781,11 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
         <div className={cardClass("p-5 text-sm text-[color:var(--acm-muted-fg)]")}>Loading estimate workspace...</div>
       ) : null}
 
-      {tab === "templates" ? (
+      {tab === "records" ? (
         <div className="space-y-6">
-          <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-            <div className={cardClass("p-5")}>
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-xl font-bold">Template Library</div>
-                <button type="button" onClick={() => setTemplateForm(emptyTemplateForm())} className="acm-btn acm-btn-secondary h-10 px-4">New Template</button>
-              </div>
-              <div className="mt-4 space-y-3 lg:grid lg:grid-cols-2 lg:gap-3 lg:space-y-0">
-                {templates.map((template) => (
-                  <CompactListRow
-                    key={template.id}
-                    primary={template.name}
-                    secondary={template.is_default ? "Default template" : template.template_kind || "Template"}
-                    tertiary={`${template.configuration?.branding?.templateHeader || "Estimate"} | ${template.configuration?.branding?.badgeLabel || "Standard"}`}
-                    onClick={() => openTemplate(template)}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-6">
-              <form onSubmit={saveTemplate} className={cardClass("p-5")}>
-              <div className="text-xl font-bold">Template Branding</div>
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <LabeledInput label="Template Name">
-                  <input className={inputClass()} value={templateForm.name} onChange={(event) => setTemplateForm((current) => ({ ...current, name: event.target.value }))} />
-                </LabeledInput>
-                <LabeledInput label="Badge Label">
-                  <input className={inputClass()} value={templateForm.configuration.branding.badgeLabel} onChange={(event) => setTemplateForm((current) => ({ ...current, configuration: { ...current.configuration, branding: { ...current.configuration.branding, badgeLabel: event.target.value } } }))} />
-                </LabeledInput>
-                <LabeledInput label="Header">
-                  <input className={inputClass()} value={templateForm.configuration.branding.templateHeader} onChange={(event) => setTemplateForm((current) => ({ ...current, configuration: { ...current.configuration, branding: { ...current.configuration.branding, templateHeader: event.target.value } } }))} />
-                </LabeledInput>
-                <LabeledInput label="Subheader">
-                  <input className={inputClass()} value={templateForm.configuration.branding.templateSubheader} onChange={(event) => setTemplateForm((current) => ({ ...current, configuration: { ...current.configuration, branding: { ...current.configuration.branding, templateSubheader: event.target.value } } }))} />
-                </LabeledInput>
-                <label className="flex items-center gap-3 rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
-                  <input type="checkbox" checked={templateForm.isDefault} onChange={(event) => setTemplateForm((current) => ({ ...current, isDefault: event.target.checked }))} />
-                  <span className="text-sm font-semibold">Make this the default template</span>
-                </label>
-              </div>
-
-              <div className="mt-5 rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
-                <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Template Fields</div>
-                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {[
-                    ["title", "Title"],
-                    ["estimateDate", "Estimate Date"],
-                    ["validUntil", "Valid Until"],
-                    ["client", "Customer"],
-                    ["customerEmail", "Customer Email"],
-                    ["customerPhone", "Customer Phone"],
-                    ["customerAddress", "Customer Address"],
-                    ["template", "Template"],
-                    ["notes", "Notes"],
-                    ["terms", "Terms"],
-                    ["signature", "Signature"],
-                    ["stamp", "Stamp"],
-                  ].map(([fieldKey, label]) => (
-                    <label key={fieldKey} className="flex items-center gap-3 rounded-[16px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3 text-sm font-semibold">
-                      <input
-                        type="checkbox"
-                        checked={templateForm.configuration.fields?.basicDetails?.[fieldKey] !== false}
-                        onChange={(event) =>
-                          setTemplateForm((current) => ({
-                            ...current,
-                            configuration: normalizeTemplateConfiguration({
-                              ...current.configuration,
-                              fields: {
-                                ...normalizeTemplateConfiguration(current.configuration).fields,
-                                basicDetails: {
-                                  ...normalizeTemplateConfiguration(current.configuration).fields.basicDetails,
-                                  [fieldKey]: event.target.checked,
-                                },
-                              },
-                            }),
-                          }))
-                        }
-                      />
-                      <span>{label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="mt-5 rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
-                <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Labour Defaults</div>
-                <div className="mt-4 grid gap-4">
-                  <LabeledInput label="Labour Classifications">
-                    <textarea
-                      className={inputClass("min-h-[90px]")}
-                      value={(normalizeTemplateConfiguration(templateForm.configuration).laborLibrary?.classifications || []).join("\n")}
-                      onChange={(event) =>
-                        setTemplateForm((current) => ({
-                          ...current,
-                          configuration: {
-                            ...normalizeTemplateConfiguration(current.configuration),
-                            laborLibrary: {
-                              ...normalizeTemplateConfiguration(current.configuration).laborLibrary,
-                              classifications: event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean),
-                            },
-                          },
-                        }))
-                      }
-                      placeholder="One classification per line"
-                    />
-                  </LabeledInput>
-
-                  <div>
-                    <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Rate Default Values</div>
-                    <div className="space-y-3">
-                      {normalizeTemplateConfiguration(templateForm.configuration).laborLibrary.rateDefaults.map((rate) => (
-                        <div key={rate.id} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                          <input className={inputClass()} placeholder="Rate name" value={rate.name} onChange={(event) => updateTemplateRate(rate.id, "name", event.target.value)} />
-                          <input className={inputClass()} placeholder="Rate value (%)" value={rate.value} onChange={(event) => updateTemplateRate(rate.id, "value", event.target.value)} />
-                          <button type="button" onClick={() => removeTemplateRate(rate.id)} className="flex h-11 w-11 items-center justify-center rounded-[14px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] text-lg font-bold text-rose-600">Ã—</button>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-3">
-                      <button type="button" onClick={addTemplateRate} className="acm-btn acm-btn-secondary h-10 px-4">Add Rate Default</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
-                <ColorPaletteInput label="Accent" value={templateBranding.accentColor} options={BRAND_PALETTES.accentColor} onChange={(value) => setTemplateForm((current) => ({ ...current, configuration: normalizeTemplateConfiguration({ ...current.configuration, branding: { ...normalizeTemplateConfiguration(current.configuration).branding, accentColor: value } }) }))} />
-                <ColorPaletteInput label="Canvas" value={templateBranding.canvasTint} options={BRAND_PALETTES.canvasTint} onChange={(value) => setTemplateForm((current) => ({ ...current, configuration: normalizeTemplateConfiguration({ ...current.configuration, branding: { ...normalizeTemplateConfiguration(current.configuration).branding, canvasTint: value } }) }))} />
-                <ColorPaletteInput label="Surface" value={templateBranding.surfaceTint} options={BRAND_PALETTES.surfaceTint} onChange={(value) => setTemplateForm((current) => ({ ...current, configuration: normalizeTemplateConfiguration({ ...current.configuration, branding: { ...normalizeTemplateConfiguration(current.configuration).branding, surfaceTint: value } }) }))} />
-                <ColorPaletteInput label="Text" value={templateBranding.textColor} options={BRAND_PALETTES.textColor} onChange={(value) => setTemplateForm((current) => ({ ...current, configuration: normalizeTemplateConfiguration({ ...current.configuration, branding: { ...normalizeTemplateConfiguration(current.configuration).branding, textColor: value } }) }))} />
-              </div>
-
-              <div className="mt-5 flex justify-end">
-                <BusyButton type="submit" busy={templateBusy} className="acm-btn acm-btn-primary h-11 px-5">Save Template</BusyButton>
-              </div>
-              </form>
-
-              <EstimatePreviewCard
-                form={{
-                  ...form,
-                  companyName: companyDetails.name,
-                  companyAddress: companyDetails.address,
-                  companyLogoText: companyDetails.logoText,
-                  companyLogoUrl: companyDetails.logoDataUrl,
-                  signatureDataUrl: companyDetails.signatureDataUrl,
-                  signatureName: companyDetails.signatureName,
-                  stampDataUrl: companyDetails.stampDataUrl,
-                  stampLabel: companyDetails.stampLabel,
-                }}
-                selectedTemplate={{ configuration: normalizeTemplateConfiguration(templateForm.configuration) }}
-                totals={uiTotals}
-              />
-            </div>
-          </section>
-          {message ? <div className="rounded-[18px] border border-[color:var(--acm-accent-border)] bg-[color:var(--acm-accent-soft)] px-4 py-3 text-sm text-[color:var(--acm-accent-strong)]">{message}</div> : null}
-        </div>
-      ) : (
-        <section className="space-y-6">
-          <section className={cardClass("p-5")}>
-            <div className="flex items-center justify-between gap-3">
+          <section className="space-y-6">
+          <section className={`cardClass("p-5")`}>
+            <div className="  flex items-center justify-between gap-3">
               <div className="text-xl font-bold">Estimate Records</div>
               <button type="button" onClick={newEstimate} className="acm-btn acm-btn-secondary h-10 px-4">New</button>
             </div>
@@ -1915,433 +1805,162 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
             </div>
             {message ? <div className="mt-4 rounded-[18px] border border-[color:var(--acm-accent-border)] bg-[color:var(--acm-accent-soft)] px-4 py-3 text-sm text-[color:var(--acm-accent-strong)]">{message}</div> : null}
           </section>
+          </section>
+          {message ? <div className="rounded-[18px] border border-[color:var(--acm-accent-border)] bg-[color:var(--acm-accent-soft)] px-4 py-3 text-sm text-[color:var(--acm-accent-strong)]">{message}</div> : null}
+        </div>
+      ) : (
+        <section className="space-y-6">
+         
 
           <div className="space-y-6">
-            <section className={cardClass("overflow-hidden")}>
-              <div className="border-b border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-5 py-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-4">
-                    {companyDetails.logoDataUrl ? (
-                      <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-[18px] bg-white">
-                        <img src={companyDetails.logoDataUrl} alt="Company logo" className="h-full w-full object-contain" />
-                      </div>
-                    ) : (
-                      <div className="flex h-14 w-14 items-center justify-center rounded-[18px] bg-[color:var(--acm-accent)] text-lg font-extrabold text-white">
-                        {companyDetails.logoText}
-                      </div>
-                    )}
-                    <div>
-                      <div className="text-lg font-bold text-[color:var(--acm-fg)]">{companyDetails.name}</div>
-                      <div className="text-sm text-[color:var(--acm-muted-fg)]">{companyDetails.address || "Complete company address in profile/settings"}</div>
-                      <div className="text-sm text-[color:var(--acm-muted-fg)]">{[companyDetails.phone, companyDetails.email].filter(Boolean).join(" | ") || "Complete company phone and email in profile/settings"}</div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--acm-muted-fg)]">{selectedTemplate?.configuration?.branding?.templateHeader || "Estimate"}</div>
-                    <div className="mt-2 text-3xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">{form.id ? `#${estimates.find((item) => item.id === form.id)?.estimate_number || "Saved"}` : "Auto"}</div>
-                    <div className="mt-1 flex items-center justify-end gap-2">
-                      <StatusPill status={form.status} />
-                    </div>
+            <section className="space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-lg font-bold text-[color:var(--acm-fg)]">{companyDetails.name}</div>
+                  <div className="text-sm text-[color:var(--acm-muted-fg)]">{companyDetails.address || "Complete company address in profile/settings"}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--acm-muted-fg)]">Estimate</div>
+                  <div className="mt-1 text-2xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">{form.estimateNumber ? `#${form.estimateNumber}` : "Draft"}</div>
+                  <div className="mt-1 flex items-center justify-end gap-2">
+                    <StatusPill status={form.status} />
                   </div>
                 </div>
               </div>
 
-              <div className="px-5 py-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex flex-wrap gap-2">
-                    <BusyButton type="button" busy={previewBusy || busy} onClick={() => openPdf("preview")} className="acm-btn acm-btn-primary h-10 px-4">Preview PDF</BusyButton>
-                    <BusyButton type="button" busy={sendBusy} onClick={handleSend} disabled={!form.id || !pdfReviewed} className="acm-btn acm-btn-secondary h-10 px-4">Send</BusyButton>
-                    <BusyButton type="button" busy={busy} onClick={duplicateEstimate} className="acm-btn acm-btn-secondary h-10 px-4">Duplicate</BusyButton>
-                    {form.id ? <button type="button" onClick={() => deleteEstimate(form.id)} className="acm-btn acm-btn-secondary h-10 px-4">Delete</button> : null}
-                  </div>
-                  <div className="rounded-full border border-[color:var(--acm-border)] px-4 py-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">
-                    Auto-save is active while you edit.
-                  </div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap gap-2">
+                  <BusyButton type="button" busy={previewBusy || busy} onClick={() => openPdf("preview")} className="acm-btn acm-btn-primary h-10 px-4">Preview PDF</BusyButton>
+                  <BusyButton type="button" busy={busy} onClick={() => persistEstimate()} className="acm-btn acm-btn-secondary h-10 px-4">Save Details</BusyButton>
+                  {/* <BusyButton type="button" busy={sendBusy} onClick={handleSend} disabled={!form.id || !pdfReviewed} className="acm-btn acm-btn-secondary h-10 px-4">Send</BusyButton> */}
+                  <select className={inputClass("h-10 min-w-[150px]")} value={statusDraft} onChange={(event) => setStatusDraft(event.target.value)}>
+                    <option value="draft">Draft</option>
+                    <option value="sent">Sent</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                  </select>
+                  <BusyButton type="button" busy={busy} onClick={handleStatusAction} className="acm-btn acm-btn-secondary h-10 px-4">Update Status</BusyButton>
+                  {form.id ? <button type="button" onClick={() => deleteEstimate(form.id)} className="acm-btn acm-btn-secondary h-10 px-4">Delete</button> : null}
                 </div>
+                <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">{dirty ? "Unsaved changes" : "All changes saved manually"}</div>
               </div>
 
-              {error ? (
-                <div className="px-5 pb-2">
-                  <div className="acm-message-error">{error}</div>
-                </div>
-              ) : null}
-
-              <div className="px-5 pb-5">
-                <div className="space-y-6">
-                  <div className="grid gap-4 lg:grid-cols-1">
-                    <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
-                      <div className="mb-4 text-lg font-bold">Estimate Details</div>
-                      <div className="grid gap-4">
-                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                          <LabeledInput label="Estimate Title">
-                            <input className={inputClass()} value={form.title} onChange={(event) => updateEstimate("title", event.target.value)} />
-                          </LabeledInput>
-                          <LabeledInput label="Estimate Date">
-                            <input type="date" className={inputClass()} value={form.estimateDate} onChange={(event) => updateEstimate("estimateDate", event.target.value)} />
-                          </LabeledInput>
-                          <LabeledInput label="Valid Until">
-                            <input type="date" className={inputClass()} value={form.validUntil} onChange={(event) => updateEstimate("validUntil", event.target.value)} />
-                          </LabeledInput>
-                          <LabeledInput label="Customer">
-                            <select className={inputClass()} value={form.clientId} onChange={(event) => updateEstimate("clientId", event.target.value)}>
-                              <option value="">Select customer</option>
-                              {clients.map((client) => (
-                                <option key={client.id} value={client.id}>{client.name || client.email || "Customer"}</option>
-                              ))}
-                            </select>
-                          </LabeledInput>
-                          <LabeledInput label="Template">
-                            <select className={inputClass()} value={form.templateId || selectedTemplate?.id || ""} onChange={(event) => updateEstimate("templateId", event.target.value)}>
-                              <option value="">Default template</option>
-                              {templates.map((template) => (
-                                <option key={template.id} value={template.id}>{template.name}</option>
-                              ))}
-                            </select>
-                          </LabeledInput>
-                        </div>
-
-                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                          <LabeledInput label="Customer Name">
-                            <input className={inputClass()} value={form.customerName} onChange={(event) => updateEstimate("customerName", event.target.value)} />
-                          </LabeledInput>
-                          <LabeledInput label="Customer Email">
-                            <input className={inputClass()} value={form.customerEmail} onChange={(event) => updateEstimate("customerEmail", event.target.value)} />
-                          </LabeledInput>
-                          <LabeledInput label="Customer Phone">
-                            <input className={inputClass()} value={form.customerPhone} onChange={(event) => updateEstimate("customerPhone", event.target.value)} />
-                          </LabeledInput>
-                          <LabeledInput label="Customer Address">
-                            <input className={inputClass()} value={form.customerAddress} onChange={(event) => updateEstimate("customerAddress", event.target.value)} />
-                          </LabeledInput>
-                        </div>
-
-                        <div className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
-                          <div className="mb-4 text-sm font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Auto Calculations</div>
-                          <div className="grid gap-4 md:grid-cols-3">
-                            <LabeledInput label="Overhead %">
-                              <input className={inputClass()} value={form.overheadPercent} onChange={(event) => updateEstimate("overheadPercent", event.target.value)} />
-                            </LabeledInput>
-                            <LabeledInput label="Profit %">
-                              <input className={inputClass()} value={form.profitPercent} onChange={(event) => updateEstimate("profitPercent", event.target.value)} />
-                            </LabeledInput>
-                            <LabeledInput label="Commission %">
-                              <input className={inputClass()} value={form.commissionPercent} onChange={(event) => updateEstimate("commissionPercent", event.target.value)} />
-                            </LabeledInput>
-                          </div>
-                          <div className="mt-4">
-                            <FormulaGrid
-                              items={[
-                                { label: "Total Cost", value: formatCurrency(previewSummary.baseCost), note: "Labor + Material + Equipment + Overhead", tone: "accent" },
-                                { label: "Overhead", value: formatCurrency(previewSummary.overheadAmount), note: `Total Cost x ${form.overheadPercent || 0}%` },
-                                { label: "Profit", value: formatCurrency(previewSummary.profitAmount), note: `(Total Cost + Overhead) x ${form.profitPercent || 0}%` },
-                                { label: "Commission", value: formatCurrency(previewSummary.commissionAmount), note: `(Total Cost + Overhead + Profit) x ${form.commissionPercent || 0}%` },
-                                { label: "Total Price", value: formatCurrency(previewSummary.totalPrice), note: "Total Cost + Overhead + Profit + Commission", tone: "accent" },
-                              ]}
-                            />
-                          </div>
-                        </div>
-
-                  <div className="space-y-5">
-                    {form.costLines.map((line, lineIndex) => {
-                      const lineSummary = computeCostLineSummary(line);
-                      return (
-                        <div key={line.id} className="rounded-[28px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div className="grid flex-1 gap-3 md:grid-cols-[180px_180px_minmax(0,1fr)]">
-                              <div className="rounded-[16px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm font-semibold">
-                                Cost Line {lineIndex + 1}
-                              </div>
-                              <input className={inputClass()} value={line.code || ""} onChange={(event) => updateLine(line.id, "code", event.target.value)} placeholder="Code" />
-                              <input className={inputClass("min-w-[220px]")} value={line.description} onChange={(event) => updateLine(line.id, "description", event.target.value)} placeholder="Cost line title" />
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {form.costLines.length > 1 ? (
-                                <button type="button" onClick={() => removeCostLine(line.id)} className="acm-btn acm-btn-secondary h-10 px-4">Remove Line</button>
-                              ) : null}
-                            </div>
-                          </div>
-
-                          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                            <MetricCard label="Labor" value={formatCurrency(lineSummary.laborCost)} />
-                            <MetricCard label="Material" value={formatCurrency(lineSummary.materialCost)} />
-                            <MetricCard label="Equipment" value={formatCurrency(lineSummary.equipmentCost)} />
-                            <MetricCard label="Overhead" value={formatCurrency(lineSummary.overheadCost)} />
-                            <MetricCard label="Line Total" value={formatCurrency(lineSummary.total)} tone="accent" />
-                          </div>
-
-                          <div className="mt-4 space-y-4">
-                            <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)]">
-                              <button type="button" onClick={() => toggleSection(line.id, "laborEntries")} className="flex w-full items-center justify-between px-4 py-4 text-left">
-                                <div>
-                                  <div className="text-lg font-bold">Labor</div>
-                                  <div className="text-sm text-[color:var(--acm-muted-fg)]">Classification, wage, rates, crew counts, and target/prevail calculations</div>
-                                </div>
-                                <ChevronRightIcon className={`h-5 w-5 transition ${collapsedSections[`${line.id}:laborEntries`] ? "" : "rotate-90"}`} />
-                              </button>
-                              {!collapsedSections[`${line.id}:laborEntries`] ? (
-                                <div className="border-t border-[color:var(--acm-border)] p-4">
-                                  <div className="space-y-4">
-                                    {line.laborEntries.map((entry, entryIndex) => {
-                                      const derived = calculateLabor(entry);
-                                      return (
-                                        <div key={entry.id} className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
-                                          <div className="mb-4 flex items-center justify-between">
-                                            <div className="text-sm font-bold">Labor Entry {entryIndex + 1}</div>
-                                            {line.laborEntries.length > 1 ? <button type="button" onClick={() => removeEntry(line.id, "laborEntries", entry.id)} className="text-xs font-semibold text-rose-600">Remove Labor</button> : null}
-                                          </div>
-                                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                                            <LabeledInput label="Labor Item"><input list={`labor-options-${line.id}`} className={inputClass()} value={entry.title} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "title", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Classification"><select className={inputClass()} value={entry.classification} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "classification", event.target.value)}><option value="">Select classification</option>{laborClassificationOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></LabeledInput>
-                                            <LabeledInput label="Base Wage ($)"><input className={inputClass()} value={entry.baseWage} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "baseWage", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Tax (%)"><input className={inputClass()} value={entry.taxPercent} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "taxPercent", event.target.value)} /></LabeledInput>
-                                          </div>
-                                          <div className="mt-4 rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
-                                            <div className="flex items-center justify-between">
-                                              <div className="text-sm font-bold">Rates</div>
-                                              <button type="button" onClick={() => addRate(line.id, entry.id)} className="acm-btn acm-btn-secondary h-9 px-3">Add Rate</button>
-                                            </div>
-                                            <div className="mt-3 space-y-3">
-                                              {(entry.rates ?? []).map((rate) => (
-                                                <div key={rate.id} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                                                  <input list={`labor-rate-options-${line.id}`} className={inputClass()} placeholder="Rate name" value={rate.name} onChange={(event) => updateRate(line.id, entry.id, rate.id, "name", event.target.value)} />
-                                                  <input className={inputClass()} placeholder="Rate value (%)" value={rate.value} onChange={(event) => updateRate(line.id, entry.id, rate.id, "value", event.target.value)} />
-                                                  <button type="button" onClick={() => removeRate(line.id, entry.id, rate.id)} className="flex h-10 w-10 items-center justify-center rounded-[14px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] text-lg font-bold text-rose-600">×</button>
-                                                </div>
-                                              ))}
-                                            </div>
-                                          </div>
-                                          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                                            <LabeledInput label="Straight Time Hours"><input className={inputClass()} value={entry.stHours} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "stHours", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Straight Time Rate"><input className={inputClass()} value={entry.stRate} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "stRate", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Overtime Hours"><input className={inputClass()} value={entry.otHours} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "otHours", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Overtime Rate"><input className={inputClass()} value={entry.otRate} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "otRate", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="ST Persons"><input className={inputClass()} value={entry.straightTimePersons} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "straightTimePersons", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="ST Days"><input className={inputClass()} value={entry.straightTimeDays} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "straightTimeDays", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="OT Persons"><input className={inputClass()} value={entry.overtimePersons} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "overtimePersons", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="OT Days"><input className={inputClass()} value={entry.overtimeDays} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "overtimeDays", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Target Wage ($)"><input className={inputClass()} value={entry.targetWage} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "targetWage", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Prevail Wage ($)"><input className={inputClass()} value={entry.prevailWage} onChange={(event) => updateEntry(line.id, "laborEntries", entry.id, "prevailWage", event.target.value)} /></LabeledInput>
-                                          </div>
-                                          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                                            <FormulaCard label="Total Amount" value={formatCurrency(derived.total)} note="(Straight Time Hours x Rate) + (Overtime Hours x Rate)" tone="accent" />
-                                            <FormulaCard label="Target Pay" value={formatCurrency(toNumber(entry.stHours) * toNumber(entry.targetWage))} note="Straight Time Hours x Target Wage" />
-                                            <FormulaCard label="Prevail Pay" value={formatCurrency(toNumber(entry.stHours) * toNumber(entry.prevailWage))} note="Straight Time Hours x Prevail Wage" />
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                  <datalist id={`labor-options-${line.id}`}>{suggestionLibrary.labor.map((option) => <option key={option.label} value={option.label} />)}</datalist>
-                                  <datalist id={`labor-rate-options-${line.id}`}>{laborRateDefaultOptions.map((option) => <option key={`${option.name}-${option.value}`} value={option.name} />)}</datalist>
-                                  <div className="mt-4 flex justify-end">
-                                    <button type="button" onClick={() => addEntry(line.id, "laborEntries")} className="acm-btn acm-btn-secondary h-10 px-4">Add Other Labor</button>
-                                  </div>
-                                </div>
-                              ) : null}
-                            </div>
-
-                            <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)]">
-                              <button type="button" onClick={() => toggleSection(line.id, "materialEntries")} className="flex w-full items-center justify-between px-4 py-4 text-left">
-                                <div>
-                                  <div className="text-lg font-bold">Material</div>
-                                  <div className="text-sm text-[color:var(--acm-muted-fg)]">Code, quantity, waste, freight, tax, and total material calculations</div>
-                                </div>
-                                <ChevronRightIcon className={`h-5 w-5 transition ${collapsedSections[`${line.id}:materialEntries`] ? "" : "rotate-90"}`} />
-                              </button>
-                              {!collapsedSections[`${line.id}:materialEntries`] ? (
-                                <div className="border-t border-[color:var(--acm-border)] p-4">
-                                  <div className="space-y-4">
-                                    {line.materialEntries.map((entry, entryIndex) => {
-                                      const derived = calculateMaterial(entry);
-                                      return (
-                                        <div key={entry.id} className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
-                                          <div className="mb-4 flex items-center justify-between">
-                                            <div className="text-sm font-bold">Material Entry {entryIndex + 1}</div>
-                                            {line.materialEntries.length > 1 ? <button type="button" onClick={() => removeEntry(line.id, "materialEntries", entry.id)} className="text-xs font-semibold text-rose-600">Remove Material</button> : null}
-                                          </div>
-                                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                                            <LabeledInput label="Code"><input className={inputClass()} value={entry.code} onChange={(event) => updateEntry(line.id, "materialEntries", entry.id, "code", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Description"><input list={`material-options-${line.id}`} className={inputClass()} value={entry.description} onChange={(event) => updateEntry(line.id, "materialEntries", entry.id, "description", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Quantity"><input className={inputClass()} value={entry.quantity} onChange={(event) => updateEntry(line.id, "materialEntries", entry.id, "quantity", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="UOM"><input className={inputClass()} value={entry.uom} onChange={(event) => updateEntry(line.id, "materialEntries", entry.id, "uom", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Waste %"><input className={inputClass()} value={entry.wastePercent} onChange={(event) => updateEntry(line.id, "materialEntries", entry.id, "wastePercent", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Unit Rate ($)"><input className={inputClass()} value={entry.unitRate} onChange={(event) => updateEntry(line.id, "materialEntries", entry.id, "unitRate", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Freight ($)"><input className={inputClass()} value={entry.freight} onChange={(event) => updateEntry(line.id, "materialEntries", entry.id, "freight", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Tax (%)"><input className={inputClass()} value={entry.taxPercent} onChange={(event) => updateEntry(line.id, "materialEntries", entry.id, "taxPercent", event.target.value)} /></LabeledInput>
-                                          </div>
-                                          <div className="mt-4">
-                                            <FormulaGrid
-                                              items={[
-                                                { label: "Waste Qty", value: derived.wasteQty.toFixed(2), note: "Quantity x Waste %" },
-                                                { label: "Cost", value: formatCurrency(derived.cost), note: "Quantity x Unit Rate" },
-                                                { label: "Cost w/ Freight", value: formatCurrency(derived.costWithFreight), note: "Cost + Freight" },
-                                                { label: "Cost w/ Tax", value: formatCurrency(derived.taxAmount), note: "Tax % x Cost w/ Freight" },
-                                                { label: "Total", value: formatCurrency(derived.total), note: "Cost w/ Freight + Cost w/ Tax", tone: "accent" },
-                                              ]}
-                                            />
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                  <datalist id={`material-options-${line.id}`}>{suggestionLibrary.material.map((option) => <option key={option.label} value={option.label} />)}</datalist>
-                                  <div className="mt-4 flex justify-end">
-                                    <button type="button" onClick={() => addEntry(line.id, "materialEntries")} className="acm-btn acm-btn-secondary h-10 px-4">Add Other Material</button>
-                                  </div>
-                                </div>
-                              ) : null}
-                            </div>
-
-                            <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)]">
-                              <button type="button" onClick={() => toggleSection(line.id, "equipmentEntries")} className="flex w-full items-center justify-between px-4 py-4 text-left">
-                                <div>
-                                  <div className="text-lg font-bold">Equipment</div>
-                                  <div className="text-sm text-[color:var(--acm-muted-fg)]">Rental days, freight, fuel, tax, and total equipment calculations</div>
-                                </div>
-                                <ChevronRightIcon className={`h-5 w-5 transition ${collapsedSections[`${line.id}:equipmentEntries`] ? "" : "rotate-90"}`} />
-                              </button>
-                              {!collapsedSections[`${line.id}:equipmentEntries`] ? (
-                                <div className="border-t border-[color:var(--acm-border)] p-4">
-                                  <div className="space-y-4">
-                                    {line.equipmentEntries.map((entry, entryIndex) => {
-                                      const derived = calculateEquipment(entry);
-                                      return (
-                                        <div key={entry.id} className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
-                                          <div className="mb-4 flex items-center justify-between">
-                                            <div className="text-sm font-bold">Equipment Entry {entryIndex + 1}</div>
-                                            {line.equipmentEntries.length > 1 ? <button type="button" onClick={() => removeEntry(line.id, "equipmentEntries", entry.id)} className="text-xs font-semibold text-rose-600">Remove Equipment</button> : null}
-                                          </div>
-                                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                                            <LabeledInput label="Code"><input className={inputClass()} value={entry.code} onChange={(event) => updateEntry(line.id, "equipmentEntries", entry.id, "code", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Description"><input list={`equipment-options-${line.id}`} className={inputClass()} value={entry.description} onChange={(event) => updateEntry(line.id, "equipmentEntries", entry.id, "description", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Quantity"><input className={inputClass()} value={entry.quantity} onChange={(event) => updateEntry(line.id, "equipmentEntries", entry.id, "quantity", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Rental Days"><input className={inputClass()} value={entry.rentalDays} onChange={(event) => updateEntry(line.id, "equipmentEntries", entry.id, "rentalDays", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Unit Rate ($)"><input className={inputClass()} value={entry.unitRate} onChange={(event) => updateEntry(line.id, "equipmentEntries", entry.id, "unitRate", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Freight ($)"><input className={inputClass()} value={entry.freight} onChange={(event) => updateEntry(line.id, "equipmentEntries", entry.id, "freight", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Fuel (%)"><input className={inputClass()} value={entry.fuelPercent} onChange={(event) => updateEntry(line.id, "equipmentEntries", entry.id, "fuelPercent", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Tax (%)"><input className={inputClass()} value={entry.taxPercent} onChange={(event) => updateEntry(line.id, "equipmentEntries", entry.id, "taxPercent", event.target.value)} /></LabeledInput>
-                                          </div>
-                                          <div className="mt-4">
-                                            <FormulaGrid
-                                              items={[
-                                                { label: "Cost", value: formatCurrency(derived.cost), note: "Quantity x Rental Days x Unit Rate" },
-                                                { label: "Cost w/ Freight", value: formatCurrency(derived.costWithFreight), note: "Cost + Freight" },
-                                                { label: "Cost w/ Fuel", value: formatCurrency(derived.costWithFuel), note: "Fuel % x Cost w/ Freight + Cost w/ Freight" },
-                                                { label: "Cost w/ Tax", value: formatCurrency(derived.taxAmount), note: "Tax % x Cost w/ Fuel" },
-                                                { label: "Total", value: formatCurrency(derived.total), note: "Cost w/ Fuel + Cost w/ Tax", tone: "accent" },
-                                              ]}
-                                            />
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                  <datalist id={`equipment-options-${line.id}`}>{suggestionLibrary.equipment.map((option) => <option key={option.label} value={option.label} />)}</datalist>
-                                  <div className="mt-4 flex justify-end">
-                                    <button type="button" onClick={() => addEntry(line.id, "equipmentEntries")} className="acm-btn acm-btn-secondary h-10 px-4">Add Other Equipment</button>
-                                  </div>
-                                </div>
-                              ) : null}
-                            </div>
-
-                            <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)]">
-                              <button type="button" onClick={() => toggleSection(line.id, "overheadEntries")} className="flex w-full items-center justify-between px-4 py-4 text-left">
-                                <div>
-                                  <div className="text-lg font-bold">Overhead</div>
-                                  <div className="text-sm text-[color:var(--acm-muted-fg)]">Quantity, days, tax, and total overhead calculations</div>
-                                </div>
-                                <ChevronRightIcon className={`h-5 w-5 transition ${collapsedSections[`${line.id}:overheadEntries`] ? "" : "rotate-90"}`} />
-                              </button>
-                              {!collapsedSections[`${line.id}:overheadEntries`] ? (
-                                <div className="border-t border-[color:var(--acm-border)] p-4">
-                                  <div className="space-y-4">
-                                    {line.overheadEntries.map((entry, entryIndex) => {
-                                      const derived = calculateOverhead(entry);
-                                      return (
-                                        <div key={entry.id} className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
-                                          <div className="mb-4 flex items-center justify-between">
-                                            <div className="text-sm font-bold">Overhead Entry {entryIndex + 1}</div>
-                                            {line.overheadEntries.length > 1 ? <button type="button" onClick={() => removeEntry(line.id, "overheadEntries", entry.id)} className="text-xs font-semibold text-rose-600">Remove Overhead</button> : null}
-                                          </div>
-                                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                                            <LabeledInput label="Code"><input className={inputClass()} value={entry.code} onChange={(event) => updateEntry(line.id, "overheadEntries", entry.id, "code", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Description"><input list={`overhead-options-${line.id}`} className={inputClass()} value={entry.description} onChange={(event) => updateEntry(line.id, "overheadEntries", entry.id, "description", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Quantity"><input className={inputClass()} value={entry.quantity} onChange={(event) => updateEntry(line.id, "overheadEntries", entry.id, "quantity", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="UOM"><input className={inputClass()} value={entry.uom} onChange={(event) => updateEntry(line.id, "overheadEntries", entry.id, "uom", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Unit Rate ($)"><input className={inputClass()} value={entry.unitRate} onChange={(event) => updateEntry(line.id, "overheadEntries", entry.id, "unitRate", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Days"><input className={inputClass()} value={entry.days} onChange={(event) => updateEntry(line.id, "overheadEntries", entry.id, "days", event.target.value)} /></LabeledInput>
-                                            <LabeledInput label="Tax (%)"><input className={inputClass()} value={entry.taxPercent} onChange={(event) => updateEntry(line.id, "overheadEntries", entry.id, "taxPercent", event.target.value)} /></LabeledInput>
-                                          </div>
-                                          <div className="mt-4">
-                                            <FormulaGrid
-                                              items={[
-                                                { label: "Cost", value: formatCurrency(derived.cost), note: "Quantity x Unit Rate x Days" },
-                                                { label: "Cost w/ Tax", value: formatCurrency(derived.taxAmount), note: "Cost x Tax %" },
-                                                { label: "Total", value: formatCurrency(derived.total), note: "Cost + Cost w/ Tax", tone: "accent" },
-                                              ]}
-                                            />
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                  <datalist id={`overhead-options-${line.id}`}>{suggestionLibrary.overhead.map((option) => <option key={option.label} value={option.label} />)}</datalist>
-                                  <div className="mt-4 flex justify-end">
-                                    <button type="button" onClick={() => addEntry(line.id, "overheadEntries")} className="acm-btn acm-btn-secondary h-10 px-4">Add Overhead</button>
-                                  </div>
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    <div className="flex justify-end">
-                      <button type="button" onClick={addCostLine} className="acm-btn acm-btn-secondary h-11 rounded-full px-5">Add Cost Line</button>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-4">
-                    <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
-                      <div className="mb-4 text-lg font-bold">Notes & Terms</div>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <LabeledInput label="Notes">
-                          <textarea className={inputClass("min-h-[94px]")} value={form.notes} onChange={(event) => updateEstimate("notes", event.target.value)} />
-                        </LabeledInput>
-                        <LabeledInput label="Terms">
-                          <textarea className={inputClass("min-h-[94px]")} value={form.terms} onChange={(event) => updateEstimate("terms", event.target.value)} />
-                        </LabeledInput>
-                        <LabeledInput label="Signature Label">
-                          <input className={inputClass()} value={form.signatureLabel} onChange={(event) => updateEstimate("signatureLabel", event.target.value)} />
-                        </LabeledInput>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                      <MetricCard label="Man Hours" value={String(form.costLines.reduce((sum, costLine) => sum + (costLine.laborEntries ?? []).reduce((entrySum, entry) => entrySum + toNumber(entry.stHours) + toNumber(entry.otHours), 0), 0).toFixed(2))} />
-                      <MetricCard label="Overhead Costs" value={formatCurrency(previewSummary.directOverheadCost)} />
-                      <MetricCard label="Overhead" value={formatCurrency(previewSummary.overheadAmount)} />
-                      <MetricCard label="Profit" value={formatCurrency(previewSummary.profitAmount)} />
-                      <MetricCard label="Total Price" value={formatCurrency(previewSummary.totalPrice)} tone="accent" />
-                    </div>
-
-                    
-
-                    <div className={cardClass("p-4")}>
-                    <div className="text-lg font-bold">Status Management</div>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <StatusButton active={form.status === "draft"} onClick={() => updateEstimate("status", "draft")}>Draft</StatusButton>
-                      <StatusButton active={form.status === "sent"} onClick={handleSend}>Sent</StatusButton>
-                      <StatusButton active={form.status === "approved"} onClick={handleApprove}>Approved</StatusButton>
-                      <StatusButton active={form.status === "rejected"} onClick={handleReject}>Rejected</StatusButton>
-                    </div>
-                    </div>
-                  </div>
-                </div>
+              <div className="grid gap-6 md:grid-cols-4">
+                <LabeledInput label="Estimate No">
+                  <div className="py-2 text-sm font-semibold text-[color:var(--acm-fg)]">{form.estimateNumber || "Auto Generated"}</div>
+                </LabeledInput>
+                <LabeledInput label="Estimate Date">
+                  <input type="date" className={sheetInputClass()} value={form.estimateDate} onChange={(event) => updateEstimate("estimateDate", event.target.value)} />
+                </LabeledInput>
+                <LabeledInput label="Valid Until">
+                  <input type="date" className={sheetInputClass()} value={form.validUntil} onChange={(event) => updateEstimate("validUntil", event.target.value)} />
+                </LabeledInput>
+                <LabeledInput label="Customer">
+                  <select className={sheetInputClass()} value={form.clientId} onChange={(event) => updateEstimate("clientId", event.target.value)}>
+                    <option value="">Select customer</option>
+                    {clients.map((client) => (
+                      <option key={client.id} value={client.id}>{client.name || client.email || "Customer"}</option>
+                    ))}
+                  </select>
+                </LabeledInput>
               </div>
+
+              <div className="space-y-8">
+                <SectionTable
+                  title="Labor"
+                  addLabel="Add Other Labor"
+                  sectionKey="laborEntries"
+                  rows={form.costLines[0]?.laborEntries ?? []}
+                  columns={laborColumns}
+                  summaryColumns={[
+                    { key: "targetPay", label: "Target Pay", render: (row, derived) => formatCurrency(derived.targetPay) },
+                    // { key: "overheadAmount", label: "Overhead", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).overheadAmount) },
+                    // { key: "profitAmount", label: "Profit", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).profitAmount) },
+                    // { key: "finalTotal", label: "Total", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).finalTotal) },
+                  ]}
+                  onChange={(rowId, key, value) => updateEntry(form.costLines[0]?.id, "laborEntries", rowId, key, value)}
+                  onAdd={() => addEntry(form.costLines[0]?.id, "laborEntries")}
+                  onRemove={(rowId) => removeEntry(form.costLines[0]?.id, "laborEntries", rowId)}
+                  onKeyDown={handleGridKeyDown}
+                  collapsed={collapsedSections[`${form.costLines[0]?.id}:laborEntries`]}
+                  onToggle={() => toggleSection(form.costLines[0]?.id, "laborEntries")}
+                />
+
+                <SectionTable
+                  title="Material"
+                  addLabel="Add Other Material"
+                  sectionKey="materialEntries"
+                  rows={form.costLines[0]?.materialEntries ?? []}
+                  columns={materialColumns}
+                  summaryColumns={[
+                    // { key: "overheadAmount", label: "Overhead", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).overheadAmount) },
+                    // { key: "profitAmount", label: "Profit", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).profitAmount) },
+                    { key: "finalTotal", label: "Total", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).finalTotal) },
+                  ]}
+                  onChange={(rowId, key, value) => updateEntry(form.costLines[0]?.id, "materialEntries", rowId, key, value)}
+                  onAdd={() => addEntry(form.costLines[0]?.id, "materialEntries")}
+                  onRemove={(rowId) => removeEntry(form.costLines[0]?.id, "materialEntries", rowId)}
+                  onKeyDown={handleGridKeyDown}
+                  collapsed={collapsedSections[`${form.costLines[0]?.id}:materialEntries`]}
+                  onToggle={() => toggleSection(form.costLines[0]?.id, "materialEntries")}
+                />
+
+                <SectionTable
+                  title="Equipment"
+                  addLabel="Add Other Equipment"
+                  sectionKey="equipmentEntries"
+                  rows={form.costLines[0]?.equipmentEntries ?? []}
+                  columns={equipmentColumns}
+                  summaryColumns={[
+                    // { key: "overheadAmount", label: "Overhead", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).overheadAmount) },
+                    // { key: "profitAmount", label: "Profit", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).profitAmount) },
+                    { key: "finalTotal", label: "Total", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).finalTotal) },
+                  ]}
+                  onChange={(rowId, key, value) => updateEntry(form.costLines[0]?.id, "equipmentEntries", rowId, key, value)}
+                  onAdd={() => addEntry(form.costLines[0]?.id, "equipmentEntries")}
+                  onRemove={(rowId) => removeEntry(form.costLines[0]?.id, "equipmentEntries", rowId)}
+                  onKeyDown={handleGridKeyDown}
+                  collapsed={collapsedSections[`${form.costLines[0]?.id}:equipmentEntries`]}
+                  onToggle={() => toggleSection(form.costLines[0]?.id, "equipmentEntries")}
+                />
               </div>
-              </div>
+
+              <datalist id="estimate-cost-code-options">
+                {costCodeSuggestions.map((option) => <option key={option.label} value={option.label}>{option.description}</option>)}
+              </datalist>
+              <datalist id="labor-classification-options">
+                {laborClassificationOptions.map((option) => <option key={option} value={option} />)}
+              </datalist>
+              <datalist id="material-suggestion-options">
+                {suggestionLibrary.material.map((option) => <option key={option.label} value={option.label} />)}
+              </datalist>
+              <datalist id="equipment-suggestion-options">
+                {suggestionLibrary.equipment.map((option) => <option key={option.label} value={option.label} />)}
+              </datalist>
+
+              <div className="overflow-x-auto">
+                <table className="min-w-full">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
+                      <th className="py-2">Labor</th>
+                      <th className="py-2">Material</th>
+                      <th className="py-2">Equipment</th>
+                      <th className="py-2">Overhead</th>
+                      <th className="py-2">Profit</th>
+                      <th className="py-2">Total Estimate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="text-sm font-semibold text-[color:var(--acm-fg)]">
+                      <td className="py-2">{formatCurrency(previewSummary.laborCost)}</td>
+                      <td className="py-2">{formatCurrency(previewSummary.materialCost)}</td>
+                      <td className="py-2">{formatCurrency(previewSummary.equipmentCost)}</td>
+                      <td className="py-2">{formatCurrency(previewSummary.overheadAmount)}</td>
+                      <td className="py-2">{formatCurrency(previewSummary.profitAmount)}</td>
+                      <td className="py-2">{formatCurrency(previewSummary.totalPrice)}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </section>
           </div>
