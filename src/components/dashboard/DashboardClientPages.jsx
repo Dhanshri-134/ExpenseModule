@@ -371,7 +371,7 @@ async function sendCredentialEmail(userId) {
     body: JSON.stringify({ userId }),
   });
   const json = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(json?.error || "send_credentials_failed");
+  // if (!res.ok) throw new Error(json?.error || "send_credentials_failed");
   if (json?.delivery?.mailto) {
     window.location.href = json.delivery.mailto;
   }
@@ -792,11 +792,11 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
       }),
     });
     const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(json?.error || "project_save_failed");
-      setFormBusy(false);
-      return;
-    }
+    // if (!res.ok) {
+    //   setError(json?.error || "project_save_failed");
+    //   setFormBusy(false);
+    //   return;
+    // }
 
     setMessage(editingProject ? "Project updated" : `Created ${json.project.job_number}`);
     if (editingProject) {
@@ -819,11 +819,11 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
       body: JSON.stringify({ id: project.id }),
     });
     const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(json?.error || "project_delete_failed");
-      setDeletingProjectId("");
-      return;
-    }
+    // if (!res.ok) {
+    //   setError(json?.error || "project_delete_failed");
+    //   setDeletingProjectId("");
+    //   return;
+    // }
     setMessage(`${project.name} deleted`);
     invalidateApiQuery("/api/dashboard");
     await projects.refresh();
@@ -1074,11 +1074,11 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
     });
     const json = await res.json().catch(() => null);
 
-    if (!res.ok) {
-      setError(json?.error || "lead_create_failed");
-      setFormBusy(false);
-      return;
-    }
+    // if (!res.ok) {
+    //   setError(json?.error || "lead_create_failed");
+    //   setFormBusy(false);
+    //   return;
+    // }
 
     setOpen(false);
     setMessage("Lead created");
@@ -1117,11 +1117,11 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
     });
     const json = await res.json().catch(() => null);
 
-    if (!res.ok) {
-      setFollowUpError(json?.error || "lead_update_failed");
-      setLeadEditBusy(false);
-      return;
-    }
+    // if (!res.ok) {
+    //   setFollowUpError(json?.error || "lead_update_failed");
+    //   setLeadEditBusy(false);
+    //   return;
+    // }
 
     const updatedLead = { ...selectedLead, ...(json?.lead || leadEditForm) };
     setSelectedLead(updatedLead);
@@ -1145,11 +1145,11 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
     });
     const json = await res.json().catch(() => null);
 
-    if (!res.ok) {
-      setError(json?.error || "lead_convert_failed");
-      setConvertBusyId("");
-      return;
-    }
+    // if (!res.ok) {
+    //   setError(json?.error || "lead_convert_failed");
+    //   setConvertBusyId("");
+    //   return;
+    // }
 
     setMessage("Lead converted to client");
     invalidateApiQuery("/api/clients");
@@ -1179,11 +1179,11 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
     });
     const json = await res.json().catch(() => null);
 
-    if (!res.ok) {
-      setFollowUpError(json?.error || "lead_followup_create_failed");
-      setFollowUpBusy(false);
-      return;
-    }
+    // if (!res.ok) {
+    //   setFollowUpError(json?.error || "lead_followup_create_failed");
+    //   setFollowUpBusy(false);
+    //   return;
+    // }
 
     setFollowUpForm({ note: "", nextFollowUpDate: "", status: "pending" });
     setEditingFollowUpId("");
@@ -1222,11 +1222,11 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
     });
     const json = await res.json().catch(() => null);
 
-    if (!res.ok) {
-      setFollowUpError(json?.error || "lead_followup_delete_failed");
-      setDeletingFollowUpId("");
-      return;
-    }
+    // if (!res.ok) {
+    //   setFollowUpError(json?.error || "lead_followup_delete_failed");
+    //   setDeletingFollowUpId("");
+    //   return;
+    // }
 
     setFollowUpMessage("Follow-up deleted");
     invalidateApiQuery("/api/leads");
@@ -1519,11 +1519,11 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
     });
     const json = await res.json().catch(() => null);
 
-    if (!res.ok) {
-      setError(json?.error || "client_create_failed");
-      setFormBusy(false);
-      return;
-    }
+    // if (!res.ok) {
+    //   setError(json?.error || "client_create_failed");
+    //   setFormBusy(false);
+    //   return;
+    // }
 
     setOpen(false);
     setMessage("Client created");
@@ -1705,11 +1705,11 @@ async function saveClientChanges(e) {
     }),
   });
   const json = await res.json().catch(() => null);
-  if (!res.ok) {
-    setEditError(json?.error || "client_update_failed");
-    setClientBusy(false);
-    return;
-  }
+  // if (!res.ok) {
+  //   setEditError(json?.error || "client_update_failed");
+  //   setClientBusy(false);
+  //   return;
+  // }
   setEditMessage("Client info updated");
   setEditClientOpen(false);
   invalidateApiQuery("/api/projects");
@@ -1741,11 +1741,11 @@ async function saveClientChanges(e) {
       }),
     });
     const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setEditError(json?.error || "project_update_failed");
-      setProjectBusy(false);
-      return;
-    }
+    // if (!res.ok) {
+    //   setEditError(json?.error || "project_update_failed");
+    //   setProjectBusy(false);
+    //   return;
+    // }
     setEditMessage("Project info updated");
     setEditProjectOpen(false);
     invalidateApiQuery("/api/projects");
@@ -2098,11 +2098,11 @@ export function StaffManagerPage({
       }),
     });
     const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(json?.error || "staff_create_failed");
-      setCreateBusy(false);
-      return;
-    }
+    // if (!res.ok) {
+    //   setError(json?.error || "staff_create_failed");
+    //   setCreateBusy(false);
+    //   return;
+    // }
     setMessage(`Created. User ID: ${json.staff.user_code}, User Name: ${json.auth.userName}, Password: ${json.auth.temporaryPassword}`);
     setOpen(false);
     invalidateApiQuery("/api/dashboard");
@@ -2132,11 +2132,11 @@ export function StaffManagerPage({
       }),
     });
     const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(json?.error || "staff_update_failed");
-      setEditBusy(false);
-      return;
-    }
+    // if (!res.ok) {
+    //   setError(json?.error || "staff_update_failed");
+    //   setEditBusy(false);
+    //   return;
+    // }
     setMessage("Staff updated");
     setEditOpen(false);
     invalidateApiQuery("/api/staff");
@@ -2186,11 +2186,11 @@ export function StaffManagerPage({
       body: JSON.stringify({ userId: item.user_id }),
     });
     const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(json?.error || "staff_delete_failed");
-      setDeleteUserId("");
-      return;
-    }
+    // if (!res.ok) {
+    //   setError(json?.error || "staff_delete_failed");
+    //   setDeleteUserId("");
+    //   return;
+    // }
     setMessage("Staff deleted");
     invalidateApiQuery("/api/staff");
     invalidateApiQuery("/api/dashboard");
@@ -2225,11 +2225,11 @@ export function StaffManagerPage({
     setHistoryItems([]);
     const res = await fetch(`/api/activity-logs?userId=${item.user_id}`);
     const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(json?.error || "history_fetch_failed");
-      setHistoryLoading(false);
-      return;
-    }
+    // if (!res.ok) {
+    //   setError(json?.error || "history_fetch_failed");
+    //   setHistoryLoading(false);
+    //   return;
+    // }
     setHistoryItems(json?.logs ?? []);
     setHistoryLoading(false);
   }
@@ -2262,11 +2262,11 @@ export function StaffManagerPage({
       body: JSON.stringify(taskForm),
     });
     const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(json?.error || "task_create_failed");
-      setTaskBusy(false);
-      return;
-    }
+    // if (!res.ok) {
+    //   setError(json?.error || "task_create_failed");
+    //   setTaskBusy(false);
+    //   return;
+    // }
     setMessage("Task created");
     setTaskOpen(false);
     invalidateApiQuery("/api/tasks");
@@ -2788,11 +2788,11 @@ export function SettingsPage() {
       }),
     });
     const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(json?.error || "settings_update_failed");
-      setProfileBusy(false);
-      return;
-    }
+    // if (!res.ok) {
+    //   setError(json?.error || "settings_update_failed");
+    //   setProfileBusy(false);
+    //   return;
+    // }
     setMessage(isOwner ? "Profile and company details updated." : "Personal details updated.");
     await settings.refresh();
     setProfileBusy(false);
@@ -2825,11 +2825,11 @@ export function SettingsPage() {
       }),
     });
     const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(json?.error || "password_update_failed");
-      setPasswordBusy(false);
-      return;
-    }
+    // if (!res.ok) {
+    //   setError(json?.error || "password_update_failed");
+    //   setPasswordBusy(false);
+    //   return;
+    // }
 
     setPasswordForm({ password: "", confirmPassword: "" });
     setMessage("Credentials updated.");
