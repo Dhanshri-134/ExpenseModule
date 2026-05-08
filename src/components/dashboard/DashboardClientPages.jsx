@@ -17,7 +17,7 @@ import {
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
 
 function cardClass(extra = "") {
-  return `rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.08)] ${extra}`.trim();
+  return `rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 ${extra}`.trim();
 }
 
 function fieldClass() {
@@ -117,7 +117,7 @@ function OverviewCard({
   layout = "grid",
 }) {
   return (
-    <div className="relative overflow-hidden rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4 shadow-[0_12px_28px_rgba(0,0,0,0.05)]">
+    <div className="relative overflow-hidden rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4 ">
       <div
         className="pointer-events-none absolute inset-x-0 top-0 h-16 opacity-75"
         style={{ background: accent }}
@@ -488,7 +488,7 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
 
   return (
     <>
-      <SectionHeader title="Overview" />
+      {/* <SectionHeader title="Overview" /> */}
 
       <section className="grid gap-3 xl:grid-cols-[1fr_1fr_1.15fr]">
         <OverviewCard
@@ -543,7 +543,7 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
 
       <section className="mt-4 grid gap-4 xl:grid-cols-2">
         <div className={cardClass()}>
-          <SectionHeader title="Projects" action={<Link href={`/${roleBase}/projects`} className="text-sm font-semibold text-[color:var(--acm-accent)]">Open</Link>} />
+          {/* <SectionHeader title="Projects" action={<Link href={`/${roleBase}/projects`} className="text-sm font-semibold text-[color:var(--acm-accent)]">Open</Link>} /> */}
           <div className="space-y-3">
             {projectList.slice(0, 3).map((project) => (
               <CompactListRow
@@ -557,7 +557,7 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
           </div>
         </div>
         <div className={cardClass()}>
-          <SectionHeader title="Tasks" action={<Link href={`/${roleBase}/tasks`} className="text-sm font-semibold text-[color:var(--acm-accent)]">Open</Link>} />
+          {/* <SectionHeader title="Tasks" action={<Link href={`/${roleBase}/tasks`} className="text-sm font-semibold text-[color:var(--acm-accent)]">Open</Link>} /> */}
           <div className="space-y-3">
             {taskList.slice(0, 3).map((task) => (
               <CompactListRow
@@ -1142,21 +1142,24 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
   return (
     <>
       <SectionHeader
-        title="Leads"
         action={
           canCreateLead ? (
+            <div className="mb-4">
+        <button type="button" onClick={() => router.push(`/${roleBase}/followups`)} className="acm-btn acm-btn-secondary h-10 px-4 mr-2">
+          Open Follow-up List
+        </button>
             <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
               Create Lead
             </button>
-          ) : null
-        }
-      />
-
-      <div className="mb-4">
+      </div>
+          ) : <div className="mb-4">
         <button type="button" onClick={() => router.push(`/${roleBase}/followups`)} className="acm-btn acm-btn-secondary h-10 px-4">
           Open Follow-up List
         </button>
       </div>
+          
+        }
+      />
 
       <InlineMessage error={leads.error || error} message={message} />
 
@@ -1363,7 +1366,7 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
   return (
     <>
       <SectionHeader
-        title="Clients"
+        // title="Clients"
         action={
           canCreateClient ? (
             <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
@@ -2099,7 +2102,7 @@ export function StaffManagerPage({
   return (
     <>
       <SectionHeader
-        title="Staff"
+        // title="Staff"
         action={
           readOnly ? null : (
             <div className="flex gap-2">
@@ -2659,7 +2662,7 @@ export function SettingsPage() {
 
   return (
     <>
-      <SectionHeader title="Profile" />
+      {/* <SectionHeader title="Profile" /> */}
       <InlineMessage error={settings.error || error} message={message} />
 
       <section className="grid gap-4">

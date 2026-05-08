@@ -319,6 +319,7 @@ function buildCostLineDetailSections(estimate) {
   return (estimate?.cost_codes ?? []).map((costCode, index) => {
     const label = costCode.costCode?.name || costCode.costCode?.code || `Cost Line ${index + 1}`;
     const code = costCode.costCode?.code || "";
+    const percent = (value) => (value || value === 0 ? `${normalizeNumber(value).toFixed(1)}%` : "-");
 
     return {
       label,
@@ -326,36 +327,60 @@ function buildCostLineDetailSections(estimate) {
       description: costCode.description || costCode.costCode?.description || "",
       groups: [
         {
-          title: "Labour",
-          columns: ["Item", "Classification", "Hours", "Rate", "Total"],
+          title: "Labor",
+          columns: ["Category", "Scope Of Work", "Classification", "ST Persons", "ST Days", "OT Persons", "OT Days", "Target Wage", "Overhead", "Profit", "Target Pay"],
+          widths: [42, 74, 58, 34, 30, 34, 30, 46, 38, 34, 44],
+          fontSize: 5.8,
           rows: (costCode.laborEntries ?? []).map((entry) => [
-            entry.metadata?.title || entry.description || "Labour",
+            entry.metadata?.code || code || "-",
+            entry.metadata?.description || entry.description || "-",
             entry.metadata?.classification || "-",
-            `${entry.stHours || 0} ST / ${entry.otHours || 0} OT`,
-            `${formatPdfCurrency(entry.stRate || 0)} / ${formatPdfCurrency(entry.otRate || 0)}`,
-            formatPdfCurrency(entry.totalCost || 0),
+            entry.metadata?.straightTimePersons ?? "-",
+            entry.metadata?.straightTimeDays ?? "-",
+            entry.metadata?.overtimePersons ?? "-",
+            entry.metadata?.overtimeDays ?? "-",
+            entry.metadata?.targetWage ? formatPdfCurrency(entry.metadata.targetWage) : "-",
+            percent(entry.metadata?.overheadPercent),
+            percent(entry.metadata?.profitPercent),
+            formatPdfCurrency(entry.metadata?.targetPay || entry.metadata?.finalTotal || entry.totalCost || 0),
           ]),
         },
         {
           title: "Material",
-          columns: ["Code", "Description", "Qty", "Rate", "Total"],
+          columns: ["Category", "Item", "Quantity", "UOM", "Waste %", "Unit Rate", "Freight", "Tax %", "Overhead", "Profit", "Total"],
+          widths: [44, 86, 38, 30, 36, 46, 42, 34, 38, 34, 44],
+          fontSize: 5.8,
           rows: (costCode.materialEntries ?? []).map((entry) => [
             entry.metadata?.code || "-",
             entry.description || label,
-            `${entry.quantity || 0} ${entry.metadata?.uom || ""}`.trim(),
+            entry.quantity || 0,
+            entry.metadata?.uom || "-",
+            percent(entry.wastePercent),
             formatPdfCurrency(entry.unitRate || 0),
-            formatPdfCurrency(entry.totalCost || 0),
+            formatPdfCurrency(entry.freight || 0),
+            percent(entry.taxPercent),
+            percent(entry.metadata?.overheadPercent),
+            percent(entry.metadata?.profitPercent),
+            formatPdfCurrency(entry.metadata?.finalTotal || entry.totalCost || 0),
           ]),
         },
         {
           title: "Equipment",
-          columns: ["Code", "Description", "Usage", "Rate", "Total"],
+          columns: ["Category", "Item", "Quantity", "Rental Days", "Unit Rate", "Freight", "Fuel %", "Tax %", "Overhead", "Profit", "Total"],
+          widths: [44, 88, 38, 42, 46, 42, 34, 34, 38, 34, 44],
+          fontSize: 5.8,
           rows: (costCode.equipmentEntries ?? []).map((entry) => [
             entry.metadata?.code || "-",
             entry.description || label,
-            `${entry.qty || 0} x ${entry.days || 0} days`,
+            entry.qty || 0,
+            entry.days || 0,
             formatPdfCurrency(entry.rate || 0),
-            formatPdfCurrency(entry.totalCost || 0),
+            formatPdfCurrency(entry.freight || 0),
+            percent(entry.metadata?.fuelPercent),
+            percent(entry.taxPercent),
+            percent(entry.metadata?.overheadPercent),
+            percent(entry.metadata?.profitPercent),
+            formatPdfCurrency(entry.metadata?.finalTotal || entry.totalCost || 0),
           ]),
         },
         {
@@ -390,6 +415,12 @@ function drawWrappedText(commands, text, x, y, width, size = 10, leading = 13, f
     drawText(commands, line, x, y - index * leading, size, fillRgb);
   });
   return lines.length * leading;
+}
+
+function fitPdfCellText(value, width, size = 8) {
+  const text = String(value ?? "-");
+  const maxLength = Math.max(4, Math.floor(width / (size * 0.54)));
+  return text.length > maxLength ? `${text.slice(0, Math.max(1, maxLength - 3))}...` : text;
 }
 
 function drawRect(commands, x, y, width, height, fillRgb, strokeRgb = null, lineWidth = 1) {
@@ -460,9 +491,9 @@ function buildPdfDocument(estimate) {
       drawText(commands, customer.name || estimate?.client?.name || "Client name", page.margin + 14, y - 36, 12);
       // drawRect(commands, page.margin + 14, y - 96, 112, 18, accentSoft, line, 0.7);
       // drawRect(commands, page.margin + 136, y - 96, 116, 18, accentSoft, line, 0.7);
-      drawText(commands, customer.email || estimate?.client?.email || "-", page.margin + 18, y - 89, 8);
-      drawText(commands, customer.phone || estimate?.client?.contact || "-", page.margin + 140, y - 89, 8);
-      drawWrappedText(commands, customer.address || estimate?.client?.address || "-", page.margin + 14, y - 50, 238, 9, 12);
+      drawText(commands, customer.email || estimate?.client?.email || "-", page.margin + 14, y - 50, 8);
+      drawText(commands, customer.phone || estimate?.client?.contact || "-", page.margin + 140, y - 50, 8);
+      drawWrappedText(commands, customer.address || estimate?.client?.address || "-", page.margin + 14, y - 60, 238, 9, 12);
 
       drawText(commands, "Estimate Details", page.width - page.margin - 202, y - 20, 11);
       drawText(commands, `Title: ${estimate?.title || "Estimate"}`, page.width - page.margin - 202, y - 36, 10);
@@ -599,8 +630,12 @@ function buildPdfDocument(estimate) {
       drawText(commands, group.title, page.margin + 10, y - 13, 9, white);
       y -= 24;
       drawRect(commands, page.margin, y - 18, page.width - page.margin * 2, 18, accentSoft, line);
+      const widths = group.widths || group.columns.map(() => 100);
+      const fontSize = group.fontSize || 8;
+      let headerX = page.margin + 8;
       group.columns.forEach((column, index) => {
-        drawText(commands, column, page.margin + 8 + index * 100, y - 12, 8);
+        drawText(commands, fitPdfCellText(column, widths[index] - 4, fontSize), headerX, y - 12, fontSize);
+        headerX += widths[index];
       });
       y -= 22;
 
@@ -610,8 +645,10 @@ function buildPdfDocument(estimate) {
           startPage("detail");
         }
         drawRect(commands, page.margin, y - 18, page.width - page.margin * 2, 18, [255, 255, 255], line, 0.5);
+        let cellX = page.margin + 8;
         row.forEach((cell, index) => {
-          drawText(commands, String(cell || "-"), page.margin + 8 + index * 100, y - 12, 8);
+          drawText(commands, fitPdfCellText(cell || "-", widths[index] - 4, fontSize), cellX, y - 12, fontSize);
+          cellX += widths[index];
         });
         y -= 20;
       });

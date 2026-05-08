@@ -332,7 +332,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
   return (
     <>
       <SectionHeader
-        title="Field Operations And Daily Inspection Reports"
+        // title="Field Operations And Daily Inspection Reports"
         action={
           canCreateReports ? (
             <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">

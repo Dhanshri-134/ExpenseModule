@@ -737,7 +737,7 @@ export function ProjectEstimatesWorkspace({ projectId, canManage = false }) {
   return (
     <>
       <SectionHeader
-        title="Estimate Template"
+        // title="Estimate Template"
         action={
           canManage ? (
             <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">

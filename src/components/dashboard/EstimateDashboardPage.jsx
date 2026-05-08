@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useRouter } from "next/router";
 import { BusyButton, CompactListRow } from "@/components/dashboard/DashboardUi";
 import { ChevronRightIcon } from "@/components/dashboard/icons";
+import Modal from "@/components/dashboard/Modal";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
 import {Trash} from "lucide-react";
 
@@ -1064,6 +1065,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const [collapsedSections, setCollapsedSections] = useState({});
   const [selectedCostLineId, setSelectedCostLineId] = useState(initialCostLineId);
   const [statusDraft, setStatusDraft] = useState("draft");
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const initialDetailHydratedRef = useRef(false);
 
   const clients = useMemo(() => clientsQuery.data?.clients ?? [], [clientsQuery.data?.clients]);
@@ -1224,17 +1226,16 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     if (!initialEstimateId || initialDetailHydratedRef.current || !estimates.length) return;
     const estimate = estimates.find((item) => item.id === initialEstimateId);
     if (!estimate) return;
-    setForm(mapEstimateToForm(estimate, templates));
-    setActiveEstimateId(estimate.id);
-    setSelectedCostLineId(initialCostLineId || estimate.cost_codes?.[0]?.id || "");
-    setPdfReviewed(false);
-    setDirty(false);
     initialDetailHydratedRef.current = true;
+    queueMicrotask(() => {
+      setForm(mapEstimateToForm(estimate, templates));
+      setActiveEstimateId(estimate.id);
+      setSelectedCostLineId(initialCostLineId || estimate.cost_codes?.[0]?.id || "");
+      setPdfReviewed(false);
+      setDirty(false);
+      setStatusDraft(estimate.status || "draft");
+    });
   }, [estimates, initialCostLineId, initialEstimateId, templates]);
-
-  useEffect(() => {
-    setStatusDraft(form.status || "draft");
-  }, [form.status]);
 
   function setDirtyState() {
     setDirty(true);
@@ -1480,6 +1481,12 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       return;
     }
 
+    if (nextStatus === "sent") {
+      const sent = await handleSend();
+      if (sent) setStatusDialogOpen(false);
+      return;
+    }
+
     if (nextStatus === "approved") {
       let createdEstimate = null;
       if (!form.id) {
@@ -1500,23 +1507,25 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       await estimatesQuery.refresh();
       setForm((current) => ({ ...current, status: "approved", approvalStatus: "approved" }));
       setMessage("Estimate approved.");
+      setStatusDialogOpen(false);
       return;
     }
 
-    await persistEstimate({ status: nextStatus });
+    const saved = await persistEstimate({ status: nextStatus });
+    if (saved) setStatusDialogOpen(false);
   }
 
   async function handleSend() {
     if (!pdfReviewed) {
       setError("Open the latest PDF preview before sending.");
-      return;
+      return false;
     }
     if (!window.confirm(`Send "${form.title || "Estimate"}" to ${form.customerEmail || "the customer"} using the configured SMTP account?`)) {
-      return;
+      return false;
     }
 
     const saved = await persistEstimate({ silent: true });
-    if (!saved) return;
+    if (!saved) return false;
 
     setSendBusy(true);
     setError("");
@@ -1531,13 +1540,14 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
 
     if (!res.ok) {
       setError(formatApiError(json, "Unable to send estimate."));
-      return;
+      return false;
     }
 
     invalidateApiQuery("/api/estimates");
     await estimatesQuery.refresh();
     setForm((current) => ({ ...current, status: "sent" }));
     setMessage("Estimate sent from the configured SMTP account.");
+    return true;
   }
 
   function newEstimate() {
@@ -1562,25 +1572,6 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     setMessage("");
     setStatusDraft(estimate.status || "draft");
     setTab("estimates");
-  }
-
-  async function deleteEstimate(id) {
-    const estimate = estimates.find((item) => item.id === id);
-    if (!estimate || !window.confirm(`Delete "${estimate.title || `Estimate #${estimate.estimate_number}`}"?`)) return;
-
-    const res = await fetch("/api/estimates", {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id }),
-    });
-    const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(formatApiError(json, "Unable to delete estimate."));
-      return;
-    }
-    invalidateApiQuery("/api/estimates");
-    if (activeEstimateId === id) newEstimate();
-    setMessage("Estimate deleted.");
   }
 
   async function openPdf(mode = "download") {
@@ -1681,7 +1672,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
 
     if (!hasRows) return "Add at least one estimate row.";
     return "";
-  }, [companyDetails.address, companyDetails.email, companyDetails.name, companyDetails.phone, form, selectedTemplate?.id]);
+  }, [companyDetails.address, companyDetails.email, companyDetails.name, companyDetails.phone, form]);
 
   const persistEstimate = useCallback(async ({ status, silent = false } = {}) => {
     const validationError = validateEstimate();
@@ -1690,7 +1681,9 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       return false;
     }
 
-    const nextPayload = status ? { ...payload, status, approvalStatus: status === "rejected" ? "rejected" : payload.approvalStatus } : payload;
+    const nextApprovalStatus =
+      status === "rejected" ? "rejected" : status === "draft" ? "draft" : payload.approvalStatus;
+    const nextPayload = status ? { ...payload, status, approvalStatus: nextApprovalStatus } : payload;
     setBusy(true);
     setError("");
     if (!silent) setMessage("");
@@ -1722,13 +1715,13 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   }, [payload, form.id, templates, validateEstimate]);
 
   const laborColumns = [
-    { key: "code", label: "Category",  placeholder: "Cost code" },
+    { key: "code", label: "Category",  placeholder: "Category", width: "w-40" },
     // { key: "code", label: "Category", listId: "estimate-cost-code-options", placeholder: "Cost code" },
-    { key: "description", label: "Scope Of Work", placeholder: "Scope of work" },
-    { key: "classification", label: "Classification", placeholder: "Category" },
-    { key: "straightTimePersons", label: "ST Persons",  placeholder: "0" },
-    { key: "straightTimeDays", label: "ST Days",  placeholder: "0" },
-    { key: "overtimePersons", label: "OT Persons",  placeholder: "0" },
+    { key: "description", label: "Scope Of Work", placeholder: "Scope of work", width: "w-40" },
+    { key: "classification", label: "Classification", placeholder: "Classification", width: "w-40" },
+    { key: "straightTimePersons", label: "ST Persons",  placeholder: "0", width: "w-20" },
+    { key: "straightTimeDays", label: "ST Days",  placeholder: "0", width: "w-20" },
+    { key: "overtimePersons", label: "OT Persons",  placeholder: "0", width: "w-20" },
     { key: "overtimeDays", label: "OT Days",  placeholder: "0" },
     { key: "targetWage", label: "Target Wage",  placeholder: "0" },
     { key: "overheadPercent", label: "Overhead",  placeholder: "0" },
@@ -1736,8 +1729,8 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   ];
 
   const materialColumns = [
-    { key: "code", label: "Category", placeholder: "Category" },
-    { key: "description", label: "Item", placeholder: "Item" },
+    { key: "code", label: "Category", placeholder: "Category", width: "w-40" },
+    { key: "description", label: "Item", placeholder: "Item", width: "w-40" },
     { key: "quantity", label: "Quantity",  placeholder: "0" },
     { key: "uom", label: "UOM", placeholder: "Unit" },
     { key: "wastePercent", label: "Waste %",  placeholder: "0" },
@@ -1763,8 +1756,8 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
 
   return (
     <div className="space-y-6">
-      <section className={cardClass("p-5")}>
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <section className="border-b border-[color:var(--acm-border)] pb-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <div className="text-sm font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Estimate Workspace</div>
             <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">Records And Editor</h1>
@@ -1777,20 +1770,18 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       </section>
 
       {error ? <div className="acm-message-error">{error}</div> : null}
-      {(clientsQuery.loading || templatesQuery.loading || estimatesQuery.loading || settingsQuery.loading) ? (
-        <div className={cardClass("p-5 text-sm text-[color:var(--acm-muted-fg)]")}>Loading estimate workspace...</div>
-      ) : null}
 
       {tab === "records" ? (
-        <div className="space-y-6">
-          <section className="space-y-6">
-          <section className={`cardClass("p-5")`}>
-            <div className="  flex items-center justify-between gap-3">
-              <div className="text-xl font-bold">Estimate Records</div>
-              <button type="button" onClick={newEstimate} className="acm-btn acm-btn-secondary h-10 px-4">New</button>
-            </div>
-            <div className="mt-4 max-h-[280px] overflow-y-auto pr-1">
-              <div className="grid gap-3 lg:grid-cols-2">
+        <section className="space-y-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xl font-bold">Estimate Records</div>
+            <button type="button" onClick={newEstimate} className="acm-btn acm-btn-secondary h-10 px-4">New</button>
+          </div>
+          {(clientsQuery.loading || templatesQuery.loading || estimatesQuery.loading || settingsQuery.loading) ? (
+            <div className="text-sm text-[color:var(--acm-muted-fg)]">Loading estimate workspace...</div>
+          ) : null}
+          <div className="max-h-[280px] overflow-y-auto pr-1">
+            <div className="grid gap-3 lg:grid-cols-2">
               {estimates.map((estimate) => (
                 <CompactListRow
                   key={estimate.id}
@@ -1801,20 +1792,14 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                   actions={<StatusPill status={estimate.status || "draft"} />}
                 />
               ))}
-              </div>
             </div>
-            {message ? <div className="mt-4 rounded-[18px] border border-[color:var(--acm-accent-border)] bg-[color:var(--acm-accent-soft)] px-4 py-3 text-sm text-[color:var(--acm-accent-strong)]">{message}</div> : null}
-          </section>
-          </section>
+          </div>
           {message ? <div className="rounded-[18px] border border-[color:var(--acm-accent-border)] bg-[color:var(--acm-accent-soft)] px-4 py-3 text-sm text-[color:var(--acm-accent-strong)]">{message}</div> : null}
-        </div>
+        </section>
       ) : (
         <section className="space-y-6">
-         
-
           <div className="space-y-6">
-            <section className="space-y-6">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[color:var(--acm-border)] pb-4">
                 <div>
                   <div className="text-lg font-bold text-[color:var(--acm-fg)]">{companyDetails.name}</div>
                   <div className="text-sm text-[color:var(--acm-muted-fg)]">{companyDetails.address || "Complete company address in profile/settings"}</div>
@@ -1831,18 +1816,20 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap gap-2">
                   <BusyButton type="button" busy={previewBusy || busy} onClick={() => openPdf("preview")} className="acm-btn acm-btn-primary h-10 px-4">Preview PDF</BusyButton>
+                  <BusyButton
+                    type="button"
+                    busy={busy || sendBusy}
+                    onClick={() => {
+                      setStatusDraft(form.status || "draft");
+                      setStatusDialogOpen(true);
+                    }}
+                    className="acm-btn acm-btn-secondary h-10 px-4"
+                  >
+                    Change Status
+                  </BusyButton>
                   <BusyButton type="button" busy={busy} onClick={() => persistEstimate()} className="acm-btn acm-btn-secondary h-10 px-4">Save Details</BusyButton>
-                  {/* <BusyButton type="button" busy={sendBusy} onClick={handleSend} disabled={!form.id || !pdfReviewed} className="acm-btn acm-btn-secondary h-10 px-4">Send</BusyButton> */}
-                  <select className={inputClass("h-10 min-w-[150px]")} value={statusDraft} onChange={(event) => setStatusDraft(event.target.value)}>
-                    <option value="draft">Draft</option>
-                    <option value="sent">Sent</option>
-                    <option value="approved">Approved</option>
-                    <option value="rejected">Rejected</option>
-                  </select>
-                  <BusyButton type="button" busy={busy} onClick={handleStatusAction} className="acm-btn acm-btn-secondary h-10 px-4">Update Status</BusyButton>
-                  {form.id ? <button type="button" onClick={() => deleteEstimate(form.id)} className="acm-btn acm-btn-secondary h-10 px-4">Delete</button> : null}
                 </div>
-                <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">{dirty ? "Unsaved changes" : "All changes saved manually"}</div>
+                {/* <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">{dirty ? "Unsaved changes" : "All changes saved manually"}</div> */}
               </div>
 
               <div className="grid gap-6 md:grid-cols-4">
@@ -1962,10 +1949,48 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                   </tbody>
                 </table>
               </div>
-            </section>
           </div>
         </section>
       )}
+
+      <Modal open={statusDialogOpen} title="Change Status" onClose={() => setStatusDialogOpen(false)} maxWidth="max-w-md">
+        <div className="space-y-5">
+          <div className="flex items-center justify-between gap-3 border-b border-[color:var(--acm-border)] pb-3">
+            <div>
+              <div className="text-sm font-semibold text-[color:var(--acm-fg)]">{form.title || "Estimate"}</div>
+              <div className="mt-1 text-xs text-[color:var(--acm-muted-fg)]">Current status</div>
+            </div>
+            <StatusPill status={form.status} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              ["draft", "Draft"],
+              ["sent", "Send"],
+              ["rejected", "Reject"],
+              ["approved", "Approve"],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setStatusDraft(value)}
+                className={`h-11 rounded-lg border px-3 text-sm font-semibold transition ${
+                  statusDraft === value
+                    ? "border-[color:var(--acm-accent)] bg-[color:var(--acm-accent-soft)] text-[color:var(--acm-accent-strong)]"
+                    : "border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] text-[color:var(--acm-fg)]"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setStatusDialogOpen(false)} className="acm-btn acm-btn-secondary h-10 px-4">Cancel</button>
+            <BusyButton type="button" busy={busy || sendBusy} onClick={handleStatusAction} className="acm-btn acm-btn-primary h-10 px-4">Apply</BusyButton>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

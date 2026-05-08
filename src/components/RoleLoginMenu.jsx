@@ -72,7 +72,7 @@ export default function RoleLoginMenu() {
           id={menuId}
           role="menu"
           aria-labelledby={buttonId}
-          className="absolute right-0 mt-3 w-56 origin-top-right rounded-[1.4rem] border border-[color:var(--acm-border)] bg-[color:var(--acm-panel)] p-2 shadow-[0_18px_60px_rgba(0,0,0,0.18)] backdrop-blur"
+          className="absolute right-0 mt-3 w-56 origin-top-right rounded-[1.4rem] border border-[color:var(--acm-border)] bg-[color:var(--acm-panel)] p-2 backdrop-blur"
         >
           <div className="px-3 pb-2 pt-2 text-xs text-[color:var(--acm-muted-fg)]">
             Choose your role

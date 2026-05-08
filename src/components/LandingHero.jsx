@@ -73,9 +73,7 @@ export default function LandingHero() {
       <div
         aria-hidden="true"
         className="pointer-events-none fixed inset-0 z-0"
-        style={{
-          background: `radial-gradient(600px circle at ${pos.x}px ${pos.y}px, rgba(33, 62, 224, 0.12), transparent 42%)`,
-        }}
+        
       />
 
       <div className="relative z-10 w-full px-6 py20 sm:px-10 py-0">
@@ -118,7 +116,7 @@ export default function LandingHero() {
           </div>
 
           <div className="relative">
-            <div className="acm-surface-strong p-8 shadow-2xl backdrop-blur-xl">
+            <div className="acm-surface-strong p-8 shadow-1xl backdrop-blur-xl">
               <div className="text-sm font-semibold text-[color:var(--acm-accent-strong)]">
                 Feature {index + 1}
               </div>
