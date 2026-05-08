@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createFollowUp, listFollowUps } from "@/lib/server/followups";
+import { createFollowUp, deleteFollowUp, listFollowUps, updateFollowUp } from "@/lib/server/followups";
 import { getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
 
@@ -12,6 +12,17 @@ const CreateFollowUpSchema = z.object({
   note: z.string().trim().min(1),
   nextFollowUpDate: z.string().min(1),
   status: z.enum(["pending", "done"]).optional().nullable(),
+});
+
+const UpdateFollowUpSchema = z.object({
+  id: z.string().uuid(),
+  note: z.string().trim().min(1),
+  nextFollowUpDate: z.string().min(1),
+  status: z.enum(["pending", "done"]).optional().nullable(),
+});
+
+const DeleteFollowUpSchema = z.object({
+  id: z.string().uuid(),
 });
 
 export default async function handler(req, res) {
@@ -65,6 +76,43 @@ export default async function handler(req, res) {
     } catch (error) {
       const status = error.message === "forbidden" ? 403 : error.message?.endsWith("_not_found") ? 404 : 500;
       return sendError(res, status, error.message || "lead_followup_create_failed", error.message);
+    }
+  }
+
+  if (req.method === "PUT") {
+    const parsed = UpdateFollowUpSchema.safeParse(req.body);
+    if (!parsed.success) return sendError(res, 400, "invalid_payload", parsed.error.flatten());
+
+    try {
+      const followUp = await updateFollowUp(ctx, parsed.data.id, {
+        date: parsed.data.nextFollowUpDate,
+        note: parsed.data.note,
+        status: parsed.data.status ?? "pending",
+      });
+
+      return sendOk(res, {
+        followUp: {
+          ...followUp,
+          lead_id: followUp.ref_id,
+          next_follow_up_date: followUp.date,
+          created_by_user_id: followUp.created_by,
+        },
+      });
+    } catch (error) {
+      const status = error.message === "forbidden" ? 403 : error.message === "followup_not_found" ? 404 : 500;
+      return sendError(res, status, error.message || "lead_followup_update_failed", error.message);
+    }
+  }
+
+  if (req.method === "DELETE") {
+    const parsed = DeleteFollowUpSchema.safeParse(req.body);
+    if (!parsed.success) return sendError(res, 400, "invalid_payload", parsed.error.flatten());
+
+    try {
+      return sendOk(res, await deleteFollowUp(ctx, parsed.data.id));
+    } catch (error) {
+      const status = error.message === "forbidden" ? 403 : error.message === "followup_not_found" ? 404 : 500;
+      return sendError(res, status, error.message || "lead_followup_delete_failed", error.message);
     }
   }
 

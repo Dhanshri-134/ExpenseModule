@@ -13,6 +13,15 @@ const LeadSchema = z.object({
   followUpStatus: z.enum(["pending", "done"]).optional().nullable(),
 });
 
+const UpdateLeadSchema = LeadSchema.pick({
+  name: true,
+  address: true,
+  contact: true,
+  email: true,
+}).extend({
+  id: z.string().uuid(),
+});
+
 export default async function handler(req, res) {
   const ctx = await getRequestContext(req, res);
   if (!ctx.ok) return sendError(res, ctx.status, ctx.error);
@@ -106,6 +115,30 @@ export default async function handler(req, res) {
         nextFollowUpDate: payload.followUpDate ?? "",
       },
     });
+  }
+
+  if (req.method === "PUT") {
+    const parsed = UpdateLeadSchema.safeParse(req.body);
+    if (!parsed.success) return sendError(res, 400, "invalid_payload", parsed.error.flatten());
+
+    const { id, ...payload } = parsed.data;
+    const { data: lead, error } = await ctx.admin
+      .from("leads")
+      .update({
+        name: payload.name,
+        address: payload.address,
+        contact: payload.contact,
+        email: payload.email,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .eq("company_id", ctx.company.id)
+      .select("*")
+      .single();
+
+    if (error || !lead) return sendError(res, 500, "lead_update_failed", error?.message);
+
+    return sendOk(res, { lead });
   }
 
   return sendError(res, 405, "method_not_allowed");

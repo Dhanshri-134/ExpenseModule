@@ -15,6 +15,7 @@ import {
   TeamIcon,
 } from "@/components/dashboard/icons";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 
 function cardClass(extra = "") {
   return `rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 ${extra}`.trim();
@@ -1014,9 +1015,15 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
   const [formBusy, setFormBusy] = useState(false);
   const [convertBusyId, setConvertBusyId] = useState("");
   const [selectedLead, setSelectedLead] = useState(null);
+  const [leadEditOpen, setLeadEditOpen] = useState(false);
+  const [leadEditForm, setLeadEditForm] = useState({ name: "", address: "", contact: "", email: "" });
+  const [leadEditBusy, setLeadEditBusy] = useState(false);
   const [followUpMessage, setFollowUpMessage] = useState("");
   const [followUpError, setFollowUpError] = useState("");
   const [followUpBusy, setFollowUpBusy] = useState(false);
+  const [followUpFormOpen, setFollowUpFormOpen] = useState(false);
+  const [editingFollowUpId, setEditingFollowUpId] = useState("");
+  const [deletingFollowUpId, setDeletingFollowUpId] = useState("");
   const [followUpForm, setFollowUpForm] = useState({
     note: "",
     nextFollowUpDate: "",
@@ -1026,6 +1033,7 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
     selectedLead ? `/api/lead-followups?leadId=${selectedLead.id}` : "",
     { enabled: Boolean(selectedLead) }
   );
+
   const [form, setForm] = useState({
     name: "",
     address: "",
@@ -1080,6 +1088,50 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
     setFormBusy(false);
   }
 
+  function openLeadEdit() {
+    if (!selectedLead) return;
+    setLeadEditForm({
+      name: selectedLead.name || "",
+      address: selectedLead.address || "",
+      contact: selectedLead.contact || "",
+      email: selectedLead.email || "",
+    });
+    setLeadEditOpen(true);
+    setFollowUpFormOpen(false);
+    setFollowUpMessage("");
+    setFollowUpError("");
+  }
+
+  async function saveLeadEdit(e) {
+    e.preventDefault();
+    if (!selectedLead || leadEditBusy) return;
+
+    setLeadEditBusy(true);
+    setFollowUpMessage("");
+    setFollowUpError("");
+
+    const res = await fetch("/api/leads", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: selectedLead.id, ...leadEditForm }),
+    });
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setFollowUpError(json?.error || "lead_update_failed");
+      setLeadEditBusy(false);
+      return;
+    }
+
+    const updatedLead = { ...selectedLead, ...(json?.lead || leadEditForm) };
+    setSelectedLead(updatedLead);
+    setLeadEditOpen(false);
+    setFollowUpMessage("Lead updated");
+    invalidateApiQuery("/api/leads");
+    await leads.refresh();
+    setLeadEditBusy(false);
+  }
+
   async function convertLead(lead) {
     if (lead.status === "converted" || convertBusyId) return;
     setError("");
@@ -1115,9 +1167,10 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
     setFollowUpBusy(true);
 
     const res = await fetch("/api/lead-followups", {
-      method: "POST",
+      method: editingFollowUpId ? "PUT" : "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
+        id: editingFollowUpId || undefined,
         leadId: selectedLead.id,
         note: followUpForm.note,
         nextFollowUpDate: followUpForm.nextFollowUpDate,
@@ -1133,10 +1186,52 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
     }
 
     setFollowUpForm({ note: "", nextFollowUpDate: "", status: "pending" });
-    setFollowUpMessage("Follow-up saved");
+    setEditingFollowUpId("");
+    setFollowUpFormOpen(false);
+    setFollowUpMessage(editingFollowUpId ? "Follow-up updated" : "Follow-up saved");
     invalidateApiQuery("/api/leads");
     await Promise.all([followUps.refresh(), leads.refresh()]);
     setFollowUpBusy(false);
+  }
+
+  function openFollowUpForm(item = null) {
+    setLeadEditOpen(false);
+    setFollowUpFormOpen(true);
+    setEditingFollowUpId(item?.id || "");
+    setFollowUpForm({
+      note: item?.note || "",
+      nextFollowUpDate: item?.next_follow_up_date || item?.date || "",
+      status: item?.status || "pending",
+    });
+    setFollowUpMessage("");
+    setFollowUpError("");
+  }
+
+  async function deleteLeadFollowUp(item) {
+    if (!item || deletingFollowUpId) return;
+    if (!window.confirm("Delete this follow-up?")) return;
+
+    setDeletingFollowUpId(item.id);
+    setFollowUpMessage("");
+    setFollowUpError("");
+
+    const res = await fetch("/api/lead-followups", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: item.id }),
+    });
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setFollowUpError(json?.error || "lead_followup_delete_failed");
+      setDeletingFollowUpId("");
+      return;
+    }
+
+    setFollowUpMessage("Follow-up deleted");
+    invalidateApiQuery("/api/leads");
+    await Promise.all([followUps.refresh(), leads.refresh()]);
+    setDeletingFollowUpId("");
   }
 
   return (
@@ -1169,9 +1264,21 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
             key={lead.id}
             primary={lead.name}
             secondary={lead.status === "converted" ? "Converted Lead" : "Enquiry Lead"}
-            tertiary={`${lead.contact} | ${lead.email} | Next follow-up: ${formatDate(lead.nextFollowUpDate)}`}
+            tertiary={
+  <>
+    {lead.contact}
+    <br />
+    {lead.email}
+    <br />
+    Next follow-up: {formatDate(lead.nextFollowUpDate)}
+  </>
+}
             onClick={() => {
               setSelectedLead(lead);
+              setLeadEditOpen(false);
+              setFollowUpFormOpen(false);
+              setEditingFollowUpId("");
+              setFollowUpForm({ note: "", nextFollowUpDate: "", status: "pending" });
               setFollowUpMessage("");
               setFollowUpError("");
             }}
@@ -1239,45 +1346,114 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
         title={selectedLead ? `${selectedLead.name} Follow Ups` : "Follow Ups"}
         onClose={() => {
           setSelectedLead(null);
+          setLeadEditOpen(false);
+          setFollowUpFormOpen(false);
+          setEditingFollowUpId("");
           setFollowUpForm({ note: "", nextFollowUpDate: "", status: "pending" });
         }}
       >
         <div className="space-y-3">
-          {selectedLead ? (
-            <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm text-[color:var(--acm-muted-fg)]">
-              {selectedLead.contact} | {selectedLead.email} | Status: {selectedLead.status}
-            </div>
-          ) : null}
 
           <InlineMessage error={followUps.error || followUpError} message={followUpMessage} />
 
-          <form onSubmit={saveFollowUp} className="grid gap-3 rounded-[20px] border border-[color:var(--acm-border)] p-4">
-            <LabeledField label="Follow-up Note">
-              <textarea required className={fieldClass()} rows={3} value={followUpForm.note} onChange={(e) => setFollowUpForm((prev) => ({ ...prev, note: e.target.value }))} />
-            </LabeledField>
-            <LabeledField label="Next Follow-up Date">
-              <input type="date" className={fieldClass()} value={followUpForm.nextFollowUpDate} onChange={(e) => setFollowUpForm((prev) => ({ ...prev, nextFollowUpDate: e.target.value }))} />
-            </LabeledField>
-            <LabeledField label="Status">
-              <select className={fieldClass()} value={followUpForm.status} onChange={(e) => setFollowUpForm((prev) => ({ ...prev, status: e.target.value }))}>
-                <option value="pending">Pending</option>
-                <option value="done">Done</option>
-              </select>
-            </LabeledField>
-            <BusyButton type="submit" busy={followUpBusy} className="acm-btn acm-btn-primary">
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={openLeadEdit} className="acm-btn acm-btn-secondary h-10 px-4">
+              Edit Lead
+            </button>
+            <button type="button" onClick={() => openFollowUpForm()} className="acm-btn acm-btn-primary h-10 px-4">
+              <Plus size={16} />
               Add Follow Up
-            </BusyButton>
-          </form>
+            </button>
+          </div>
+
+          {leadEditOpen ? (
+            <form onSubmit={saveLeadEdit} className="grid gap-3 rounded-[20px] border border-[color:var(--acm-border)] p-4">
+              <FieldGroup title="Edit Lead">
+                <LabeledField label="Client Name">
+                  <input required className={fieldClass()} value={leadEditForm.name} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, name: e.target.value }))} />
+                </LabeledField>
+                <LabeledField label="Client Contact">
+                  <input required className={fieldClass()} value={leadEditForm.contact} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, contact: e.target.value }))} />
+                </LabeledField>
+                <LabeledField label="Client Email">
+                  <input required type="email" className={fieldClass()} value={leadEditForm.email} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, email: e.target.value }))} />
+                </LabeledField>
+                <LabeledField label="Client Address">
+                  <textarea required className={fieldClass()} rows={3} value={leadEditForm.address} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, address: e.target.value }))} />
+                </LabeledField>
+              </FieldGroup>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setLeadEditOpen(false)} className="acm-btn acm-btn-secondary h-10 px-4">Cancel</button>
+                <BusyButton type="submit" busy={leadEditBusy} className="acm-btn acm-btn-primary h-10 px-4">Save Lead</BusyButton>
+              </div>
+            </form>
+          ) : null}
+
+          {followUpFormOpen ? (
+            <form onSubmit={saveFollowUp} className="grid gap-3 rounded-[20px] border border-[color:var(--acm-border)] p-4">
+              <LabeledField label="Follow-up Note">
+                <textarea required className={fieldClass()} rows={3} value={followUpForm.note} onChange={(e) => setFollowUpForm((prev) => ({ ...prev, note: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="Next Follow-up Date">
+                <input type="date" className={fieldClass()} value={followUpForm.nextFollowUpDate} onChange={(e) => setFollowUpForm((prev) => ({ ...prev, nextFollowUpDate: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="Status">
+                <select className={fieldClass()} value={followUpForm.status} onChange={(e) => setFollowUpForm((prev) => ({ ...prev, status: e.target.value }))}>
+                  <option value="pending">Pending</option>
+                  <option value="done">Done</option>
+                </select>
+              </LabeledField>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFollowUpFormOpen(false);
+                    setEditingFollowUpId("");
+                    setFollowUpForm({ note: "", nextFollowUpDate: "", status: "pending" });
+                  }}
+                  className="acm-btn acm-btn-secondary h-10 px-4"
+                >
+                  Cancel
+                </button>
+                <BusyButton type="submit" busy={followUpBusy} className="acm-btn acm-btn-primary h-10 px-4">
+                  {editingFollowUpId ? "Save Follow Up" : "Add Follow Up"}
+                </BusyButton>
+              </div>
+            </form>
+          ) : null}
 
           <div className="space-y-3">
             {(followUps.data?.followUps ?? []).map((item) => (
               <div key={item.id} className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3">
-                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">
-                  {formatDateTime(item.created_at)}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">
+                    {formatDateTime(item.created_at)}
+                  </div>
+                  {item.canModify !== false ? (
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => openFollowUpForm(item)}
+                        className="flex h-8 w-8 items-center justify-center rounded-full border border-[color:var(--acm-border)] text-[color:var(--acm-muted-fg)] hover:text-[color:var(--acm-accent)]"
+                        aria-label="Edit follow-up"
+                      >
+                        <Pencil size={15} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteLeadFollowUp(item)}
+                        disabled={deletingFollowUpId === item.id}
+                        className="flex h-8 w-8 items-center justify-center rounded-full border border-[color:var(--acm-border)] text-rose-600 hover:bg-rose-50 disabled:opacity-60"
+                        aria-label="Delete follow-up"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="mt-2 text-sm text-[color:var(--acm-fg)]">{item.note}</div>
                 <div className="mt-2 text-sm text-[color:var(--acm-muted-fg)]">
-                  Follow-up Date: {formatDate(item.next_follow_up_date)} | Status: {item.status ?? "-"}
+                  Follow-up Date: {formatDate(item.next_follow_up_date)} <br/> Status: {item.status ?? "-"}
                 </div>
                 <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">
                   Created By: {item.createdBy?.name ?? "-"}
@@ -1389,8 +1565,8 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
           <CompactListRow
             key={client.id}
             primary={client.name}
-            secondary={`${client.contact} | ${client.email}`}
-            tertiary={`${client.address} | Projects: ${client.projectCount ?? 0}`}
+            secondary={<>{client.contact}</>}
+            tertiary={<> {client.email}<br />{client.address} <br/> Projects: {client.projectCount ?? 0}</>}
             onClick={() => openClientProjects(client)}
             actions={
               <button
