@@ -546,7 +546,7 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
         />
       </section>
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-2">
+      {/* <section className="mt-4 grid gap-4 xl:grid-cols-2">
         <div className={cardClass()}>
           <SectionHeader title="Projects" action={<Link href={`/${roleBase}/projects`} className="text-sm font-semibold text-[color:var(--acm-accent)]">Open</Link>} />
           <div className="space-y-3">
@@ -575,7 +575,7 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
             ))}
           </div>
         </div>
-      </section>
+      </section> */}
 
       <DrilldownModal
         open={drilldown.open}
