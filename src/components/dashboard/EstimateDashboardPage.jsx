@@ -1100,6 +1100,8 @@ function SectionTable({
   summaryColumns = [],
 }) {
   const visibleColumns = buildVisibleColumns(columns);
+  const stackedDetailColumn = visibleColumns.find((column) => column.type === "textarea");
+  const tableColumns = stackedDetailColumn ? visibleColumns.filter((column) => column.key !== stackedDetailColumn.key) : visibleColumns;
   const derivedRows = rows.map((row) =>
     sectionKey === "laborEntries"
       ? calculateLabor(row)
@@ -1127,7 +1129,7 @@ function SectionTable({
             <table className="min-w-full table-fixed border-separate border-spacing-0">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
-                  {visibleColumns.map((column) => (
+                  {tableColumns.map((column) => (
                     <th key={column.key} className={`px-2 py-2 font-semibold text-[0.6rem] ${column.width || ""}`}>{column.label}</th>
                   ))}
                   {summaryColumns.map((column) => (
@@ -1139,10 +1141,11 @@ function SectionTable({
               <tbody data-grid-scope={sectionKey}>
                 {rows.map((row, index) => {
                   const derived = derivedRows[index];
+                  const detailColSpan = tableColumns.length + summaryColumns.length + 1;
                   return (
                     <Fragment key={row.id}>
                       <tr className="border-t border-[color:var(--acm-border)] align-top">
-                        {visibleColumns.map((column) => (
+                        {tableColumns.map((column) => (
                           <td key={column.key} className="px-1 py-1 text-[0.6rem]">
                             {column.pairedDescriptionColumn ? (
                               <div className="min-w-[18rem] w-full space-y-2">
@@ -1195,6 +1198,25 @@ function SectionTable({
                           )}
                         </td>
                       </tr>
+                      {stackedDetailColumn ? (
+                        <tr className="border-b border-[color:var(--acm-border)]">
+                          <td colSpan={detailColSpan} className="px-2 pb-3 pt-1">
+                            <div className="rounded-2xl border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-3">
+                              <div className="mb-2 text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">
+                                {stackedDetailColumn.label}
+                              </div>
+                              <TableCellInput
+                                value={row[stackedDetailColumn.key]}
+                                list={stackedDetailColumn.listId || (stackedDetailColumn.list ? datalistId : undefined)}
+                                type={stackedDetailColumn.type || "text"}
+                                placeholder={stackedDetailColumn.placeholder}
+                                onChange={(event) => onChange(row.id, stackedDetailColumn.key, event.target.value)}
+                                onKeyDown={onKeyDown}
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
                     </Fragment>
                   );
                 })}
@@ -1996,9 +2018,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   }, [payload, templates, validateEstimate, estimateListQuery, standalone]);
 
   const laborColumns = [
-    { key: "code", label: "Category",  placeholder: "Category", width: "w-40" },
-    // { key: "code", label: "Category", listId: "estimate-cost-code-options", placeholder: "Cost code" },
-    { key: "description", label: "Scope of work", placeholder: "Scope of work", width: "w-72", type: "textarea" },
+    { key: "description", label: "Scope of work", placeholder: "Scope of work", type: "textarea" },
     { key: "classification", label: "Classification", placeholder: "Classification", width: "w-40" },
     { key: "straightTimePersons", label: "ST Persons",  placeholder: "0", width: "w-20" },
     { key: "straightTimeDays", label: "ST Days",  placeholder: "0", width: "w-20" },
@@ -2010,7 +2030,6 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   ];
 
   const subcontractorColumns = [
-    { key: "code", label: "Category", placeholder: "Category", width: "w-40" },
     { key: "description", label: "Description", placeholder: "Description", width: "w-72", type: "textarea" },
     { key: "cost", label: "Cost", placeholder: "0" },
     { key: "workersCompPercent", label: "WC %", placeholder: "0" },
@@ -2020,7 +2039,6 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   ];
 
   const materialColumns = [
-    { key: "code", label: "Category", placeholder: "Category", width: "w-40" },
     { key: "description", label: "Scope of work", placeholder: "Scope of work", width: "w-72", type: "textarea" },
     { key: "quantity", label: "Quantity",  placeholder: "0" },
     { key: "uom", label: "UOM", placeholder: "Unit" },
@@ -2033,7 +2051,6 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   ];
 
   const equipmentColumns = [
-    { key: "code", label: "Category", placeholder: "Category", width: "w-40" },
     { key: "description", label: "Scope of work",  placeholder: "Scope of work", width: "w-72", type: "textarea" },
     { key: "quantity", label: "Quantity",  placeholder: "0" },
     { key: "rentalDays", label: "Rental Days",  placeholder: "0" },
@@ -2161,80 +2178,112 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
               </div>
 
               <div className="space-y-8">
-                <SectionTable
-                  title="Labor"
-                  addLabel="Add Other Labor"
-                  sectionKey="laborEntries"
-                  rows={form.costLines[0]?.laborEntries ?? []}
-                  columns={laborColumns}
-                  summaryColumns={[
-                    { key: "targetPay", label: "Target Pay", render: (row, derived) => formatCurrency(derived.targetPay) },
-                    // { key: "overheadAmount", label: "Overhead", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).overheadAmount) },
-                    // { key: "profitAmount", label: "Profit", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).profitAmount) },
-                    // { key: "finalTotal", label: "Total", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).finalTotal) },
-                  ]}
-                  onChange={(rowId, key, value) => updateEntry(form.costLines[0]?.id, "laborEntries", rowId, key, value)}
-                  onAdd={() => addEntry(form.costLines[0]?.id, "laborEntries")}
-                  onRemove={(rowId) => removeEntry(form.costLines[0]?.id, "laborEntries", rowId)}
-                  onKeyDown={handleGridKeyDown}
-                  collapsed={collapsedSections[`${form.costLines[0]?.id}:laborEntries`]}
-                  onToggle={() => toggleSection(form.costLines[0]?.id, "laborEntries")}
-                />
+                {form.costLines.map((line, index) => (
+                  <div key={line.id} className="  ">
+                    <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+                      <div className="grid flex-1 gap-3 md:grid-cols-[minmax(0,140px)_minmax(280px,1fr)] md:items-center">
+                        <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Cost Code</div>
+                        <input
+                          className={sheetInputClass()}
+                          list="estimate-cost-code-options"
+                          placeholder={`Cost code ${index + 1}`}
+                          value={line.code}
+                          onChange={(event) => updateLine(line.id, "code", event.target.value)}
+                        />
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {/* <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">
+                          Section {index + 1}
+                        </div> */}
+                        {form.costLines.length > 1 ? (
+                          <button
+                            type="button"
+                            onClick={() => removeCostLine(line.id)}
+                            className="rounded-full border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                          >
+                            Remove
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
 
-                <SectionTable
-                  title="Subcontractor"
-                  addLabel="Add Subcontractor"
-                  sectionKey="subcontractorEntries"
-                  rows={form.costLines[0]?.subcontractorEntries ?? []}
-                  columns={subcontractorColumns}
-                  summaryColumns={[
-                    { key: "finalTotal", label: "Total", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).finalTotal) },
-                  ]}
-                  onChange={(rowId, key, value) => updateEntry(form.costLines[0]?.id, "subcontractorEntries", rowId, key, value)}
-                  onAdd={() => addEntry(form.costLines[0]?.id, "subcontractorEntries")}
-                  onRemove={(rowId) => removeEntry(form.costLines[0]?.id, "subcontractorEntries", rowId)}
-                  onKeyDown={handleGridKeyDown}
-                  collapsed={collapsedSections[`${form.costLines[0]?.id}:subcontractorEntries`]}
-                  onToggle={() => toggleSection(form.costLines[0]?.id, "subcontractorEntries")}
-                />
+                    <div className="space-y-8">
+                      <SectionTable
+                        title="Labor"
+                        addLabel="Add Other Labor"
+                        sectionKey="laborEntries"
+                        rows={line.laborEntries ?? []}
+                        columns={laborColumns}
+                        summaryColumns={[
+                          { key: "targetPay", label: "Target Pay", render: (row, derived) => formatCurrency(derived.targetPay) },
+                        ]}
+                        onChange={(rowId, key, value) => updateEntry(line.id, "laborEntries", rowId, key, value)}
+                        onAdd={() => addEntry(line.id, "laborEntries")}
+                        onRemove={(rowId) => removeEntry(line.id, "laborEntries", rowId)}
+                        onKeyDown={handleGridKeyDown}
+                        collapsed={collapsedSections[`${line.id}:laborEntries`]}
+                        onToggle={() => toggleSection(line.id, "laborEntries")}
+                      />
 
-                <SectionTable
-                  title="Material"
-                  addLabel="Add Other Material"
-                  sectionKey="materialEntries"
-                  rows={form.costLines[0]?.materialEntries ?? []}
-                  columns={materialColumns}
-                  summaryColumns={[
-                    // { key: "overheadAmount", label: "Overhead", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).overheadAmount) },
-                    // { key: "profitAmount", label: "Profit", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).profitAmount) },
-                    { key: "finalTotal", label: "Total", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).finalTotal) },
-                  ]}
-                  onChange={(rowId, key, value) => updateEntry(form.costLines[0]?.id, "materialEntries", rowId, key, value)}
-                  onAdd={() => addEntry(form.costLines[0]?.id, "materialEntries")}
-                  onRemove={(rowId) => removeEntry(form.costLines[0]?.id, "materialEntries", rowId)}
-                  onKeyDown={handleGridKeyDown}
-                  collapsed={collapsedSections[`${form.costLines[0]?.id}:materialEntries`]}
-                  onToggle={() => toggleSection(form.costLines[0]?.id, "materialEntries")}
-                />
+                      <SectionTable
+                        title="Subcontractor"
+                        addLabel="Add Subcontractor"
+                        sectionKey="subcontractorEntries"
+                        rows={line.subcontractorEntries ?? []}
+                        columns={subcontractorColumns}
+                        summaryColumns={[
+                          { key: "finalTotal", label: "Total", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).finalTotal) },
+                        ]}
+                        onChange={(rowId, key, value) => updateEntry(line.id, "subcontractorEntries", rowId, key, value)}
+                        onAdd={() => addEntry(line.id, "subcontractorEntries")}
+                        onRemove={(rowId) => removeEntry(line.id, "subcontractorEntries", rowId)}
+                        onKeyDown={handleGridKeyDown}
+                        collapsed={collapsedSections[`${line.id}:subcontractorEntries`]}
+                        onToggle={() => toggleSection(line.id, "subcontractorEntries")}
+                      />
 
-                <SectionTable
-                  title="Equipment"
-                  addLabel="Add Other Equipment"
-                  sectionKey="equipmentEntries"
-                  rows={form.costLines[0]?.equipmentEntries ?? []}
-                  columns={equipmentColumns}
-                  summaryColumns={[
-                    // { key: "overheadAmount", label: "Overhead", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).overheadAmount) },
-                    // { key: "profitAmount", label: "Profit", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).profitAmount) },
-                    { key: "finalTotal", label: "Total", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).finalTotal) },
-                  ]}
-                  onChange={(rowId, key, value) => updateEntry(form.costLines[0]?.id, "equipmentEntries", rowId, key, value)}
-                  onAdd={() => addEntry(form.costLines[0]?.id, "equipmentEntries")}
-                  onRemove={(rowId) => removeEntry(form.costLines[0]?.id, "equipmentEntries", rowId)}
-                  onKeyDown={handleGridKeyDown}
-                  collapsed={collapsedSections[`${form.costLines[0]?.id}:equipmentEntries`]}
-                  onToggle={() => toggleSection(form.costLines[0]?.id, "equipmentEntries")}
-                />
+                      <SectionTable
+                        title="Material"
+                        addLabel="Add Other Material"
+                        sectionKey="materialEntries"
+                        rows={line.materialEntries ?? []}
+                        columns={materialColumns}
+                        summaryColumns={[
+                          { key: "finalTotal", label: "Total", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).finalTotal) },
+                        ]}
+                        onChange={(rowId, key, value) => updateEntry(line.id, "materialEntries", rowId, key, value)}
+                        onAdd={() => addEntry(line.id, "materialEntries")}
+                        onRemove={(rowId) => removeEntry(line.id, "materialEntries", rowId)}
+                        onKeyDown={handleGridKeyDown}
+                        collapsed={collapsedSections[`${line.id}:materialEntries`]}
+                        onToggle={() => toggleSection(line.id, "materialEntries")}
+                      />
+
+                      <SectionTable
+                        title="Equipment"
+                        addLabel="Add Other Equipment"
+                        sectionKey="equipmentEntries"
+                        rows={line.equipmentEntries ?? []}
+                        columns={equipmentColumns}
+                        summaryColumns={[
+                          { key: "finalTotal", label: "Total", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).finalTotal) },
+                        ]}
+                        onChange={(rowId, key, value) => updateEntry(line.id, "equipmentEntries", rowId, key, value)}
+                        onAdd={() => addEntry(line.id, "equipmentEntries")}
+                        onRemove={(rowId) => removeEntry(line.id, "equipmentEntries", rowId)}
+                        onKeyDown={handleGridKeyDown}
+                        collapsed={collapsedSections[`${line.id}:equipmentEntries`]}
+                        onToggle={() => toggleSection(line.id, "equipmentEntries")}
+                      />
+                    </div>
+                  </div>
+                ))}
+
+                <div className="flex justify-end">
+                  <button type="button" onClick={addCostLine} className="acm-btn acm-btn-secondary h-10 px-4">
+                    Add Cost Code
+                  </button>
+                </div>
               </div>
 
               <datalist id="estimate-cost-code-options">

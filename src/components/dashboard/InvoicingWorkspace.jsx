@@ -265,8 +265,8 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
               <div>
                 <label className="mb-2 block text-sm font-semibold text-[color:var(--acm-fg)]">Scope of Work</label>
                 <textarea
-                  className={fieldClass()}
-                  rows={4}
+                  className={fieldClass("min-h-[120px]")}
+                  rows={6}
                   placeholder="Enter scope of work"
                   value={invoiceScopeOfWork}
                   onChange={(event) => setInvoiceScopeOfWork(event.target.value)}
@@ -276,8 +276,8 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
               <div>
                 <label className="mb-2 block text-sm font-semibold text-[color:var(--acm-fg)]">Total Code</label>
                 <textarea
-                  className={fieldClass()}
-                  rows={3}
+                  className={fieldClass("min-h-[96px]")}
+                  rows={5}
                   placeholder="Enter total code"
                   value={invoiceTotalCode}
                   onChange={(event) => setInvoiceTotalCode(event.target.value)}

@@ -107,13 +107,13 @@ export async function requirePageRole(ctx, allowedRoles) {
   const reqCtx = await getRequestContext(ctx.req, ctx.res);
   if (!reqCtx.ok) {
     if (reqCtx.status === 401) {
-      return { redirect: { destination: "/login", permanent: false } };
+      return { redirect: { destination: "/", permanent: false } };
     }
 
     const preferredRole = allowedRoles?.[0];
     return {
       redirect: {
-        destination: preferredRole ? `/login/${preferredRole}` : "/login",
+        destination: preferredRole ? `/login/${preferredRole}` : "/",
         permanent: false,
       },
     };
