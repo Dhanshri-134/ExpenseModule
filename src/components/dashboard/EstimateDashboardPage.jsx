@@ -1074,7 +1074,7 @@ function buildVisibleColumns(columns) {
     const nextColumn = columns[index + 1];
     if (column.key === "description" && visible.at(-1)?.key === "code") continue;
     if (column.key === "code" && nextColumn?.key === "description") {
-      visible.push({ ...column, pairedDescriptionColumn: nextColumn });
+      visible.push({ ...column, width: nextColumn.width || column.width, pairedDescriptionColumn: nextColumn });
       index += 1;
       continue;
     }
@@ -1145,7 +1145,7 @@ function SectionTable({
                         {visibleColumns.map((column) => (
                           <td key={column.key} className="px-1 py-1 text-[0.6rem]">
                             {column.pairedDescriptionColumn ? (
-                              <div className="space-y-2">
+                              <div className="min-w-[18rem] w-full space-y-2">
                                 <TableCellInput
                                   value={row[column.key]}
                                   list={column.listId || (column.list ? datalistId : undefined)}
@@ -1229,7 +1229,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const estimatesQuery = useApiQuery("/api/estimates");
   const costCodesQuery = useApiQuery("/api/cost-codes");
 
-  const [editorOpen, setEditorOpen] = useState(Boolean(initialEstimateId));
+  const [editorOpen, setEditorOpen] = useState(Boolean(initialEstimateId || standalone));
   const [busy, setBusy] = useState(false);
   const [templateBusy, setTemplateBusy] = useState(false);
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -1744,6 +1744,16 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   }
 
   function newEstimate() {
+    if (!standalone) {
+      router.push(`/${roleBase}/estimates/new`);
+      return;
+    }
+
+    if (standalone && initialEstimateId) {
+      router.push(`/${roleBase}/estimates/new`);
+      return;
+    }
+
     setForm(emptyEstimateForm("", defaultTemplate?.id || ""));
     setActiveEstimateId("");
     setSelectedCostLineId("");

@@ -72,6 +72,12 @@ function InlineMessage({ error, message }) {
   );
 }
 
+function downloadInvoicePdf(estimateId) {
+  if (!estimateId) return;
+  const url = `/api/estimates?id=${estimateId}&export=pdf&disposition=attachment`;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 export function InvoicingWorkspace({ roleBase = "owner" }) {
   const estimatesQuery = useApiQuery("/api/estimates");
   const settingsQuery = useApiQuery("/api/settings");
@@ -274,6 +280,9 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
                 <BusyButton type="button" busy={busyAction === "draft"} onClick={markDraft} className="acm-btn acm-btn-primary h-10 px-4">
                   Create Invoice
                 </BusyButton>
+                <button type="button" onClick={() => downloadInvoicePdf(activeEstimate.id)} className="acm-btn acm-btn-secondary h-10 px-4">
+                  Download PDF
+                </button>
               </div>
             </div>
           ) : (

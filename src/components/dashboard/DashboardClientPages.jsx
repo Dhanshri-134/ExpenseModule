@@ -848,7 +848,7 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
   return (
     <>
       <SectionHeader
-        title={filteredClient ? `${filteredClient.name} Projects` : "Projects"}
+        title={filteredClient ? `${filteredClient.name} Projects` : null}
         action={
           <div className="flex flex-wrap items-center gap-2">
             {filteredClient ? (
@@ -876,8 +876,8 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
           <CompactListRow
             key={project.id}
             primary={project.name}
-            secondary={`${project.job_number} | ${project.client?.name || "-"}`}
-            tertiary={`${project.location || "-"} | ${formatDate(project.start_date)} to ${formatDate(project.end_date)}`}
+            secondary={<>{project.job_number} <br />{project.client?.name || "-"}</>}
+            tertiary={<>{project.location || "-"} <br />{formatDate(project.start_date)} to ${formatDate(project.end_date)}</>}
             onClick={() => setProfileProject(project)}
             actions={
               <div className="flex flex-wrap gap-2">
