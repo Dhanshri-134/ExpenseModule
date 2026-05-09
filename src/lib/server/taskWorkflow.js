@@ -1,7 +1,7 @@
 import { ROLE_LABELS } from "@/lib/roles";
 import { getAuthUsersMap } from "@/lib/server/authUsers";
 
-export const PROJECT_ASSIGNABLE_ROLES = ["manager", "employee"];
+export const PROJECT_ASSIGNABLE_ROLES = ["manager", "employee", "subcontractor"];
 export const TASK_ASSIGNMENT_STATUSES = ["assigned", "submitted", "approved", "rejected"];
 
 export function normalizeProjectRole(role) {

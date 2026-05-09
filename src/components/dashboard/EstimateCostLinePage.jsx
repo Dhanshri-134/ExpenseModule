@@ -117,7 +117,7 @@ export function EstimateCostLinePage({ roleBase = "owner", estimateId, costLineI
               { key: "code", label: "Code", render: (row) => row.metadata?.code || "-" },
               { key: "description", label: "Description" },
               { key: "quantity", label: "Quantity", render: (row) => `${row.quantity || 0} ${row.metadata?.uom || ""}`.trim() },
-              { key: "rate", label: "Unit Rate", render: (row) => formatCurrency(row.unitRate) },
+              { key: "rate", label: "Rate", render: (row) => formatCurrency(row.unitRate) },
               { key: "freight", label: "Freight", render: (row) => formatCurrency(row.freight) },
               { key: "total", label: "Total", render: (row) => formatCurrency(row.totalCost) },
             ]}

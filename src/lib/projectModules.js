@@ -892,7 +892,11 @@ function normalizeStructuredEntries(items = [], fields = []) {
 export function normalizeFieldReportPayload(payload = {}) {
   const temperatureValue = String(payload.temperatureValue || "").trim();
   const temperatureUnit = String(payload.temperatureUnit || "").trim() || "F";
-  const temperatureRange = temperatureValue ? `${temperatureValue} °${temperatureUnit}` : String(payload.temperatureRange || "").trim();
+  const numericTemperatureValue = Number(temperatureValue);
+  const hasNumericTemperatureValue = temperatureValue !== "" && Number.isFinite(numericTemperatureValue);
+  const temperatureRange = hasNumericTemperatureValue
+    ? `${temperatureValue} °${temperatureUnit}`
+    : String(payload.temperatureRange || "").trim();
 
   return {
     reportDate: String(payload.reportDate || ""),
@@ -900,7 +904,7 @@ export function normalizeFieldReportPayload(payload = {}) {
     location: String(payload.location || "").trim(),
     weatherConditions: String(payload.weatherConditions || "").trim(),
     temperatureRange,
-    temperatureValue,
+    temperatureValue: hasNumericTemperatureValue ? temperatureValue : "",
     temperatureUnit,
     weatherImpact: String(payload.weatherImpact || "").trim(),
     publicCommunications: normalizeStructuredEntries(payload.publicCommunications, ["name", "phoneNumber", "comments"]),

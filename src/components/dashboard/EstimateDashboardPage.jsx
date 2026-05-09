@@ -132,6 +132,19 @@ function createLaborEntry() {
   };
 }
 
+function createSubcontractorEntry() {
+  return {
+    id: createId("subcontractor"),
+    code: "",
+    description: "",
+    cost: "",
+    workersCompPercent: "",
+    liabilityPercent: "",
+    overheadPercent: "",
+    profitPercent: "",
+  };
+}
+
 function createMaterialEntry() {
   return {
     id: createId("material"),
@@ -183,6 +196,7 @@ function createCostLine(index = 1) {
     code: `SEC-${String(index).padStart(3, "0")}`,
     description: "",
     laborEntries: [createLaborEntry()],
+    subcontractorEntries: [createSubcontractorEntry()],
     materialEntries: [createMaterialEntry()],
     equipmentEntries: [createEquipmentEntry()],
     overheadEntries: [createOverheadEntry()],
@@ -343,6 +357,21 @@ function calculateLabor(entry) {
   };
 }
 
+function calculateSubcontractor(entry) {
+  const cost = toNumber(entry.cost);
+  const workersCompAmount = cost * toPercent(entry.workersCompPercent);
+  const liabilityAmount = cost * toPercent(entry.liabilityPercent);
+  const total = cost + workersCompAmount + liabilityAmount;
+
+  return {
+    cost,
+    workersCompAmount,
+    liabilityAmount,
+    total,
+    taxAmount: 0,
+  };
+}
+
 function applyRowMarkup(baseTotal, entry) {
   const overheadAmount = baseTotal * toPercent(entry?.overheadPercent);
   const profitAmount = (baseTotal + overheadAmount) * toPercent(entry?.profitPercent);
@@ -403,12 +432,27 @@ function flattenEstimateCostLines(costCodes = []) {
   merged.code = "ESTIMATE";
   merged.description = "Estimate";
   merged.laborEntries = [];
+  merged.subcontractorEntries = [];
   merged.materialEntries = [];
   merged.equipmentEntries = [];
   merged.overheadEntries = [];
 
   (costCodes ?? []).forEach((line) => {
     (line.laborEntries ?? []).forEach((entry) => {
+      if (entry.metadata?.kind === "subcontractor") {
+        merged.subcontractorEntries.push({
+          id: entry.id || createId("subcontractor"),
+          code: entry.metadata?.code || line.costCode?.code || "",
+          description: entry.description || entry.metadata?.description || "",
+          cost: entry.metadata?.cost ?? "",
+          workersCompPercent: entry.metadata?.workersCompPercent ?? "",
+          liabilityPercent: entry.metadata?.liabilityPercent ?? "",
+          overheadPercent: entry.metadata?.overheadPercent ?? "",
+          profitPercent: entry.metadata?.profitPercent ?? "",
+        });
+        return;
+      }
+
       merged.laborEntries.push({
         id: entry.id || createId("labor"),
         code: entry.metadata?.code || line.costCode?.code || "",
@@ -458,6 +502,7 @@ function flattenEstimateCostLines(costCodes = []) {
   });
 
   if (!merged.laborEntries.length) merged.laborEntries = [createLaborEntry()];
+  if (!merged.subcontractorEntries.length) merged.subcontractorEntries = [createSubcontractorEntry()];
   if (!merged.materialEntries.length) merged.materialEntries = [createMaterialEntry()];
   if (!merged.equipmentEntries.length) merged.equipmentEntries = [createEquipmentEntry()];
   merged.overheadEntries = [];
@@ -484,10 +529,11 @@ function calculateOverhead(entry) {
 function computeUiTotals(form, previewSummary) {
   const taxAmount = form.costLines.reduce((sum, line) => {
     const laborTax = (line.laborEntries ?? []).reduce((acc, entry) => acc + calculateLabor(entry).taxAmount, 0);
+    const subcontractorTax = (line.subcontractorEntries ?? []).reduce((acc, entry) => acc + calculateSubcontractor(entry).taxAmount, 0);
     const materialTax = (line.materialEntries ?? []).reduce((acc, entry) => acc + calculateMaterial(entry).taxAmount, 0);
     const equipmentTax = (line.equipmentEntries ?? []).reduce((acc, entry) => acc + calculateEquipment(entry).taxAmount, 0);
     const overheadTax = (line.overheadEntries ?? []).reduce((acc, entry) => acc + calculateOverhead(entry).taxAmount, 0);
-    return sum + laborTax + materialTax + equipmentTax + overheadTax;
+    return sum + laborTax + subcontractorTax + materialTax + equipmentTax + overheadTax;
   }, 0);
 
   const subtotal = toNumber(previewSummary.finalBid || previewSummary.totalPrice || previewSummary.baseCost);
@@ -505,7 +551,9 @@ function computeUiTotals(form, previewSummary) {
 }
 
 function computeCostLineSummary(line) {
-  const laborCost = (line.laborEntries ?? []).reduce((sum, entry) => sum + calculateLabor(entry).total, 0);
+  const laborCost =
+    (line.laborEntries ?? []).reduce((sum, entry) => sum + calculateLabor(entry).total, 0) +
+    (line.subcontractorEntries ?? []).reduce((sum, entry) => sum + calculateSubcontractor(entry).total, 0);
   const materialCost = (line.materialEntries ?? []).reduce((sum, entry) => sum + calculateMaterial(entry).total, 0);
   const equipmentCost = (line.equipmentEntries ?? []).reduce((sum, entry) => sum + calculateEquipment(entry).total, 0);
   const overheadCost = (line.overheadEntries ?? []).reduce((sum, entry) => sum + calculateOverhead(entry).total, 0);
@@ -517,7 +565,7 @@ function computeCostLineSummary(line) {
     equipmentCost,
     overheadCost,
     total,
-    laborCount: (line.laborEntries ?? []).length,
+    laborCount: (line.laborEntries ?? []).length + (line.subcontractorEntries ?? []).length,
     materialCount: (line.materialEntries ?? []).length,
     equipmentCount: (line.equipmentEntries ?? []).length,
     overheadCount: (line.overheadEntries ?? []).length,
@@ -526,13 +574,31 @@ function computeCostLineSummary(line) {
 
 function buildClientPreviewSummary(form) {
   const lineSummaries = (form.costLines ?? []).map(computeCostLineSummary);
-  const laborBase = (form.costLines ?? []).reduce((sum, line) => sum + (line.laborEntries ?? []).reduce((entrySum, entry) => entrySum + calculateLabor(entry).total, 0), 0);
+  const laborBase = (form.costLines ?? []).reduce(
+    (sum, line) =>
+      sum +
+      (line.laborEntries ?? []).reduce((entrySum, entry) => entrySum + calculateLabor(entry).total, 0) +
+      (line.subcontractorEntries ?? []).reduce((entrySum, entry) => entrySum + calculateSubcontractor(entry).total, 0),
+    0
+  );
   const materialBase = (form.costLines ?? []).reduce((sum, line) => sum + (line.materialEntries ?? []).reduce((entrySum, entry) => entrySum + calculateMaterial(entry).total, 0), 0);
   const equipmentBase = (form.costLines ?? []).reduce((sum, line) => sum + (line.equipmentEntries ?? []).reduce((entrySum, entry) => entrySum + calculateEquipment(entry).total, 0), 0);
-  const laborMarkup = (form.costLines ?? []).reduce((sum, line) => sum + (line.laborEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateLabor(entry).total, entry).overheadAmount, 0), 0);
+  const laborMarkup = (form.costLines ?? []).reduce(
+    (sum, line) =>
+      sum +
+      (line.laborEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateLabor(entry).total, entry).overheadAmount, 0) +
+      (line.subcontractorEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateSubcontractor(entry).total, entry).overheadAmount, 0),
+    0
+  );
   const materialMarkup = (form.costLines ?? []).reduce((sum, line) => sum + (line.materialEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateMaterial(entry).total, entry).overheadAmount, 0), 0);
   const equipmentMarkup = (form.costLines ?? []).reduce((sum, line) => sum + (line.equipmentEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateEquipment(entry).total, entry).overheadAmount, 0), 0);
-  const laborProfit = (form.costLines ?? []).reduce((sum, line) => sum + (line.laborEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateLabor(entry).total, entry).profitAmount, 0), 0);
+  const laborProfit = (form.costLines ?? []).reduce(
+    (sum, line) =>
+      sum +
+      (line.laborEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateLabor(entry).total, entry).profitAmount, 0) +
+      (line.subcontractorEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateSubcontractor(entry).total, entry).profitAmount, 0),
+    0
+  );
   const materialProfit = (form.costLines ?? []).reduce((sum, line) => sum + (line.materialEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateMaterial(entry).total, entry).profitAmount, 0), 0);
   const equipmentProfit = (form.costLines ?? []).reduce((sum, line) => sum + (line.equipmentEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateEquipment(entry).total, entry).profitAmount, 0), 0);
   const baseCost = laborBase + materialBase + equipmentBase;
@@ -660,7 +726,34 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
             targetPay: derived.targetPay,
           },
         };
-      }),
+      }).concat(
+        primaryLine.subcontractorEntries.map((entry) => {
+          const derived = calculateSubcontractor(entry);
+          const markup = applyRowMarkup(derived.total, entry);
+          return {
+            description: entry.description,
+            stHours: 1,
+            stRate: derived.total,
+            otHours: 0,
+            otRate: 0,
+            metadata: {
+              kind: "subcontractor",
+              code: entry.code?.trim() || undefined,
+              description: entry.description,
+              cost: toNumber(entry.cost),
+              workersCompPercent: toNumber(entry.workersCompPercent),
+              liabilityPercent: toNumber(entry.liabilityPercent),
+              overheadPercent: toNumber(entry.overheadPercent),
+              profitPercent: toNumber(entry.profitPercent),
+              workersCompAmount: derived.workersCompAmount,
+              liabilityAmount: derived.liabilityAmount,
+              overheadAmount: markup.overheadAmount,
+              profitAmount: markup.profitAmount,
+              finalTotal: markup.finalTotal,
+            },
+          };
+        })
+      ),
       materialEntries: primaryLine.materialEntries.map((entry) => {
         const derived = calculateMaterial(entry);
         const markup = applyRowMarkup(derived.total, entry);
@@ -765,9 +858,35 @@ function mapEstimateToForm(estimate, templates) {
 function LabeledInput({ label, children }) {
   return (
     <label className="grid gap-2">
-      <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">{label}</span>
+      <span className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">{label}</span>
       {children}
     </label>
+  );
+}
+
+function InlineMessage({ error, message, onDismiss }) {
+  if (!error && !message) return null;
+
+  return (
+    <div className={error ? "acm-message-error" : "rounded-xl border border-[color:var(--acm-accent-border)] bg-[color:var(--acm-accent-soft)] px-4 py-3 text-sm text-[color:var(--acm-accent-strong)]"}>
+      <div className="flex items-start justify-between gap-3">
+        <span>{error || message}</span>
+        {onDismiss ? <button type="button" onClick={onDismiss} className="text-sm font-semibold">Close</button> : null}
+      </div>
+    </div>
+  );
+}
+
+function DetailStack({ lines = [] }) {
+  const visibleLines = lines.filter((line) => String(line || "").trim());
+  if (!visibleLines.length) return null;
+
+  return (
+    <div className="space-y-1">
+      {visibleLines.map((line, index) => (
+        <div key={`${line}-${index}`}>{line}</div>
+      ))}
+    </div>
   );
 }
 
@@ -919,6 +1038,21 @@ function StatusButton({ active, children, onClick }) {
 }
 
 function TableCellInput({ value, onChange, onKeyDown, list, placeholder = "", type = "text" }) {
+  if (type === "textarea") {
+    return (
+      <textarea
+        list={list}
+        value={value}
+        onChange={onChange}
+        onKeyDown={onKeyDown}
+        placeholder={placeholder}
+        rows={3}
+        data-grid-input="true"
+        className={sheetInputClass("min-w-[180px] resize-y text-[0.7rem]")}
+      />
+    );
+  }
+
   return (
     <input
       type={type}
@@ -928,9 +1062,25 @@ function TableCellInput({ value, onChange, onKeyDown, list, placeholder = "", ty
       onKeyDown={onKeyDown}
       placeholder={placeholder}
       data-grid-input="true"
-      className={sheetInputClass("min-w-[84px] text-[0.7rem]")}
+      className={sheetInputClass("min-w-[84px] text-[0.7rem] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none")}
     />
   );
+}
+
+function buildVisibleColumns(columns) {
+  const visible = [];
+  for (let index = 0; index < columns.length; index += 1) {
+    const column = columns[index];
+    const nextColumn = columns[index + 1];
+    if (column.key === "description" && visible.at(-1)?.key === "code") continue;
+    if (column.key === "code" && nextColumn?.key === "description") {
+      visible.push({ ...column, pairedDescriptionColumn: nextColumn });
+      index += 1;
+      continue;
+    }
+    visible.push(column);
+  }
+  return visible;
 }
 
 function SectionTable({
@@ -949,9 +1099,12 @@ function SectionTable({
   addLabel,
   summaryColumns = [],
 }) {
+  const visibleColumns = buildVisibleColumns(columns);
   const derivedRows = rows.map((row) =>
     sectionKey === "laborEntries"
       ? calculateLabor(row)
+      : sectionKey === "subcontractorEntries"
+        ? calculateSubcontractor(row)
       : sectionKey === "materialEntries"
         ? calculateMaterial(row)
         : sectionKey === "equipmentEntries"
@@ -963,7 +1116,7 @@ function SectionTable({
       <button type="button" onClick={onToggle} className="flex w-full items-center justify-between gap-3 py-2 text-left">
         <div>
           <div className="text-base font-bold text-[color:var(--acm-fg)]">{title}</div>
-          <div className="text-sm text-[color:var(--acm-muted-fg)]">{rows.length} row{rows.length === 1 ? "" : "s"}</div>
+          {/* <div className="text-sm text-[color:var(--acm-muted-fg)]">{rows.length} row{rows.length === 1 ? "" : "s"}</div> */}
         </div>
         <ChevronRightIcon className={`h-5 w-5 transition ${collapsed ? "" : "rotate-90"}`} />
       </button>
@@ -974,7 +1127,7 @@ function SectionTable({
             <table className="min-w-full table-fixed border-separate border-spacing-0">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
-                  {columns.map((column) => (
+                  {visibleColumns.map((column) => (
                     <th key={column.key} className={`px-2 py-2 font-semibold text-[0.6rem] ${column.width || ""}`}>{column.label}</th>
                   ))}
                   {summaryColumns.map((column) => (
@@ -989,16 +1142,42 @@ function SectionTable({
                   return (
                     <Fragment key={row.id}>
                       <tr className="border-t border-[color:var(--acm-border)] align-top">
-                        {columns.map((column) => (
+                        {visibleColumns.map((column) => (
                           <td key={column.key} className="px-1 py-1 text-[0.6rem]">
-                            <TableCellInput
-                              value={row[column.key]}
-                              list={column.listId || (column.list ? datalistId : undefined)}
-                              type={column.type || "text"}
-                              placeholder={column.placeholder}
-                              onChange={(event) => onChange(row.id, column.key, event.target.value)}
-                              onKeyDown={onKeyDown}
-                            />
+                            {column.pairedDescriptionColumn ? (
+                              <div className="space-y-2">
+                                <TableCellInput
+                                  value={row[column.key]}
+                                  list={column.listId || (column.list ? datalistId : undefined)}
+                                  type={column.type || "text"}
+                                  placeholder={column.placeholder}
+                                  onChange={(event) => onChange(row.id, column.key, event.target.value)}
+                                  onKeyDown={onKeyDown}
+                                />
+                                <div className="space-y-1">
+                                  <div className="text-[0.55rem] font-semibold uppercase tracking-[0.12em] text-[color:var(--acm-muted-fg)]">
+                                    {column.pairedDescriptionColumn.label}
+                                  </div>
+                                  <TableCellInput
+                                    value={row[column.pairedDescriptionColumn.key]}
+                                    list={column.pairedDescriptionColumn.listId || (column.pairedDescriptionColumn.list ? datalistId : undefined)}
+                                    type={column.pairedDescriptionColumn.type || "text"}
+                                    placeholder={column.pairedDescriptionColumn.placeholder}
+                                    onChange={(event) => onChange(row.id, column.pairedDescriptionColumn.key, event.target.value)}
+                                    onKeyDown={onKeyDown}
+                                  />
+                                </div>
+                              </div>
+                            ) : (
+                              <TableCellInput
+                                value={row[column.key]}
+                                list={column.listId || (column.list ? datalistId : undefined)}
+                                type={column.type || "text"}
+                                placeholder={column.placeholder}
+                                onChange={(event) => onChange(row.id, column.key, event.target.value)}
+                                onKeyDown={onKeyDown}
+                              />
+                            )}
                           </td>
                         ))}
                         {summaryColumns.map((column) => (
@@ -1012,7 +1191,7 @@ function SectionTable({
                               <Trash size={16}/>
                             </button>
                           ) : (
-                            <span className="px-3 py-1 text-xs text-[color:var(--acm-muted-fg)]">{index + 1}</span>
+                            null
                           )}
                         </td>
                       </tr>
@@ -1042,7 +1221,7 @@ function SectionTable({
   );
 }
 
-export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = "", initialCostLineId = "" }) {
+export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = "", initialCostLineId = "", standalone = false }) {
   const router = useRouter();
   const clientsQuery = useApiQuery("/api/clients");
   const settingsQuery = useApiQuery("/api/settings");
@@ -1050,7 +1229,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const estimatesQuery = useApiQuery("/api/estimates");
   const costCodesQuery = useApiQuery("/api/cost-codes");
 
-  const [tab, setTab] = useState("estimates");
+  const [editorOpen, setEditorOpen] = useState(Boolean(initialEstimateId));
   const [busy, setBusy] = useState(false);
   const [templateBusy, setTemplateBusy] = useState(false);
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -1066,6 +1245,19 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const [selectedCostLineId, setSelectedCostLineId] = useState(initialCostLineId);
   const [statusDraft, setStatusDraft] = useState("draft");
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
+  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
+  const [projectBusy, setProjectBusy] = useState(false);
+  const [projectEstimateId, setProjectEstimateId] = useState("");
+  const [projectForm, setProjectForm] = useState({
+    name: "",
+    location: "",
+    clientMode: "existing",
+    clientId: "",
+    clientName: "",
+    clientContact: "",
+    clientEmail: "",
+    clientAddress: "",
+  });
   const initialDetailHydratedRef = useRef(false);
 
   const clients = useMemo(() => clientsQuery.data?.clients ?? [], [clientsQuery.data?.clients]);
@@ -1413,6 +1605,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   function addEntry(lineId, sectionKey) {
     const createMap = {
       laborEntries: createLaborEntry,
+      subcontractorEntries: createSubcontractorEntry,
       materialEntries: createMaterialEntry,
       equipmentEntries: createEquipmentEntry,
       overheadEntries: createOverheadEntry,
@@ -1559,10 +1752,15 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     setError("");
     setMessage("");
     setStatusDraft("draft");
-    setTab("estimates");
+    setEditorOpen(true);
   }
 
   function loadEstimate(estimate) {
+    if (!standalone) {
+      router.push(`/${roleBase}/estimates/${estimate.id}`);
+      return;
+    }
+
     setForm(mapEstimateToForm(estimate, templates));
     setActiveEstimateId(estimate.id);
     setSelectedCostLineId("");
@@ -1571,7 +1769,63 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     setError("");
     setMessage("");
     setStatusDraft(estimate.status || "draft");
-    setTab("estimates");
+    setEditorOpen(true);
+  }
+
+  function openProjectDialog(estimate) {
+    const source = estimate || estimates.find((item) => item.id === form.id) || null;
+    const sourceClient = source?.client || clients.find((client) => client.id === (source?.client_id || form.clientId)) || null;
+    setProjectEstimateId(source?.id || form.id || "");
+    setProjectForm({
+      name: source?.title || form.title || sourceClient?.name || form.customerName || "Project",
+      location: sourceClient?.address || form.customerAddress || "",
+      clientMode: sourceClient?.id ? "existing" : "new",
+      clientId: sourceClient?.id || source?.client_id || form.clientId || "",
+      clientName: sourceClient?.name || form.customerName || "",
+      clientContact: sourceClient?.contact || form.customerPhone || "",
+      clientEmail: sourceClient?.email || form.customerEmail || "",
+      clientAddress: sourceClient?.address || form.customerAddress || "",
+    });
+    setProjectDialogOpen(true);
+  }
+
+  async function createProjectFromEstimate(event) {
+    event.preventDefault();
+    if (projectBusy || !projectEstimateId) return;
+
+    setProjectBusy(true);
+    setError("");
+    setMessage("");
+
+    const res = await fetch("/api/estimate-project", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        estimateId: projectEstimateId,
+        name: projectForm.name,
+        location: projectForm.location,
+        clientId: projectForm.clientMode === "existing" ? projectForm.clientId || null : null,
+        clientName: projectForm.clientMode === "new" ? projectForm.clientName : null,
+        clientContact: projectForm.clientMode === "new" ? projectForm.clientContact : null,
+        clientEmail: projectForm.clientMode === "new" ? projectForm.clientEmail : null,
+        clientAddress: projectForm.clientMode === "new" ? projectForm.clientAddress : null,
+        startDate: "",
+        endDate: "",
+      }),
+    });
+    const json = await res.json().catch(() => null);
+    setProjectBusy(false);
+
+    if (!res.ok) {
+      setError(formatApiError(json, "Unable to create project from estimate."));
+      return;
+    }
+
+    invalidateApiQuery("/api/projects");
+    invalidateApiQuery("/api/estimates");
+    await estimatesQuery.refresh().catch(() => null);
+    setProjectDialogOpen(false);
+    setMessage("Project created from estimate.");
   }
 
   async function openPdf(mode = "download") {
@@ -1661,7 +1915,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     if (new Date(form.validUntil) < new Date(form.estimateDate)) return "Valid until must be on or after the estimate date.";
 
     const hasRows = form.costLines.some((line) =>
-      [...(line.laborEntries ?? []), ...(line.materialEntries ?? []), ...(line.equipmentEntries ?? [])].some((entry) =>
+      [...(line.laborEntries ?? []), ...(line.subcontractorEntries ?? []), ...(line.materialEntries ?? []), ...(line.equipmentEntries ?? [])].some((entry) =>
         Object.entries(entry).some(([key, value]) => {
           if (key === "id") return false;
           if (typeof value === "string") return value.trim().length > 0;
@@ -1717,7 +1971,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const laborColumns = [
     { key: "code", label: "Category",  placeholder: "Category", width: "w-40" },
     // { key: "code", label: "Category", listId: "estimate-cost-code-options", placeholder: "Cost code" },
-    { key: "description", label: "Scope Of Work", placeholder: "Scope of work", width: "w-40" },
+    { key: "description", label: "Scope of work", placeholder: "Scope of work", width: "w-72", type: "textarea" },
     { key: "classification", label: "Classification", placeholder: "Classification", width: "w-40" },
     { key: "straightTimePersons", label: "ST Persons",  placeholder: "0", width: "w-20" },
     { key: "straightTimeDays", label: "ST Days",  placeholder: "0", width: "w-20" },
@@ -1728,13 +1982,23 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     { key: "profitPercent", label: "Profit",  placeholder: "0" },
   ];
 
+  const subcontractorColumns = [
+    { key: "code", label: "Category", placeholder: "Category", width: "w-40" },
+    { key: "cost", label: "Cost", placeholder: "0" },
+    { key: "workersCompPercent", label: "WC %", placeholder: "0" },
+    { key: "liabilityPercent", label: "GL %", placeholder: "0" },
+    { key: "overheadPercent", label: "Overhead %", placeholder: "0" },
+    { key: "profitPercent", label: "Profit %", placeholder: "0" },
+    { key: "description", label: "Description", placeholder: "Description", width: "w-72", type: "textarea" },
+  ];
+
   const materialColumns = [
     { key: "code", label: "Category", placeholder: "Category", width: "w-40" },
-    { key: "description", label: "Item", placeholder: "Item", width: "w-40" },
+    { key: "description", label: "Scope of work", placeholder: "Scope of work", width: "w-72", type: "textarea" },
     { key: "quantity", label: "Quantity",  placeholder: "0" },
     { key: "uom", label: "UOM", placeholder: "Unit" },
     { key: "wastePercent", label: "Waste %",  placeholder: "0" },
-    { key: "unitRate", label: "Unit Rate ($)",  placeholder: "0" },
+    { key: "unitRate", label: "Rate",  placeholder: "0" },
     { key: "freight", label: "Freight ($)",  placeholder: "0" },
     { key: "taxPercent", label: "Tax %",  placeholder: "0" },
     { key: "overheadPercent", label: "Overhead",  placeholder: "0" },
@@ -1743,10 +2007,10 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
 
   const equipmentColumns = [
     { key: "code", label: "Category", placeholder: "Category", width: "w-40" },
-    { key: "description", label: "Item",  placeholder: "Item", width: "w-40" },
+    { key: "description", label: "Scope of work",  placeholder: "Scope of work", width: "w-72", type: "textarea" },
     { key: "quantity", label: "Quantity",  placeholder: "0" },
     { key: "rentalDays", label: "Rental Days",  placeholder: "0" },
-    { key: "unitRate", label: "Unit Rate ($)",  placeholder: "0" },
+    { key: "unitRate", label: "Rate",  placeholder: "0" },
     { key: "freight", label: "Freight ($)",  placeholder: "0" },
     { key: "fuelPercent", label: "Fuel %",  placeholder: "0" },
     { key: "taxPercent", label: "Tax %",  placeholder: "0" },
@@ -1756,47 +2020,59 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
 
   return (
     <div className="space-y-6">
-      <section className="border-b border-[color:var(--acm-border)] pb-5">
+      <section>
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <div className="text-sm font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Estimate Workspace</div>
-            <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">Records And Editor</h1>
-          </div>
+          {/* <div>
+            <div className="text-lg font-bold text-[color:var(--acm-fg)]">{standalone ? "Estimate" : "Estimate Records"}</div>
+            <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">
+              {standalone ? "Review and edit this estimate on its own page." : "Open an estimate from the list or start a new one."}
+            </div>
+          </div> */}
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => setTab("estimates")} className={`acm-btn ${tab === "estimates" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>Estimates</button>
-            <button type="button" onClick={() => setTab("records")} className={`acm-btn ${tab === "records" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>Records</button>
+            {standalone ? (
+              <button type="button" onClick={() => router.push(`/${roleBase}/estimates`)} className="acm-btn acm-btn-secondary h-10 px-4">Back</button>
+            ) : null}
+            <button type="button" onClick={newEstimate} className="acm-btn acm-btn-primary h-10 px-4">New Estimate</button>
           </div>
         </div>
       </section>
 
-      {error ? <div className="acm-message-error">{error}</div> : null}
+      <InlineMessage error={error} message={message} onDismiss={() => { setError(""); setMessage(""); }} />
 
-      {tab === "records" ? (
+      {!standalone ? (
         <section className="space-y-5">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-xl font-bold">Estimate Records</div>
-            <button type="button" onClick={newEstimate} className="acm-btn acm-btn-secondary h-10 px-4">New</button>
-          </div>
           {(clientsQuery.loading || templatesQuery.loading || estimatesQuery.loading || settingsQuery.loading) ? (
             <div className="text-sm text-[color:var(--acm-muted-fg)]">Loading estimate workspace...</div>
           ) : null}
-          <div className="max-h-[280px] overflow-y-auto pr-1">
-            <div className="grid gap-3 lg:grid-cols-2">
-              {estimates.map((estimate) => (
-                <CompactListRow
-                  key={estimate.id}
-                  primary={estimate.title || `Estimate #${estimate.estimate_number}`}
-                  secondary={`${estimate.client?.name || "Client"} | ${formatDate(estimate.estimate_date)} | ${formatCurrency(estimate.summary?.finalBid || estimate.summary?.totalPrice)}`}
-                  // tertiary={`${formatCurrency(estimate.summary?.finalBid || estimate.summary?.totalPrice)} | ${String(estimate.status || "draft").toUpperCase()}`}
-                  onClick={() => loadEstimate(estimate)}
-                  actions={<StatusPill status={estimate.status || "draft"} />}
-                />
-              ))}
-            </div>
+          <div className="grid gap-3 lg:grid-cols-3">
+            {estimates.map((estimate) => (
+              <CompactListRow
+                key={estimate.id}
+                primary={estimate.title || `Estimate #${estimate.estimate_number}`}
+                secondary={
+                  <DetailStack
+                    lines={[
+                      estimate.client?.name || "Client",
+                      formatDate(estimate.estimate_date),
+                    ]}
+                  />
+                }
+                tertiary={
+                  <DetailStack
+                    lines={[
+                      formatCurrency(estimate.summary?.finalBid || estimate.summary?.totalPrice),
+                    ]}
+                  />
+                }
+                onClick={() => loadEstimate(estimate)}
+                actions={<StatusPill status={estimate.status || "draft"} />}
+              />
+            ))}
           </div>
-          {message ? <div className="rounded-[18px] border border-[color:var(--acm-accent-border)] bg-[color:var(--acm-accent-soft)] px-4 py-3 text-sm text-[color:var(--acm-accent-strong)]">{message}</div> : null}
         </section>
-      ) : (
+      ) : null}
+
+      {editorOpen ? (
         <section className="space-y-6">
           <div className="space-y-6">
               <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[color:var(--acm-border)] pb-4">
@@ -1828,13 +2104,18 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     Change Status
                   </BusyButton>
                   <BusyButton type="button" busy={busy} onClick={() => persistEstimate()} className="acm-btn acm-btn-secondary h-10 px-4">Save Details</BusyButton>
+                  {form.id ? (
+                    <button type="button" onClick={() => openProjectDialog()} className="acm-btn acm-btn-secondary h-10 px-4">
+                      Open Project
+                    </button>
+                  ) : null}
                 </div>
                 {/* <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">{dirty ? "Unsaved changes" : "All changes saved manually"}</div> */}
               </div>
 
               <div className="grid gap-6 md:grid-cols-4">
                 <LabeledInput label="Estimate No">
-                  <div className="py-2 text-sm font-semibold text-[color:var(--acm-fg)]">{form.estimateNumber || "Auto Generated"}</div>
+                  <input className={sheetInputClass()} inputMode="numeric" value={form.estimateNumber} onChange={(event) => updateEstimate("estimateNumber", event.target.value.replace(/[^\d]/g, ""))} />
                 </LabeledInput>
                 <LabeledInput label="Estimate Date">
                   <input type="date" className={sheetInputClass()} value={form.estimateDate} onChange={(event) => updateEstimate("estimateDate", event.target.value)} />
@@ -1871,6 +2152,23 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                   onKeyDown={handleGridKeyDown}
                   collapsed={collapsedSections[`${form.costLines[0]?.id}:laborEntries`]}
                   onToggle={() => toggleSection(form.costLines[0]?.id, "laborEntries")}
+                />
+
+                <SectionTable
+                  title="Subcontractor"
+                  addLabel="Add Subcontractor"
+                  sectionKey="subcontractorEntries"
+                  rows={form.costLines[0]?.subcontractorEntries ?? []}
+                  columns={subcontractorColumns}
+                  summaryColumns={[
+                    { key: "finalTotal", label: "Total", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).finalTotal) },
+                  ]}
+                  onChange={(rowId, key, value) => updateEntry(form.costLines[0]?.id, "subcontractorEntries", rowId, key, value)}
+                  onAdd={() => addEntry(form.costLines[0]?.id, "subcontractorEntries")}
+                  onRemove={(rowId) => removeEntry(form.costLines[0]?.id, "subcontractorEntries", rowId)}
+                  onKeyDown={handleGridKeyDown}
+                  collapsed={collapsedSections[`${form.costLines[0]?.id}:subcontractorEntries`]}
+                  onToggle={() => toggleSection(form.costLines[0]?.id, "subcontractorEntries")}
                 />
 
                 <SectionTable
@@ -1951,7 +2249,58 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
               </div>
           </div>
         </section>
-      )}
+      ) : null}
+
+      <Modal open={projectDialogOpen} title="Create Project" onClose={() => setProjectDialogOpen(false)} maxWidth="max-w-2xl">
+        <form onSubmit={createProjectFromEstimate} className="grid gap-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <LabeledInput label="Project Name">
+              <input className={sheetInputClass()} value={projectForm.name} onChange={(event) => setProjectForm((current) => ({ ...current, name: event.target.value }))} />
+            </LabeledInput>
+            <LabeledInput label="Client Source">
+              <select className={sheetInputClass()} value={projectForm.clientMode} onChange={(event) => setProjectForm((current) => ({ ...current, clientMode: event.target.value }))}>
+                <option value="existing">Use Existing Client</option>
+                <option value="new">Create New Client</option>
+              </select>
+            </LabeledInput>
+          </div>
+
+          {projectForm.clientMode === "existing" ? (
+            <LabeledInput label="Client">
+              <select className={sheetInputClass()} value={projectForm.clientId} onChange={(event) => setProjectForm((current) => ({ ...current, clientId: event.target.value }))}>
+                <option value="">Select client</option>
+                {clients.map((client) => (
+                  <option key={client.id} value={client.id}>{client.name}</option>
+                ))}
+              </select>
+            </LabeledInput>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              <LabeledInput label="Client Name">
+                <input className={sheetInputClass()} value={projectForm.clientName} onChange={(event) => setProjectForm((current) => ({ ...current, clientName: event.target.value }))} />
+              </LabeledInput>
+              <LabeledInput label="Client Contact">
+                <input className={sheetInputClass()} value={projectForm.clientContact} onChange={(event) => setProjectForm((current) => ({ ...current, clientContact: event.target.value }))} />
+              </LabeledInput>
+              <LabeledInput label="Client Email">
+                <input className={sheetInputClass()} value={projectForm.clientEmail} onChange={(event) => setProjectForm((current) => ({ ...current, clientEmail: event.target.value }))} />
+              </LabeledInput>
+              <LabeledInput label="Client Address">
+                <textarea className={sheetInputClass("min-h-[96px]")} value={projectForm.clientAddress} onChange={(event) => setProjectForm((current) => ({ ...current, clientAddress: event.target.value }))} />
+              </LabeledInput>
+            </div>
+          )}
+
+          <LabeledInput label="Project Location">
+            <textarea className={sheetInputClass("min-h-[96px]")} value={projectForm.location} onChange={(event) => setProjectForm((current) => ({ ...current, location: event.target.value }))} />
+          </LabeledInput>
+
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setProjectDialogOpen(false)} className="acm-btn acm-btn-secondary h-10 px-4">Cancel</button>
+            <BusyButton type="submit" busy={projectBusy} className="acm-btn acm-btn-primary h-10 px-4">Create Project</BusyButton>
+          </div>
+        </form>
+      </Modal>
 
       <Modal open={statusDialogOpen} title="Change Status" onClose={() => setStatusDialogOpen(false)} maxWidth="max-w-md">
         <div className="space-y-5">

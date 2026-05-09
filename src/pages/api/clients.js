@@ -5,12 +5,20 @@ import { sendError, sendOk } from "@/lib/server/responses";
 
 const ClientSchema = z.object({
   name: z.string().trim().min(1),
-  address: z.string().trim().min(1),
-  contact: z.string().trim().min(1),
-  email: z.string().trim().email(),
+  address: z.string().trim().optional().nullable().default(""),
+  contact: z.string().trim().optional().nullable().default(""),
+  email: z.union([z.string().trim().email(), z.literal(""), z.null(), z.undefined()]).default(""),
   followUpDate: z.string().optional().nullable(),
   followUpNote: z.string().trim().optional().nullable(),
   followUpStatus: z.enum(["pending", "done"]).optional().nullable(),
+});
+
+const UpdateClientSchema = ClientSchema.extend({
+  id: z.string().uuid(),
+});
+
+const DeleteClientSchema = z.object({
+  id: z.string().uuid(),
 });
 
 export default async function handler(req, res) {
@@ -61,9 +69,9 @@ export default async function handler(req, res) {
       .insert({
         company_id: ctx.company.id,
         name: payload.name,
-        address: payload.address,
-        contact: payload.contact,
-        email: payload.email,
+        address: payload.address || null,
+        contact: payload.contact || null,
+        email: payload.email || null,
       })
       .select("*")
       .single();
@@ -85,6 +93,43 @@ export default async function handler(req, res) {
     }
 
     return sendOk(res, { client });
+  }
+
+  if (req.method === "PUT") {
+    const parsed = UpdateClientSchema.safeParse(req.body);
+    if (!parsed.success) return sendError(res, 400, "invalid_payload", parsed.error.flatten());
+
+    const { id, ...payload } = parsed.data;
+    const { data: client, error } = await ctx.admin
+      .from("clients")
+      .update({
+        name: payload.name,
+        address: payload.address || null,
+        contact: payload.contact || null,
+        email: payload.email || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .eq("company_id", ctx.company.id)
+      .select("*")
+      .single();
+
+    if (error || !client) return sendError(res, 500, "client_update_failed", error?.message);
+    return sendOk(res, { client });
+  }
+
+  if (req.method === "DELETE") {
+    const parsed = DeleteClientSchema.safeParse(req.body);
+    if (!parsed.success) return sendError(res, 400, "invalid_payload", parsed.error.flatten());
+
+    const { error } = await ctx.admin
+      .from("clients")
+      .delete()
+      .eq("id", parsed.data.id)
+      .eq("company_id", ctx.company.id);
+
+    if (error) return sendError(res, 500, "client_delete_failed", error.message);
+    return sendOk(res, { deleted: true });
   }
 
   return sendError(res, 405, "method_not_allowed");

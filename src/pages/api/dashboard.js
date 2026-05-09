@@ -71,6 +71,7 @@ export default async function handler(req, res) {
 
   const managerCount = visibleCompanyUsers.filter((item) => item.role === "manager").length;
   const employeeCount = visibleCompanyUsers.filter((item) => item.role === "employee").length;
+  const subcontractorCount = visibleCompanyUsers.filter((item) => item.role === "subcontractor").length;
 
   const projectSummary = {
     total: visibleProjects.length,
@@ -94,6 +95,7 @@ export default async function handler(req, res) {
     staff: {
       managers: managerCount,
       employees: employeeCount,
+      subcontractors: subcontractorCount,
     },
     tasks:
       ctx.role === "owner"

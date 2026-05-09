@@ -4,7 +4,7 @@ import { requireRolePage } from "@/lib/pages/requireRolePage";
 
 export default function EmployeeInvoicingPage({ authContext }) {
   return (
-    <EmployeeShell companyName={authContext.company.name} viewer={authContext.viewer} title="Invoicing">
+    <EmployeeShell companyName={authContext.company.name} viewer={authContext.viewer} title="Invoices">
       <InvoicingWorkspace roleBase="employee" />
     </EmployeeShell>
   );

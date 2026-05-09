@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Modal from "@/components/dashboard/Modal";
 import { BusyButton, CompactListRow } from "@/components/dashboard/DashboardUi";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
@@ -24,7 +24,7 @@ function formatDate(value) {
 function LabeledField({ label, children }) {
   return (
     <label className="relative block pt-3">
-      <span className="absolute left-3 top-0 z-10 bg-[color:var(--acm-surface)] px-2 text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
+      <span className="absolute left-3 top-0 z-10 bg-[color:var(--acm-surface)] px-2 text-xs font-semibold text-[color:var(--acm-muted-fg)]">
         {label}
       </span>
       {children}
@@ -41,11 +41,14 @@ function FieldGroup({ title, children }) {
   );
 }
 
-function InlineMessage({ error, message }) {
+function InlineMessage({ error, message, onDismiss }) {
   if (error) {
     return (
       <div className="rounded-xl border border-rose-500/25 bg-rose-500/8 px-4 py-3 text-sm text-rose-500">
-        {error}
+        <div className="flex items-start justify-between gap-3">
+          <span>{error}</span>
+          {onDismiss ? <button type="button" onClick={onDismiss} className="text-sm font-semibold">Close</button> : null}
+        </div>
       </div>
     );
   }
@@ -53,7 +56,10 @@ function InlineMessage({ error, message }) {
   if (message) {
     return (
       <div className="rounded-xl border border-[color:var(--acm-accent-border)] bg-[color:var(--acm-accent-soft)] px-4 py-3 text-sm text-[color:var(--acm-accent-strong)]">
-        {message}
+        <div className="flex items-start justify-between gap-3">
+          <span>{message}</span>
+          {onDismiss ? <button type="button" onClick={onDismiss} className="text-sm font-semibold">Close</button> : null}
+        </div>
       </div>
     );
   }
@@ -100,6 +106,7 @@ function createFieldReportForm(projectId) {
     reportTime: "08:00",
     location: "",
     weatherConditions: "",
+    temperatureRange: "",
     temperatureValue: "",
     temperatureUnit: "F",
     weatherImpact: "",
@@ -174,6 +181,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
       reportTime: report.report_time || "",
       location: report.location || "",
       weatherConditions: report.weather_conditions || "",
+      temperatureRange: report.temperature_range || "",
       temperatureValue: report.temperature_value ?? "",
       temperatureUnit: report.temperature_unit || "F",
       weatherImpact: report.weather_impact || "",
@@ -342,7 +350,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
         }
       />
 
-      <InlineMessage error={reportsQuery.error || error} message={message} />
+      <InlineMessage error={reportsQuery.error || error} message={message} onDismiss={() => { setError(""); setMessage(""); }} />
 
       <div className={cardClass()}>
         <div className="mb-4">
@@ -360,9 +368,25 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
             <div key={report.id} className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
               <CompactListRow
               key={report.id}
-              primary={`${formatDate(report.report_date)} | ${report.location || "Site report"}`}
-              secondary={`${report.report_time || "Time pending"} | ${report.weather_conditions || "Weather pending"} | ${report.temperature_range || "Temp pending"}`}
-              tertiary={`Created by ${report.created_by?.name || report.created_by?.user_name || report.created_by?.user_code || "-"} | ${report.work_activities?.length || 0} work logs | ${(report.equipment_used ?? []).length || 0} equipment entries`}
+              primary={formatDate(report.report_date)}
+              secondary={
+                <>
+                  {report.location || "Site report"}
+                  <br />
+                  {report.report_time || "Time pending"}
+                  <br />
+                  {report.weather_conditions || "Weather pending"}
+                </>
+              }
+              tertiary={
+                <>
+                  {report.temperature_range || "Temp pending"}
+                  <br />
+                  Created by {report.created_by?.name || report.created_by?.user_name || report.created_by?.user_code || "-"}
+                  <br />
+                  {report.work_activities?.length || 0} work logs, {(report.equipment_used ?? []).length || 0} equipment entries
+                </>
+              }
               onClick={() => setSelectedReport(report)}
               actions={
                 canEdit(report) ? (
@@ -415,7 +439,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
               {useDetailedInspectionForm ? (
                 <>
                   <LabeledField label="Temperature Value">
-                    <input type="number" min="-50" max="150" step="0.1" className={fieldClass()} value={form.temperatureValue} onChange={(event) => setForm((current) => ({ ...current, temperatureValue: event.target.value }))} />
+                    <input inputMode="decimal" className={`${fieldClass()} [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`} value={form.temperatureValue} onChange={(event) => setForm((current) => ({ ...current, temperatureValue: event.target.value, temperatureRange: "" }))} />
                   </LabeledField>
                   <LabeledField label="Temperature Unit">
                     <select className={fieldClass()} value={form.temperatureUnit} onChange={(event) => setForm((current) => ({ ...current, temperatureUnit: event.target.value }))}>
@@ -426,7 +450,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
                 </>
               ) : (
                 <LabeledField label="Temperature Range">
-                  <input className={fieldClass()} value={form.temperatureValue ? `${form.temperatureValue} °${form.temperatureUnit}` : ""} onChange={(event) => setForm((current) => ({ ...current, temperatureValue: event.target.value, temperatureUnit: "F" }))} />
+                  <input className={fieldClass()} value={form.temperatureRange} onChange={(event) => setForm((current) => ({ ...current, temperatureRange: event.target.value, temperatureValue: "", temperatureUnit: "F" }))} />
                 </LabeledField>
               )}
               <LabeledField label="Weather Impact">
@@ -686,7 +710,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
               <DetailRow label="Temperature" value={selectedReport.temperature_range || "-"} />
               <DetailRow label="Impact" value={selectedReport.weather_impact || "-"} />
               <DetailRow label="Comments" value={selectedReport.comments || "-"} />
-              <DetailRow label="Signoff" value={`${selectedReport.signoff_name || "-"} | ${selectedReport.signoff_role || "-"}`} />
+              <DetailRow label="Signoff" value={[selectedReport.signoff_name || "-", selectedReport.signoff_role || "-"].join(", ")} />
             </div>
 
             {useDetailedInspectionForm ? (
@@ -800,3 +824,38 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
     </>
   );
 }
+
+export function FieldReportsWorkspacePage({ roleBase = "owner", currentUserId = "" }) {
+  const projectsQuery = useApiQuery("/api/projects");
+  const projectList = useMemo(() => projectsQuery.data?.projects ?? [], [projectsQuery.data?.projects]);
+  const [projectId, setProjectId] = useState("");
+  const activeProjectId = projectId || projectList[0]?.id || "";
+
+  return (
+    <div className="space-y-4">
+      <div className={cardClass()}>
+        <div className="grid gap-3 md:grid-cols-[220px_1fr] md:items-end">
+          <LabeledField label="Project">
+            <select className={fieldClass()} value={activeProjectId} onChange={(event) => setProjectId(event.target.value)}>
+              {projectList.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </LabeledField>
+          {/* <div className="text-sm text-[color:var(--acm-muted-fg)]">
+            Select a project to view and manage its field reports from the main dashboard.
+          </div> */}
+        </div>
+      </div>
+
+      {activeProjectId ? (
+        <ProjectFieldReportsPage projectId={activeProjectId} roleBase={roleBase} currentUserId={currentUserId} />
+      ) : (
+        <div className={cardClass()}>No projects available yet.</div>
+      )}
+    </div>
+  );
+}
+

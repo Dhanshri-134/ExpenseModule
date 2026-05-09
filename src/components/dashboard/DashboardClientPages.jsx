@@ -304,11 +304,12 @@ function useApi(url) {
   return useApiQuery(url);
 }
 
-function InlineMessage({ error, message }) {
+function InlineMessage({ error, message, onDismiss }) {
   if (error) {
     return (
-      <div className="acm-message-error">
-        {error}
+      <div className="flex items-start justify-between gap-3 acm-message-error">
+        <span>{error}</span>
+        {onDismiss ? <button type="button" onClick={onDismiss} className="text-sm font-semibold">Close</button> : null}
       </div>
     );
   }
@@ -316,7 +317,10 @@ function InlineMessage({ error, message }) {
   if (message) {
     return (
       <div className="rounded-xl border border-[color:var(--acm-accent-border)] bg-[color:var(--acm-accent-soft)] px-4 py-3 text-sm text-[color:var(--acm-accent-strong)]">
-        {message}
+        <div className="flex items-start justify-between gap-3">
+          <span>{message}</span>
+          {onDismiss ? <button type="button" onClick={onDismiss} className="text-sm font-semibold">Close</button> : null}
+        </div>
       </div>
     );
   }
@@ -544,7 +548,7 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
 
       <section className="mt-4 grid gap-4 xl:grid-cols-2">
         <div className={cardClass()}>
-          {/* <SectionHeader title="Projects" action={<Link href={`/${roleBase}/projects`} className="text-sm font-semibold text-[color:var(--acm-accent)]">Open</Link>} /> */}
+          <SectionHeader title="Projects" action={<Link href={`/${roleBase}/projects`} className="text-sm font-semibold text-[color:var(--acm-accent)]">Open</Link>} />
           <div className="space-y-3">
             {projectList.slice(0, 3).map((project) => (
               <CompactListRow
@@ -558,7 +562,7 @@ export function DashboardOverview({ roleBase, canManageStaff = false }) {
           </div>
         </div>
         <div className={cardClass()}>
-          {/* <SectionHeader title="Tasks" action={<Link href={`/${roleBase}/tasks`} className="text-sm font-semibold text-[color:var(--acm-accent)]">Open</Link>} /> */}
+          <SectionHeader title="Tasks" action={<Link href={`/${roleBase}/tasks`} className="text-sm font-semibold text-[color:var(--acm-accent)]">Open</Link>} />
           <div className="space-y-3">
             {taskList.slice(0, 3).map((task) => (
               <CompactListRow
@@ -726,6 +730,8 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
     id: "",
     name: "",
     location: "",
+    clientMode: "existing",
+    clientId: "",
     clientName: "",
     clientContact: "",
     clientEmail: "",
@@ -748,6 +754,8 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
       id: "",
       name: "",
       location: "",
+      clientMode: filteredClient ? "existing" : "new",
+      clientId: filteredClient?.id || "",
       clientName: filteredClient?.name || "",
       clientContact: filteredClient?.contact || "",
       clientEmail: filteredClient?.email || "",
@@ -765,6 +773,8 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
       id: project.id,
       name: project.name || "",
       location: project.location || "",
+      clientMode: "existing",
+      clientId: project.client?.id || "",
       clientName: project.client?.name || "",
       clientContact: project.client?.contact || "",
       clientEmail: project.client?.email || "",
@@ -788,6 +798,11 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         ...form,
+        clientId: form.clientMode === "existing" ? form.clientId || null : null,
+        clientName: form.clientMode === "new" ? form.clientName : null,
+        clientContact: form.clientMode === "new" ? form.clientContact : null,
+        clientEmail: form.clientMode === "new" ? form.clientEmail : null,
+        clientAddress: form.clientMode === "new" ? form.clientAddress : null,
         contractValue: Number(form.contractValue || 0),
       }),
     });
@@ -962,18 +977,47 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
 
           <fieldset disabled={Boolean(message && !editingProject && !error)} className="contents">
             <FieldGroup title="Client Info">
-              <LabeledField label="Client Name">
-                <input className={fieldClass()} value={form.clientName} disabled={Boolean(filteredClient && !editingProject)} onChange={(e) => setForm((prev) => ({ ...prev, clientName: e.target.value }))} />
+              <LabeledField label="Client Source">
+                <select
+                  className={fieldClass()}
+                  value={form.clientMode}
+                  disabled={Boolean(filteredClient && !editingProject)}
+                  onChange={(e) => setForm((prev) => ({ ...prev, clientMode: e.target.value }))}
+                >
+                  <option value="existing">Use Existing Client</option>
+                  <option value="new">Create New Client</option>
+                </select>
               </LabeledField>
-              <LabeledField label="Client Contact">
-                <input className={fieldClass()} value={form.clientContact} disabled={Boolean(filteredClient && !editingProject)} onChange={(e) => setForm((prev) => ({ ...prev, clientContact: e.target.value }))} />
-              </LabeledField>
-              <LabeledField label="Client Email">
-                <input className={fieldClass()} type="email" value={form.clientEmail} disabled={Boolean(filteredClient && !editingProject)} onChange={(e) => setForm((prev) => ({ ...prev, clientEmail: e.target.value }))} />
-              </LabeledField>
-              <LabeledField label="Client Address">
-                <textarea className={fieldClass()} rows={3} value={form.clientAddress} disabled={Boolean(filteredClient && !editingProject)} onChange={(e) => setForm((prev) => ({ ...prev, clientAddress: e.target.value }))} />
-              </LabeledField>
+              {form.clientMode === "existing" ? (
+                <LabeledField label="Client">
+                  <select
+                    className={fieldClass()}
+                    value={form.clientId}
+                    disabled={Boolean(filteredClient && !editingProject)}
+                    onChange={(e) => setForm((prev) => ({ ...prev, clientId: e.target.value }))}
+                  >
+                    <option value="">Select client</option>
+                    {(clients.data?.clients ?? []).map((client) => (
+                      <option key={client.id} value={client.id}>{client.name}</option>
+                    ))}
+                  </select>
+                </LabeledField>
+              ) : (
+                <>
+                  <LabeledField label="Client Name">
+                    <input className={fieldClass()} value={form.clientName} onChange={(e) => setForm((prev) => ({ ...prev, clientName: e.target.value }))} />
+                  </LabeledField>
+                  <LabeledField label="Client Contact">
+                    <input className={fieldClass()} value={form.clientContact} onChange={(e) => setForm((prev) => ({ ...prev, clientContact: e.target.value }))} />
+                  </LabeledField>
+                  <LabeledField label="Client Email">
+                    <input className={fieldClass()} type="email" value={form.clientEmail} onChange={(e) => setForm((prev) => ({ ...prev, clientEmail: e.target.value }))} />
+                  </LabeledField>
+                  <LabeledField label="Client Address">
+                    <textarea className={fieldClass()} rows={3} value={form.clientAddress} onChange={(e) => setForm((prev) => ({ ...prev, clientAddress: e.target.value }))} />
+                  </LabeledField>
+                </>
+              )}
             </FieldGroup>
 
             <FieldGroup title="Project Info">
@@ -1044,7 +1088,7 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
     followUpStatus: "pending",
   });
 
-  const leadList = leads.data?.leads ?? [];
+  const leadList = (leads.data?.leads ?? []).filter((lead) => lead.status !== "converted");
 
   function openCreate() {
     setForm({
@@ -1310,13 +1354,13 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
               <input required className={fieldClass()} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
             </LabeledField>
             <LabeledField label="Client Contact">
-              <input required className={fieldClass()} value={form.contact} onChange={(e) => setForm((prev) => ({ ...prev, contact: e.target.value }))} />
+              <input className={fieldClass()} value={form.contact} onChange={(e) => setForm((prev) => ({ ...prev, contact: e.target.value }))} />
             </LabeledField>
             <LabeledField label="Client Email">
-              <input required type="email" className={fieldClass()} value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
+              <input type="email" className={fieldClass()} value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
             </LabeledField>
             <LabeledField label="Client Address">
-              <textarea required className={fieldClass()} rows={3} value={form.address} onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))} />
+              <textarea className={fieldClass()} rows={3} value={form.address} onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))} />
             </LabeledField>
           </FieldGroup>
           <FieldGroup title="Create Follow-up">
@@ -1373,13 +1417,13 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
                   <input required className={fieldClass()} value={leadEditForm.name} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, name: e.target.value }))} />
                 </LabeledField>
                 <LabeledField label="Client Contact">
-                  <input required className={fieldClass()} value={leadEditForm.contact} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, contact: e.target.value }))} />
+                  <input className={fieldClass()} value={leadEditForm.contact} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, contact: e.target.value }))} />
                 </LabeledField>
                 <LabeledField label="Client Email">
-                  <input required type="email" className={fieldClass()} value={leadEditForm.email} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, email: e.target.value }))} />
+                  <input type="email" className={fieldClass()} value={leadEditForm.email} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, email: e.target.value }))} />
                 </LabeledField>
                 <LabeledField label="Client Address">
-                  <textarea required className={fieldClass()} rows={3} value={leadEditForm.address} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, address: e.target.value }))} />
+                  <textarea className={fieldClass()} rows={3} value={leadEditForm.address} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, address: e.target.value }))} />
                 </LabeledField>
               </FieldGroup>
               <div className="flex justify-end gap-2">
@@ -1479,6 +1523,9 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [formBusy, setFormBusy] = useState(false);
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteBusyId, setDeleteBusyId] = useState("");
   const [form, setForm] = useState({
     name: "",
     address: "",
@@ -1532,11 +1579,76 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
     setFormBusy(false);
   }
 
-  function openClientProjects(client) {
-    router.push({
-      pathname: `/${roleBase}/projects`,
-      query: { clientId: client.id },
+  function openClientEdit(client) {
+    setSelectedClient(client);
+    setForm({
+      name: client.name || "",
+      address: client.address || "",
+      contact: client.contact || "",
+      email: client.email || "",
+      followUpDate: "",
+      followUpNote: "",
+      followUpStatus: "pending",
     });
+    setEditOpen(true);
+  }
+
+  async function updateClient(event) {
+    event.preventDefault();
+    if (!selectedClient || formBusy) return;
+
+    setError("");
+    setMessage("");
+    setFormBusy(true);
+
+    const res = await fetch("/api/clients", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: selectedClient.id, ...form }),
+    });
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setError(json?.error || "client_update_failed");
+      setFormBusy(false);
+      return;
+    }
+
+    setSelectedClient(json?.client || { ...selectedClient, ...form });
+    setEditOpen(false);
+    setMessage("Client updated");
+    invalidateApiQuery("/api/clients");
+    await clients.refresh();
+    setFormBusy(false);
+  }
+
+  async function deleteClient(client) {
+    if (!client || deleteBusyId) return;
+    if (!window.confirm(`Delete ${client.name}?`)) return;
+
+    setDeleteBusyId(client.id);
+    setError("");
+    setMessage("");
+
+    const res = await fetch("/api/clients", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: client.id }),
+    });
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setError(json?.error || "client_delete_failed");
+      setDeleteBusyId("");
+      return;
+    }
+
+    if (selectedClient?.id === client.id) setSelectedClient(null);
+    setEditOpen(false);
+    setMessage("Client deleted");
+    invalidateApiQuery("/api/clients");
+    await clients.refresh();
+    setDeleteBusyId("");
   }
 
   return (
@@ -1552,13 +1664,13 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
         }
       />
 
-      <InlineMessage error={clients.error || error} message={message} />
+      <InlineMessage error={clients.error || error} message={message} onDismiss={() => { setError(""); setMessage(""); }} />
 
-      <div className="mb-4">
+      {/* <div className="mb-4">
         <button type="button" onClick={() => router.push(`/${roleBase}/followups`)} className="acm-btn acm-btn-secondary h-10 px-4">
           Open Follow-up List
         </button>
-      </div>
+      </div> */}
 
       <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {clientList.map((client) => (
@@ -1567,18 +1679,32 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
             primary={client.name}
             secondary={<>{client.contact}</>}
             tertiary={<> {client.email}<br />{client.address} <br/> Projects: {client.projectCount ?? 0}</>}
-            onClick={() => openClientProjects(client)}
+            onClick={() => setSelectedClient(client)}
             actions={
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  openClientProjects(client);
-                }}
-                className="acm-btn acm-btn-primary h-9 px-3 text-xs"
-              >
-                Open Projects
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openClientEdit(client);
+                  }}
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-[color:var(--acm-border)] text-[color:var(--acm-muted-fg)] transition hover:text-[color:var(--acm-accent)]"
+                  aria-label="Edit client"
+                >
+                  <Pencil size={15} />
+                </button>
+                <BusyButton
+                  type="button"
+                  busy={deleteBusyId === client.id}
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-[color:var(--acm-border)] text-rose-600 transition hover:bg-rose-50"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    deleteClient(client);
+                  }}
+                >
+                  <Trash2 size={15} />
+                </BusyButton>
+              </div>
             }
           />
         ))}
@@ -1591,13 +1717,13 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
               <input required className={fieldClass()} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
             </LabeledField>
             <LabeledField label="Client Contact">
-              <input required className={fieldClass()} value={form.contact} onChange={(e) => setForm((prev) => ({ ...prev, contact: e.target.value }))} />
+              <input className={fieldClass()} value={form.contact} onChange={(e) => setForm((prev) => ({ ...prev, contact: e.target.value }))} />
             </LabeledField>
             <LabeledField label="Client Email">
-              <input required type="email" className={fieldClass()} value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
+              <input type="email" className={fieldClass()} value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
             </LabeledField>
             <LabeledField label="Client Address">
-              <textarea required className={fieldClass()} rows={3} value={form.address} onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))} />
+              <textarea className={fieldClass()} rows={3} value={form.address} onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))} />
             </LabeledField>
           </FieldGroup>
           <FieldGroup title="Create Follow-up">
@@ -1619,6 +1745,81 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
           <BusyButton type="submit" busy={formBusy} className="acm-btn acm-btn-primary">
             Save
           </BusyButton>
+        </form>
+      </Modal>
+
+      <ProfileModal
+        open={Boolean(selectedClient)}
+        title={selectedClient ? `${selectedClient.name} Client Info` : "Client Info"}
+        details={
+          selectedClient
+            ? [
+                { label: "Name", value: selectedClient.name },
+                { label: "Contact", value: selectedClient.contact || "-" },
+                { label: "Email", value: selectedClient.email || "-" },
+                { label: "Address", value: selectedClient.address || "-" },
+                { label: "Projects", value: String(selectedClient.projectCount ?? 0) },
+              ]
+            : []
+        }
+        onClose={() => setSelectedClient(null)}
+        actions={
+          selectedClient ? (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedClient(null);
+                  router.push({
+                    pathname: `/${roleBase}/projects`,
+                    query: { clientId: selectedClient.id },
+                  });
+                }}
+                className="acm-btn acm-btn-primary h-10 px-4"
+              >
+                Open Projects
+              </button>
+              <button
+                type="button"
+                onClick={() => openClientEdit(selectedClient)}
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-[color:var(--acm-border)] text-[color:var(--acm-muted-fg)] transition hover:text-[color:var(--acm-accent)]"
+                aria-label="Edit client"
+              >
+                <Pencil size={16} />
+              </button>
+              <BusyButton
+                type="button"
+                busy={deleteBusyId === selectedClient.id}
+                onClick={() => deleteClient(selectedClient)}
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-[color:var(--acm-border)] text-rose-600 transition hover:bg-rose-50"
+              >
+                <Trash2 size={16} />
+              </BusyButton>
+            </>
+          ) : null
+        }
+      />
+
+      <Modal open={editOpen} title="Edit Client" onClose={() => setEditOpen(false)}>
+        <form onSubmit={updateClient} className="grid gap-3">
+          <FieldGroup title="Client Info">
+            <LabeledField label="Client Name">
+              <input required className={fieldClass()} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Client Contact">
+              <input className={fieldClass()} value={form.contact} onChange={(e) => setForm((prev) => ({ ...prev, contact: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Client Email">
+              <input type="email" className={fieldClass()} value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
+            </LabeledField>
+            <LabeledField label="Client Address">
+              <textarea className={fieldClass()} rows={3} value={form.address} onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))} />
+            </LabeledField>
+          </FieldGroup>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setEditOpen(false)} className="acm-btn acm-btn-secondary h-10 px-4">Cancel</button>
+            <BusyButton type="submit" busy={formBusy} className="acm-btn acm-btn-primary h-10 px-4">Save Client</BusyButton>
+          </div>
         </form>
       </Modal>
     </>
@@ -2011,7 +2212,6 @@ export function StaffManagerPage({
   const [open, setOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [taskOpen, setTaskOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [selectedProfile, setSelectedProfile] = useState(null);
@@ -2019,11 +2219,9 @@ export function StaffManagerPage({
   const [historyItems, setHistoryItems] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [editingStaff, setEditingStaff] = useState(null);
-  const [taskTarget, setTaskTarget] = useState(null);
   const [createBusy, setCreateBusy] = useState(false);
   const [assignBusy, setAssignBusy] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
-  const [taskBusy, setTaskBusy] = useState(false);
   const [deleteUserId, setDeleteUserId] = useState("");
   const [form, setForm] = useState({
     name: "",
@@ -2032,6 +2230,7 @@ export function StaffManagerPage({
     email: "",
     mobile: "",
     hourlyRate: "",
+    craft: "",
     projectId: "",
     password: "",
   });
@@ -2041,24 +2240,13 @@ export function StaffManagerPage({
     role: allowManagerCreation ? "manager" : "employee",
     hourlyRate: "",
   });
-  const [taskForm, setTaskForm] = useState({
-    projectId: fixedProjectId || "",
-    assigneeUserIds: [],
-    title: "",
-    description: "",
-    startDate: "",
-    endDate: "",
-    approvalRole: "manager",
-    approverUserId: "",
-  });
 
-  const staffData = useMemo(() => staff.data?.staff ?? { managers: [], employees: [] }, [staff.data]);
+  const staffData = useMemo(() => staff.data?.staff ?? { managers: [], employees: [], subcontractors: [] }, [staff.data]);
   const projectList = projects.data?.projects ?? [];
   const availableProjects = fixedProjectId ? projectList.filter((project) => project.id === fixedProjectId) : projectList;
   const defaultProjectId = fixedProjectId || getProjectDefaultId(availableProjects);
   const selectedProjectId = form.projectId || defaultProjectId;
   const selectedAssignmentProjectId = assignForm.projectId || defaultProjectId;
-  const availableTaskApprovers = getApproverOptions(staffData, taskForm.projectId || fixedProjectId || "", taskForm.approvalRole);
   const visibleStaffData = useMemo(() => {
     if (!fixedProjectId) return staffData;
 
@@ -2069,15 +2257,12 @@ export function StaffManagerPage({
     return {
       managers: staffData.managers.filter(inProject),
       employees: staffData.employees.filter(inProject),
+      subcontractors: staffData.subcontractors.filter(inProject),
     };
   }, [fixedProjectId, staffData]);
 
   function canManageThisStaff(item) {
     return !readOnly && (ownerMode ? item.role !== "owner" : item.role === "employee" && item.user_id !== currentUserId);
-  }
-
-  function canAssignToThisStaff(item) {
-    return !readOnly && (item.role === "employee" || (item.role === "manager" && canAssignManagers));
   }
 
   async function createStaff(e) {
@@ -2092,6 +2277,7 @@ export function StaffManagerPage({
       body: JSON.stringify({
         ...form,
         hourlyRate: Number(form.hourlyRate || 0),
+        craft: form.craft?.trim() || null,
         projectId: selectedProjectId || null,
         userName: form.userName?.trim() || null,
         password: form.password?.trim() || null,
@@ -2128,6 +2314,7 @@ export function StaffManagerPage({
         email: editingStaff.email,
         mobile: editingStaff.mobile,
         hourlyRate: Number(editingStaff.hourly_rate || 0),
+        craft: editingStaff.craft || "",
         password: editingStaff.password || "",
       }),
     });
@@ -2234,47 +2421,6 @@ export function StaffManagerPage({
     setHistoryLoading(false);
   }
 
-  function openAssignTask(item) {
-    const fallbackProjectId = fixedProjectId || item.project_assignments?.[0]?.project_id || item.created_in_project_id || "";
-    setTaskTarget(item);
-    setTaskForm({
-      projectId: fallbackProjectId,
-      assigneeUserIds: [item.user_id],
-      title: "",
-      description: "",
-      startDate: "",
-      endDate: "",
-      approvalRole: "manager",
-      approverUserId: "",
-    });
-    setTaskOpen(true);
-  }
-
-  async function assignTaskFromStaffList(e) {
-    e.preventDefault();
-    if (taskBusy) return;
-    setError("");
-    setMessage("");
-    setTaskBusy(true);
-    const res = await fetch("/api/tasks", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(taskForm),
-    });
-    const json = await res.json().catch(() => null);
-    // if (!res.ok) {
-    //   setError(json?.error || "task_create_failed");
-    //   setTaskBusy(false);
-    //   return;
-    // }
-    setMessage("Task created");
-    setTaskOpen(false);
-    invalidateApiQuery("/api/tasks");
-    invalidateApiQuery("/api/dashboard");
-    await staff.refresh();
-    setTaskBusy(false);
-  }
-
   return (
     <>
       <SectionHeader
@@ -2300,6 +2446,9 @@ export function StaffManagerPage({
         <button type="button" onClick={() => setTab("employees")} className={`acm-btn ${tab === "employees" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>
           Employees
         </button>
+        <button type="button" onClick={() => setTab("subcontractors")} className={`acm-btn ${tab === "subcontractors" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>
+          Subcontractors
+        </button>
       </div>
 
       <InlineMessage error={staff.error || error} message={message} />
@@ -2310,15 +2459,10 @@ export function StaffManagerPage({
             key={item.user_id}
             primary={item.name || item.user_name || item.user_code}
             secondary={`${item.user_name || item.user_code} | ${item.user_code} | ${roleName(item.role)}`}
-            tertiary={`${item.email || "-"} | ${getProjectAssignmentSummary(item, fixedProjectId)}`}
+            tertiary={`${item.email || "-"} | Hourly: ${item.hourly_rate || 0} | ${getProjectAssignmentSummary(item, fixedProjectId)}${item.craft ? ` | Craft: ${item.craft}` : ""}`}
             onClick={() => setSelectedProfile(item)}
             actions={
               <div className="flex flex-wrap gap-2">
-                {canAssignToThisStaff(item) ? (
-                  <button type="button" onClick={(event) => { event.stopPropagation(); openAssignTask(item); }} className="acm-btn acm-btn-primary h-9 px-3 text-xs">
-                    Assign Task
-                  </button>
-                ) : null}
                 {canManageThisStaff(item) ? (
                   <>
                     <button type="button" onClick={(event) => { event.stopPropagation(); openEditStaff(item); }} className="acm-btn acm-btn-secondary h-9 px-3 text-xs">
@@ -2355,6 +2499,8 @@ export function StaffManagerPage({
                 { label: "Email", value: selectedProfile.email },
                 { label: "Mobile", value: selectedProfile.mobile },
                 { label: "Role", value: roleName(selectedProfile.role) },
+                { label: "Hourly Rate", value: selectedProfile.hourly_rate || "0" },
+                ...(selectedProfile.role === "subcontractor" ? [{ label: "Craft", value: selectedProfile.craft || "-" }] : []),
                 { label: "Project", value: getProjectAssignmentSummary(selectedProfile, fixedProjectId) },
                 {
                   label: "Assigned Projects",
@@ -2429,6 +2575,7 @@ export function StaffManagerPage({
               <select className={fieldClass()} value={form.role} onChange={(e) => setForm((prev) => ({ ...prev, role: e.target.value }))}>
                 {allowManagerCreation ? <option value="manager">Manager</option> : null}
                 <option value="employee">Employee</option>
+                <option value="subcontractor">Subcontractor</option>
               </select>
             </LabeledField>
             <LabeledField label="Email">
@@ -2440,6 +2587,11 @@ export function StaffManagerPage({
             <LabeledField label="Hourly Rate">
               <input className={fieldClass()} inputMode="decimal" value={form.hourlyRate} onChange={(e) => setForm((prev) => ({ ...prev, hourlyRate: e.target.value }))} />
             </LabeledField>
+            {form.role === "subcontractor" ? (
+              <LabeledField label="Craft">
+                <input className={fieldClass()} value={form.craft} onChange={(e) => setForm((prev) => ({ ...prev, craft: e.target.value }))} />
+              </LabeledField>
+            ) : null}
             <LabeledField label="Assigned Project">
               <select className={fieldClass()} value={selectedProjectId} onChange={(e) => setForm((prev) => ({ ...prev, projectId: e.target.value }))} disabled={Boolean(fixedProjectId)}>
                 <option value="">Select project</option>
@@ -2473,6 +2625,9 @@ export function StaffManagerPage({
               {[...staffData.managers, ...staffData.employees].map((item) => (
                 <option key={item.user_id} value={item.user_id}>{getStaffOptionLabel(item)}</option>
               ))}
+              {(staffData.subcontractors ?? []).map((item) => (
+                <option key={item.user_id} value={item.user_id}>{getStaffOptionLabel(item)}</option>
+              ))}
             </select>
           </LabeledField>
           <LabeledField label="Select Project">
@@ -2487,6 +2642,7 @@ export function StaffManagerPage({
             <select className={fieldClass()} value={assignForm.role} onChange={(e) => setAssignForm((prev) => ({ ...prev, role: e.target.value }))}>
               {allowManagerCreation ? <option value="manager">Manager</option> : null}
               <option value="employee">Employee</option>
+              <option value="subcontractor">Subcontractor</option>
             </select>
           </LabeledField>
           <LabeledField label="Hourly Rate">
@@ -2511,6 +2667,11 @@ export function StaffManagerPage({
             <LabeledField label="Hourly Rate">
               <input className={fieldClass()} inputMode="decimal" value={editingStaff?.hourly_rate || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, hourly_rate: e.target.value }))} />
             </LabeledField>
+            {editingStaff?.role === "subcontractor" ? (
+              <LabeledField label="Craft">
+                <input className={fieldClass()} value={editingStaff?.craft || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, craft: e.target.value }))} />
+              </LabeledField>
+            ) : null}
           </FieldGroup>
           <FieldGroup title="Credentials">
             <LabeledField label="User Name">
@@ -2527,50 +2688,6 @@ export function StaffManagerPage({
         </form>
       </Modal>
 
-      <Modal open={taskOpen} title="Assign Task" onClose={() => setTaskOpen(false)}>
-        <form onSubmit={assignTaskFromStaffList} className="grid gap-3">
-          <LabeledField label="Project">
-            <select className={fieldClass()} value={taskForm.projectId} onChange={(e) => setTaskForm((prev) => ({ ...prev, projectId: e.target.value }))} disabled={Boolean(fixedProjectId)}>
-              <option value="">Select project</option>
-              {availableProjects.map((project) => (
-                <option key={project.id} value={project.id}>{project.name}</option>
-              ))}
-            </select>
-          </LabeledField>
-          <LabeledField label="Assigned To">
-            <input className={fieldClass()} value={taskTarget ? getStaffOptionLabel(taskTarget) : ""} disabled />
-          </LabeledField>
-          <LabeledField label="Task Title">
-            <input className={fieldClass()} value={taskForm.title} onChange={(e) => setTaskForm((prev) => ({ ...prev, title: e.target.value }))} />
-          </LabeledField>
-          <LabeledField label="Description">
-            <textarea className={fieldClass()} value={taskForm.description} onChange={(e) => setTaskForm((prev) => ({ ...prev, description: e.target.value }))} />
-          </LabeledField>
-          <LabeledField label="Start Date">
-            <input className={fieldClass()} type="date" value={taskForm.startDate} onChange={(e) => setTaskForm((prev) => ({ ...prev, startDate: e.target.value }))} />
-          </LabeledField>
-          <LabeledField label="End Date">
-            <input className={fieldClass()} type="date" value={taskForm.endDate} onChange={(e) => setTaskForm((prev) => ({ ...prev, endDate: e.target.value }))} />
-          </LabeledField>
-          <LabeledField label="Approval Role">
-            <select className={fieldClass()} value={taskForm.approvalRole} onChange={(e) => setTaskForm((prev) => ({ ...prev, approvalRole: e.target.value }))}>
-              <option value="manager">Manager Approval</option>
-              <option value="employee">Employee Approval</option>
-            </select>
-          </LabeledField>
-          <LabeledField label="Approving Person">
-            <select className={fieldClass()} value={taskForm.approverUserId} onChange={(e) => setTaskForm((prev) => ({ ...prev, approverUserId: e.target.value }))}>
-              <option value="">Select approving person</option>
-              {availableTaskApprovers.map((item) => (
-                <option key={item.user_id} value={item.user_id}>
-                  {getTaskAssigneeLabel(item, taskForm.projectId || fixedProjectId || "")}
-                </option>
-              ))}
-            </select>
-          </LabeledField>
-          <BusyButton type="submit" busy={taskBusy} className="acm-btn acm-btn-primary">Assign Task</BusyButton>
-        </form>
-      </Modal>
     </>
   );
 }
@@ -2735,29 +2852,31 @@ export function SettingsPage() {
   useEffect(() => {
     if (!isOwner || !settings.data?.company) return;
 
-    setCompanyForm((current) => {
-      if (current) return current;
-      const next = {
-        name: settings.data.company.name || "",
-        code: settings.data.company.code || "",
-        address: settings.data.company.address || "",
-        contact: settings.data.company.contact || "",
-        email: settings.data.company.email || "",
-        logoDataUrl: settings.data.company.logoDataUrl || "",
-        logoPath: settings.data.company.logoPath || "",
-        signatureDataUrl: settings.data.company.signatureDataUrl || "",
-        signaturePath: settings.data.company.signaturePath || "",
-        signatureName: settings.data.company.signatureName || settings.data?.profile?.name || "",
-        stampDataUrl: settings.data.company.stampDataUrl || "",
-        stampPath: settings.data.company.stampPath || "",
-        stampLabel: settings.data.company.stampLabel || settings.data.company.name || "",
-      };
+    queueMicrotask(() => {
+      setCompanyForm((current) => {
+        if (current) return current;
+        const next = {
+          name: settings.data.company.name || "",
+          code: settings.data.company.code || "",
+          address: settings.data.company.address || "",
+          contact: settings.data.company.contact || "",
+          email: settings.data.company.email || "",
+          logoDataUrl: settings.data.company.logoDataUrl || "",
+          logoPath: settings.data.company.logoPath || "",
+          signatureDataUrl: settings.data.company.signatureDataUrl || "",
+          signaturePath: settings.data.company.signaturePath || "",
+          signatureName: settings.data.company.signatureName || settings.data?.profile?.name || "",
+          stampDataUrl: settings.data.company.stampDataUrl || "",
+          stampPath: settings.data.company.stampPath || "",
+          stampLabel: settings.data.company.stampLabel || settings.data.company.name || "",
+        };
 
-      return {
-        ...next,
-        signatureDataUrl: next.signatureDataUrl || buildSignatureDataUrl(next.signatureName || settings.data?.profile?.name || ""),
-        stampDataUrl: next.stampDataUrl || buildStampDataUrl(next.stampLabel || next.name),
-      };
+        return {
+          ...next,
+          signatureDataUrl: next.signatureDataUrl || buildSignatureDataUrl(next.signatureName || settings.data?.profile?.name || ""),
+          stampDataUrl: next.stampDataUrl || buildStampDataUrl(next.stampLabel || next.name),
+        };
+      });
     });
   }, [isOwner, settings.data?.company, settings.data?.profile?.name]);
 

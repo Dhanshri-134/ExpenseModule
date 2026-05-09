@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { BusyButton, CompactListRow } from "@/components/dashboard/DashboardUi";
 import { useApiQuery, invalidateApiQuery } from "@/lib/client/apiQuery";
@@ -48,11 +48,8 @@ function getInvoiceLabel(status) {
 
 function getInvoiceErrorMessage(error) {
   if (!error) return "";
-  if (error === "invoice_not_completed") return "Complete the invoice before creating a project from it.";
   if (error === "estimate_not_found") return "This estimate could not be found anymore.";
   if (error === "estimate_workflow_update_failed") return "Unable to update the invoice stage right now.";
-  if (error === "project_already_created") return "A project has already been created for this estimate.";
-  if (error === "project_create_failed") return "Invoice was saved, but the project could not be created.";
   return error;
 }
 
@@ -80,8 +77,6 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
   const settingsQuery = useApiQuery("/api/settings");
   const [activeEstimateId, setActiveEstimateId] = useState("");
   const [invoiceReference, setInvoiceReference] = useState("");
-  const [location, setLocation] = useState("");
-  const [projectName, setProjectName] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busyAction, setBusyAction] = useState("");
@@ -99,6 +94,7 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
     () => invoiceCandidates.find((estimate) => estimate.id === activeEstimateId) || invoiceCandidates[0] || null,
     [activeEstimateId, invoiceCandidates]
   );
+  const effectiveInvoiceReference = invoiceReference || activeEstimate?.invoice_reference || "";
 
   const metrics = useMemo(() => {
     const draft = invoiceCandidates.filter((estimate) => estimate.invoice_status === "draft");
@@ -114,18 +110,6 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
       totalValue,
     };
   }, [invoiceCandidates]);
-
-  useEffect(() => {
-    if (!activeEstimate && activeEstimateId) {
-      setActiveEstimateId("");
-      return;
-    }
-    if (!activeEstimate) return;
-    setActiveEstimateId(activeEstimate.id);
-    setInvoiceReference(activeEstimate.invoice_reference || "");
-    setProjectName((current) => current || activeEstimate.title || activeEstimate.client?.name || "Project");
-    setLocation((current) => current || activeEstimate.client?.address || "");
-  }, [activeEstimate, activeEstimateId]);
 
   async function runInvoiceAction(action, body, successMessage) {
     setBusyAction(action);
@@ -157,52 +141,10 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
       {
         estimateId: activeEstimate.id,
         action: "mark_invoice_ready",
-        invoiceReference: invoiceReference.trim() || null,
+        invoiceReference: effectiveInvoiceReference.trim() || null,
       },
       "Invoice moved to draft."
     );
-  }
-
-  async function markCompleted() {
-    if (!activeEstimate) return;
-    await runInvoiceAction(
-      "complete",
-      {
-        estimateId: activeEstimate.id,
-        action: "complete_invoice",
-        invoiceReference: invoiceReference.trim() || null,
-      },
-      "Invoice marked as completed."
-    );
-  }
-
-  async function createProject() {
-    if (!activeEstimate) return;
-    setBusyAction("project");
-    setError("");
-    setMessage("");
-    const res = await fetch("/api/estimate-project", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        estimateId: activeEstimate.id,
-        name: projectName.trim() || activeEstimate.title || "Project",
-        location: location.trim(),
-        startDate: "",
-        endDate: "",
-      }),
-    });
-    const json = await res.json().catch(() => null);
-    setBusyAction("");
-
-    if (!res.ok) {
-      setError(getInvoiceErrorMessage(json?.error || "project_create_failed"));
-      return;
-    }
-
-    invalidateApiQuery("/api/estimates");
-    await estimatesQuery.refresh().catch(() => null);
-    setMessage("Project created from completed invoice.");
   }
 
   const company = settingsQuery.data?.company;
@@ -212,7 +154,7 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
       <section className={cardClass()}>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="text-sm font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Invoicing</div>
+            <div className="text-sm font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Invoices</div>
             <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">Invoice control</h1>
             {/* <div className="mt-3 max-w-3xl text-sm leading-6 text-[color:var(--acm-muted-fg)]">
               Approved estimates now move through invoice draft and completed stages here, instead of landing on a placeholder screen.
@@ -229,8 +171,8 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
       <section className="hidden sm:flex grid gap-4 md:grid-cols-2 xl:grid-cols-5 ">
         <MetricCard label="Approved Estimates" value={metrics.total} helper="Ready to invoice" />
         <MetricCard label="Not Started" value={metrics.ready} helper="Awaiting draft invoice" />
-        <MetricCard label="Draft Invoices" value={metrics.draft} helper="Need final completion" />
-        <MetricCard label="Completed" value={metrics.completed} helper="Can move into projects" />
+        <MetricCard label="Draft Invoices" value={metrics.draft} helper="Saved invoice references" />
+        <MetricCard label="Completed" value={metrics.completed} helper="Previously completed" />
         <MetricCard label="Invoice Value" value={formatCurrency(metrics.totalValue)} helper="Current visible pipeline" />
       </section>
 
@@ -253,8 +195,6 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
                 onClick={() => {
                   setActiveEstimateId(estimate.id);
                   setInvoiceReference(estimate.invoice_reference || "");
-                  setProjectName(estimate.title || estimate.client?.name || "Project");
-                  setLocation(estimate.client?.address || "");
                   setMessage("");
                   setError("");
                 }}
@@ -276,7 +216,7 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-xl font-bold text-[color:var(--acm-fg)]">Invoice Builder</div>
-              <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">Create a draft invoice reference, then complete it when billing is done.</div>
+              <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">Save the invoice reference against an approved estimate.</div>
             </div>
             {activeEstimate ? (
               <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${getInvoiceTone(activeEstimate.invoice_status)}`}>
@@ -320,53 +260,19 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-[color:var(--acm-fg)]">Invoice Reference</label>
-                  <input
-                    className={fieldClass()}
-                    placeholder="QB-INV-1001"
-                    value={invoiceReference}
-                    onChange={(event) => setInvoiceReference(event.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-[color:var(--acm-fg)]">Project Name</label>
-                  <input
-                    className={fieldClass()}
-                    placeholder="Project name after invoicing"
-                    value={projectName}
-                    onChange={(event) => setProjectName(event.target.value)}
-                  />
-                </div>
-              </div>
-
               <div>
-                <label className="mb-2 block text-sm font-semibold text-[color:var(--acm-fg)]">Project Location</label>
-                <textarea
+                <label className="mb-2 block text-sm font-semibold text-[color:var(--acm-fg)]">Invoice Reference</label>
+                <input
                   className={fieldClass()}
-                  rows={3}
-                  placeholder="Project site or billing location"
-                  value={location}
-                  onChange={(event) => setLocation(event.target.value)}
+                  placeholder="QB-INV-1001"
+                  value={effectiveInvoiceReference}
+                  onChange={(event) => setInvoiceReference(event.target.value)}
                 />
               </div>
 
               <div className="flex flex-wrap gap-3">
                 <BusyButton type="button" busy={busyAction === "draft"} onClick={markDraft} className="acm-btn acm-btn-primary h-10 px-4">
-                  Create Draft Invoice
-                </BusyButton>
-                <BusyButton type="button" busy={busyAction === "complete"} onClick={markCompleted} className="acm-btn acm-btn-secondary h-10 px-4">
-                  Mark Invoice Completed
-                </BusyButton>
-                <BusyButton
-                  type="button"
-                  busy={busyAction === "project"}
-                  disabled={activeEstimate.invoice_status !== "completed"}
-                  onClick={createProject}
-                  className="acm-btn acm-btn-secondary h-10 px-4"
-                >
-                  Create Project
+                  Create Invoice
                 </BusyButton>
               </div>
             </div>

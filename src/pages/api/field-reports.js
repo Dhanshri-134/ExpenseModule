@@ -10,7 +10,7 @@ const optionalUuid = z.preprocess(
 );
 
 const QuerySchema = z.object({
-  projectId: z.string().uuid(),
+  projectId: optionalUuid,
 });
 
 const TextEntrySchema = z.union([z.string(), z.object({ text: z.string().optional() })]);
@@ -48,7 +48,7 @@ const FieldReportPayloadSchema = z.object({
   location: z.string().optional().nullable(),
   weatherConditions: z.string().optional().nullable(),
   temperatureRange: z.string().optional().nullable(),
-  temperatureValue: z.union([z.coerce.number(), z.literal(""), z.null()]).optional(),
+  temperatureValue: z.union([z.coerce.number(), z.string(), z.literal(""), z.null()]).optional(),
   temperatureUnit: z.enum(["F", "C"]).optional().default("F"),
   weatherImpact: z.string().optional().nullable(),
   publicCommunications: z.array(PublicCommunicationSchema).default([]),
@@ -73,6 +73,12 @@ function canEditFieldReport(ctx, report) {
   return report.created_by_user_id === ctx.user.id;
 }
 
+function parseTemperatureValue(value) {
+  if (value === "" || value == null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 async function enrichReports(admin, companyId, rows) {
   const userIds = [...new Set((rows ?? []).map((item) => item.created_by_user_id).filter(Boolean))];
   const directory = await loadUserDirectory(admin, companyId, userIds);
@@ -90,18 +96,35 @@ export default async function handler(req, res) {
   if (req.method === "GET") {
     const parsed = QuerySchema.safeParse(req.query);
     if (!parsed.success) return sendError(res, 400, "invalid_project_id");
-    if (!canAccessProject(ctx, parsed.data.projectId)) return sendError(res, 403, "forbidden");
 
-    const { data, error } = await ctx.admin
+    let query = ctx.admin
       .from("field_reports")
       .select("*")
       .eq("company_id", ctx.company.id)
-      .eq("project_id", parsed.data.projectId)
       .order("report_date", { ascending: false })
       .order("created_at", { ascending: false });
 
+    if (parsed.data.projectId) {
+      if (!canAccessProject(ctx, parsed.data.projectId)) return sendError(res, 403, "forbidden");
+      query = query.eq("project_id", parsed.data.projectId);
+    } else if (ctx.role !== "owner") {
+      if (!ctx.projectIds.length) return sendOk(res, { reports: [] });
+      query = query.in("project_id", ctx.projectIds);
+    }
+
+    const { data, error } = await query;
     if (error) return sendError(res, 500, "field_reports_fetch_failed", error.message);
-    const reports = await enrichReports(ctx.admin, ctx.company.id, data ?? []);
+
+    const projectIds = [...new Set((data ?? []).map((item) => item.project_id).filter(Boolean))];
+    const { data: projects } = projectIds.length
+      ? await ctx.admin.from("projects").select("id, name, job_number").in("id", projectIds)
+      : { data: [] };
+    const projectMap = new Map((projects ?? []).map((project) => [project.id, project]));
+
+    const reports = (await enrichReports(ctx.admin, ctx.company.id, data ?? [])).map((report) => ({
+      ...report,
+      project: projectMap.get(report.project_id) ?? null,
+    }));
     return sendOk(res, { reports });
   }
 
@@ -111,7 +134,7 @@ export default async function handler(req, res) {
     if (!canManageFieldReports(ctx, parsed.data.projectId)) return sendError(res, 403, "forbidden");
 
     const payload = normalizeFieldReportPayload(parsed.data);
-    const hasTemperatureValue = payload.temperatureValue !== "";
+    const numericTemperatureValue = parseTemperatureValue(payload.temperatureValue);
     const { data, error } = await ctx.admin
       .from("field_reports")
       .insert({
@@ -122,8 +145,8 @@ export default async function handler(req, res) {
         location: payload.location || null,
         weather_conditions: payload.weatherConditions || null,
         temperature_range: payload.temperatureRange || null,
-        temperature_value: hasTemperatureValue ? Number(payload.temperatureValue) : null,
-        temperature_unit: hasTemperatureValue ? payload.temperatureUnit : null,
+        temperature_value: numericTemperatureValue,
+        temperature_unit: numericTemperatureValue != null ? payload.temperatureUnit : null,
         weather_impact: payload.weatherImpact || null,
         public_communications: payload.publicCommunications,
         contractor_labor_force: payload.contractorLaborForce,
@@ -163,7 +186,7 @@ export default async function handler(req, res) {
     if (!canEditFieldReport(ctx, existing)) return sendError(res, 403, "forbidden");
 
     const payload = normalizeFieldReportPayload(parsed.data);
-    const hasTemperatureValue = payload.temperatureValue !== "";
+    const numericTemperatureValue = parseTemperatureValue(payload.temperatureValue);
     const { data, error } = await ctx.admin
       .from("field_reports")
       .update({
@@ -172,8 +195,8 @@ export default async function handler(req, res) {
         location: payload.location || null,
         weather_conditions: payload.weatherConditions || null,
         temperature_range: payload.temperatureRange || null,
-        temperature_value: hasTemperatureValue ? Number(payload.temperatureValue) : null,
-        temperature_unit: hasTemperatureValue ? payload.temperatureUnit : null,
+        temperature_value: numericTemperatureValue,
+        temperature_unit: numericTemperatureValue != null ? payload.temperatureUnit : null,
         weather_impact: payload.weatherImpact || null,
         public_communications: payload.publicCommunications,
         contractor_labor_force: payload.contractorLaborForce,

@@ -49,7 +49,7 @@ async function loadProjectAssignments(ctx, projectId) {
 }
 
 function getAllowedAssigneeRole(ctx) {
-  return ctx.role === "owner" ? ["manager", "employee"] : ["employee"];
+  return ctx.role === "owner" ? ["manager", "employee", "subcontractor"] : ["employee", "subcontractor"];
 }
 
 async function validateAssignees(ctx, projectId, assigneeUserIds) {

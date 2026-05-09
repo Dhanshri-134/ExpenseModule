@@ -9,10 +9,11 @@ import { insertActivityLog } from "@/lib/server/taskWorkflow";
 const CreateStaffSchema = z.object({
   name: z.string().min(1),
   userName: z.string().min(1).optional().nullable(),
-  role: z.enum(["manager", "employee"]),
+  role: z.enum(["manager", "employee", "subcontractor"]),
   email: z.string().email(),
   mobile: z.string().optional().nullable(),
   hourlyRate: z.coerce.number().nonnegative().default(0),
+  craft: z.string().optional().nullable(),
   projectId: z.string().uuid().optional().nullable(),
   password: z.string().min(8).optional().nullable(),
 });
@@ -24,6 +25,7 @@ const UpdateStaffSchema = z.object({
   email: z.string().email(),
   mobile: z.string().optional().nullable(),
   hourlyRate: z.coerce.number().nonnegative().default(0),
+  craft: z.string().optional().nullable(),
   password: z.string().min(8).optional().or(z.literal("")),
 });
 
@@ -66,7 +68,7 @@ export default async function handler(req, res) {
   if (req.method === "GET") {
     const { data: companyUsers, error } = await ctx.admin
       .from("company_users")
-      .select("company_id, user_id, role, user_code, user_name, mobile_no, hourly_rate, created_in_project_id, person_id, created_at")
+      .select("company_id, user_id, role, user_code, user_name, mobile_no, hourly_rate, craft, created_in_project_id, person_id, created_at")
       .eq("company_id", ctx.company.id)
       .neq("role", "owner")
       .order("role", { ascending: true })
@@ -165,6 +167,7 @@ export default async function handler(req, res) {
         user_name: item.user_name || authUser?.user_metadata?.user_name || item.user_code,
         email: credential?.email || person?.email || authUser?.email || "",
         mobile: item.mobile_no || person?.contact || "",
+        craft: item.craft || "",
         address: person?.address || "",
         password: ctx.role === "employee" ? "" : credential?.password || "",
         password_sent_at: credential?.password_sent_at || null,
@@ -214,6 +217,7 @@ export default async function handler(req, res) {
         role: payload.role,
         mobile_no: payload.mobile ?? "",
         hourly_rate: payload.hourlyRate,
+        craft: payload.craft ?? "",
         created_by_user_id: ctx.user.id,
         created_in_project_id: payload.projectId ?? null,
         user_name: payload.userName?.trim() || null,
@@ -224,7 +228,7 @@ export default async function handler(req, res) {
     if (membershipError || !membership) return sendError(res, 500, "staff_membership_create_failed", membershipError?.message);
 
     if (payload.projectId) {
-      const assignmentRole = payload.role === "manager" ? "manager" : "employee";
+      const assignmentRole = payload.role === "manager" ? "manager" : payload.role === "subcontractor" ? "subcontractor" : "employee";
       const { error: assignmentError } = await ctx.admin
         .from("project_users")
         .insert({
@@ -312,6 +316,7 @@ export default async function handler(req, res) {
       .update({
         mobile_no: payload.mobile ?? "",
         hourly_rate: payload.hourlyRate,
+        craft: payload.craft ?? "",
         user_name: payload.userName.trim(),
       })
       .eq("company_id", ctx.company.id)
@@ -335,6 +340,7 @@ export default async function handler(req, res) {
         user_name: payload.userName.trim(),
         hourly_rate: payload.hourlyRate,
         mobile: payload.mobile ?? "",
+        craft: payload.craft ?? "",
       },
     });
 

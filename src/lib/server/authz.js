@@ -90,13 +90,13 @@ export function canAccessProject(ctx, projectId) {
 }
 
 export function canAssignTask(ctx, targetRole, projectId) {
-  if (ctx.role === "owner") return targetRole === "manager" || targetRole === "employee";
-  if (ctx.role === "manager") return targetRole === "employee" && canAccessProject(ctx, projectId);
+  if (ctx.role === "owner") return targetRole === "manager" || targetRole === "employee" || targetRole === "subcontractor";
+  if (ctx.role === "manager") return (targetRole === "employee" || targetRole === "subcontractor") && canAccessProject(ctx, projectId);
   return false;
 }
 
 export function canCreateStaff(ctx, nextRole, projectId = null) {
-  if (ctx.role === "owner") return nextRole === "manager" || nextRole === "employee";
+  if (ctx.role === "owner") return nextRole === "manager" || nextRole === "employee" || nextRole === "subcontractor";
   if (ctx.role === "manager") {
     return nextRole === "employee" && Boolean(projectId) && canAccessProject(ctx, projectId);
   }

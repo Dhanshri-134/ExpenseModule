@@ -6,7 +6,7 @@ import { formatRoleLabel, insertActivityLog, loadUserDirectory } from "@/lib/ser
 const AssignmentSchema = z.object({
   projectId: z.string().uuid(),
   userId: z.string().uuid(),
-  role: z.enum(["manager", "employee"]),
+  role: z.enum(["manager", "employee", "subcontractor"]),
   hourlyRate: z.coerce.number().nonnegative().default(0),
 });
 
@@ -21,7 +21,7 @@ export default async function handler(req, res) {
 
   const payload = parsed.data;
   if (!canAccessProject(ctx, payload.projectId)) return sendError(res, 403, "forbidden");
-  if (ctx.role === "manager" && payload.role !== "employee") {
+  if (ctx.role === "manager" && payload.role !== "employee" && payload.role !== "subcontractor") {
     return sendError(res, 403, "manager_can_only_assign_employee");
   }
 
@@ -34,7 +34,7 @@ export default async function handler(req, res) {
 
   if (!targetMembership) return sendError(res, 404, "staff_not_found");
   if (targetMembership.role === "owner") return sendError(res, 400, "owner_cannot_be_project_assigned");
-  if (ctx.role === "manager" && targetMembership.role !== "employee") {
+  if (ctx.role === "manager" && targetMembership.role !== "employee" && targetMembership.role !== "subcontractor") {
     return sendError(res, 403, "manager_can_only_assign_employee");
   }
 

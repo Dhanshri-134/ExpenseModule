@@ -4,7 +4,7 @@ import { requireOwner } from "@/lib/pages/requireOwner";
 
 export default function OwnerInvoicingPage({ companyName, viewer }) {
   return (
-    <OwnerShell companyName={companyName} viewer={viewer} title="Invoicing">
+    <OwnerShell companyName={companyName} viewer={viewer} title="Invoices">
       <InvoicingWorkspace roleBase="owner" />
     </OwnerShell>
   );

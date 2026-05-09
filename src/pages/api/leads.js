@@ -5,9 +5,9 @@ import { sendError, sendOk } from "@/lib/server/responses";
 
 const LeadSchema = z.object({
   name: z.string().trim().min(1),
-  address: z.string().trim().min(1),
-  contact: z.string().trim().min(1),
-  email: z.string().trim().email(),
+  address: z.string().trim().optional().nullable().default(""),
+  contact: z.string().trim().optional().nullable().default(""),
+  email: z.union([z.string().trim().email(), z.literal(""), z.null(), z.undefined()]).default(""),
   followUpDate: z.string().optional().nullable(),
   followUpNote: z.string().trim().optional().nullable(),
   followUpStatus: z.enum(["pending", "done"]).optional().nullable(),
@@ -84,9 +84,9 @@ export default async function handler(req, res) {
       .insert({
         company_id: ctx.company.id,
         name: payload.name,
-        address: payload.address,
-        contact: payload.contact,
-        email: payload.email,
+        address: payload.address || null,
+        contact: payload.contact || null,
+        email: payload.email || null,
       })
       .select("*")
       .single();
@@ -126,9 +126,9 @@ export default async function handler(req, res) {
       .from("leads")
       .update({
         name: payload.name,
-        address: payload.address,
-        contact: payload.contact,
-        email: payload.email,
+        address: payload.address || null,
+        contact: payload.contact || null,
+        email: payload.email || null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)

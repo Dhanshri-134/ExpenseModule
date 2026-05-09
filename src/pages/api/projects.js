@@ -4,20 +4,37 @@ import { sendError, sendOk } from "@/lib/server/responses";
 
 const CreateProjectSchema = z.object({
   name: z.string().min(1),
-  location: z.string().min(1),
-  clientName: z.string().min(1),
+  location: z.string().optional().nullable(),
+  clientId: z.string().uuid().optional().nullable(),
+  clientName: z.string().optional().nullable(),
   clientContact: z.string().optional().nullable(),
   clientEmail: z.union([z.string().email(), z.literal("")]).optional().nullable(),
   clientAddress: z.string().optional().nullable(),
-  startDate: z.string().min(1),
+  startDate: z.string().optional().nullable(),
   endDate: z.string().optional().nullable(),
   contractValue: z.coerce.number().nonnegative().default(0),
 });
 
 async function upsertClient(ctx, payload) {
+  if (payload.clientId) {
+    const { data: existingClient, error } = await ctx.admin
+      .from("clients")
+      .select("id")
+      .eq("company_id", ctx.company.id)
+      .eq("id", payload.clientId)
+      .maybeSingle();
+
+    if (error || !existingClient) throw new Error(error?.message || "client_not_found");
+    return existingClient.id;
+  }
+
+  if (!String(payload.clientName || "").trim()) {
+    throw new Error("client_required");
+  }
+
   const clientRecord = {
     company_id: ctx.company.id,
-    name: payload.clientName,
+    name: payload.clientName.trim(),
     contact: payload.clientContact || null,
     email: payload.clientEmail || null,
     address: payload.clientAddress || null,
@@ -27,7 +44,7 @@ async function upsertClient(ctx, payload) {
     .from("clients")
     .select("id")
     .eq("company_id", ctx.company.id)
-    .ilike("name", payload.clientName)
+    .ilike("name", payload.clientName.trim())
     .maybeSingle();
 
   if (existingClient?.id) {
@@ -102,7 +119,7 @@ export default async function handler(req, res) {
           client_id: clientId,
           name: payload.name,
           location: payload.location,
-          start_date: payload.startDate,
+          start_date: payload.startDate || null,
           end_date: payload.endDate || null,
           contract_value: payload.contractValue,
         })

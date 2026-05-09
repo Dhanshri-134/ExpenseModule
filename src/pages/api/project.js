@@ -11,28 +11,45 @@ const UpdateProjectSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1),
   location: z.string().optional().nullable(),
-  clientName: z.string().min(1),
+  clientId: z.string().uuid().optional().nullable(),
+  clientName: z.string().optional().nullable(),
   clientContact: z.string().optional().nullable(),
   clientEmail: z.union([z.string().email(), z.literal("")]).optional().nullable(),
   clientAddress: z.string().optional().nullable(),
-  startDate: z.string().min(1),
+  startDate: z.string().optional().nullable(),
   endDate: z.string().optional().nullable(),
   contractValue: z.coerce.number().nonnegative().default(0),
 });
 
 async function resolveClientId(ctx, payload) {
+  if (payload.clientId) {
+    const { data: existingClient } = await ctx.admin
+      .from("clients")
+      .select("id")
+      .eq("company_id", ctx.company.id)
+      .eq("id", payload.clientId)
+      .maybeSingle();
+
+    if (existingClient?.id) return existingClient.id;
+    throw new Error("client_not_found");
+  }
+
+  if (!String(payload.clientName || "").trim()) {
+    throw new Error("client_required");
+  }
+
   const { data: existingClient } = await ctx.admin
     .from("clients")
     .select("id")
     .eq("company_id", ctx.company.id)
-    .ilike("name", payload.clientName)
+    .ilike("name", payload.clientName.trim())
     .maybeSingle();
 
   if (existingClient?.id) {
     const { data: client, error } = await ctx.admin
       .from("clients")
       .update({
-        name: payload.clientName,
+        name: payload.clientName.trim(),
         contact: payload.clientContact || null,
         email: payload.clientEmail || null,
         address: payload.clientAddress || null,
@@ -52,7 +69,7 @@ async function resolveClientId(ctx, payload) {
     .from("clients")
     .insert({
       company_id: ctx.company.id,
-      name: payload.clientName,
+        name: payload.clientName.trim(),
       contact: payload.clientContact || null,
       email: payload.clientEmail || null,
       address: payload.clientAddress || null,
@@ -148,7 +165,7 @@ export default async function handler(req, res) {
           client_id: clientId,
           name: payload.name,
           location: payload.location ?? null,
-          start_date: payload.startDate,
+          start_date: payload.startDate || null,
           end_date: payload.endDate || null,
           contract_value: payload.contractValue,
         })

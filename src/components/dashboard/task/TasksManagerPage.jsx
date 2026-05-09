@@ -69,7 +69,7 @@ function getTaskAssigneeLabel(item, projectId = "") {
 }
 
 function getApprovalRoleLabel(role) {
-  return role === "manager" ? "Manager Approval" : role === "employee" ? "Employee Approval" : "-";
+  return role === "manager" ? "Manager Approval" : role === "employee" ? "Employee Approval" : role === "subcontractor" ? "Subcontractor" : "-";
 }
 
 function buildTaskDetails(task) {
@@ -320,13 +320,15 @@ export function TasksManagerPage({
   const [submitBusy, setSubmitBusy] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
 
-  const staffData = useMemo(() => staff.data?.staff ?? { managers: [], employees: [] }, [staff.data]);
+  const staffData = useMemo(() => staff.data?.staff ?? { managers: [], employees: [], subcontractors: [] }, [staff.data]);
   const projectList = projects.data?.projects ?? [];
   const availableProjects = fixedProjectId ? projectList.filter((project) => project.id === fixedProjectId) : projectList;
   const activeProjectId = form.projectId || fixedProjectId || getProjectDefaultId(availableProjects);
 
   const availableAssignees = useMemo(() => {
-    const source = canAssignManagers ? [...staffData.managers, ...staffData.employees] : [...staffData.employees];
+    const source = canAssignManagers
+      ? [...staffData.managers, ...staffData.employees, ...(staffData.subcontractors ?? [])]
+      : [...staffData.employees, ...(staffData.subcontractors ?? [])];
     const byUserId = new Map();
 
     source.forEach((item) => {
