@@ -6,6 +6,8 @@ const WorkflowSchema = z.object({
   estimateId: z.string().uuid(),
   action: z.enum(["approve", "mark_invoice_ready", "complete_invoice"]),
   invoiceReference: z.string().optional().nullable(),
+  scopeOfWork: z.string().optional().nullable(),
+  totalCode: z.string().optional().nullable(),
 });
 
 export default async function handler(req, res) {
@@ -26,6 +28,15 @@ export default async function handler(req, res) {
   if (estimateError || !estimate) return sendError(res, 404, "estimate_not_found");
 
   const patch = { updated_at: new Date().toISOString() };
+  const existingSummary = estimate.summary && typeof estimate.summary === "object" ? estimate.summary : {};
+  const existingDocumentMeta =
+    existingSummary.documentMeta && typeof existingSummary.documentMeta === "object"
+      ? existingSummary.documentMeta
+      : {};
+  const existingInvoiceMeta =
+    existingDocumentMeta.invoice && typeof existingDocumentMeta.invoice === "object"
+      ? existingDocumentMeta.invoice
+      : {};
 
   if (parsed.data.action === "approve") {
     patch.approval_status = "approved";
@@ -37,12 +48,36 @@ export default async function handler(req, res) {
   if (parsed.data.action === "mark_invoice_ready") {
     patch.invoice_status = "draft";
     patch.invoice_reference = parsed.data.invoiceReference || estimate.invoice_reference || null;
+    patch.summary = {
+      ...existingSummary,
+      documentMeta: {
+        ...existingDocumentMeta,
+        invoice: {
+          ...existingInvoiceMeta,
+          invoiceReference: parsed.data.invoiceReference || estimate.invoice_reference || null,
+          scopeOfWork: parsed.data.scopeOfWork ?? existingInvoiceMeta.scopeOfWork ?? "",
+          totalCode: parsed.data.totalCode ?? existingInvoiceMeta.totalCode ?? "",
+        },
+      },
+    };
   }
 
   if (parsed.data.action === "complete_invoice") {
     patch.invoice_status = "completed";
     patch.invoice_reference = parsed.data.invoiceReference || estimate.invoice_reference || null;
     patch.invoice_completed_at = new Date().toISOString();
+    patch.summary = {
+      ...existingSummary,
+      documentMeta: {
+        ...existingDocumentMeta,
+        invoice: {
+          ...existingInvoiceMeta,
+          invoiceReference: parsed.data.invoiceReference || estimate.invoice_reference || null,
+          scopeOfWork: parsed.data.scopeOfWork ?? existingInvoiceMeta.scopeOfWork ?? "",
+          totalCode: parsed.data.totalCode ?? existingInvoiceMeta.totalCode ?? "",
+        },
+      },
+    };
   }
 
   const { data, error } = await ctx.admin

@@ -1226,14 +1226,13 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const clientsQuery = useApiQuery("/api/clients");
   const settingsQuery = useApiQuery("/api/settings");
   const templatesQuery = useApiQuery("/api/estimate-templates");
-  const estimatesQuery = useApiQuery("/api/estimates");
+  const estimateListQuery = useApiQuery(standalone ? null : "/api/estimates?compact=1");
+  const estimateDetailQuery = useApiQuery(initialEstimateId ? `/api/estimates?id=${initialEstimateId}` : null);
   const costCodesQuery = useApiQuery("/api/cost-codes");
 
   const [editorOpen, setEditorOpen] = useState(Boolean(initialEstimateId || standalone));
-  const [busy, setBusy] = useState(false);
+  const [activeAction, setActiveAction] = useState("");
   const [templateBusy, setTemplateBusy] = useState(false);
-  const [previewBusy, setPreviewBusy] = useState(false);
-  const [sendBusy, setSendBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [form, setForm] = useState(() => emptyEstimateForm());
@@ -1266,11 +1265,18 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     () => (templatesQuery.data?.templates ?? []).map((template) => ({ ...template, configuration: normalizeTemplateConfiguration(template.configuration) })),
     [templatesQuery.data?.templates]
   );
-  const estimates = useMemo(() => estimatesQuery.data?.estimates ?? [], [estimatesQuery.data?.estimates]);
+  const estimateList = useMemo(() => estimateListQuery.data?.estimates ?? [], [estimateListQuery.data?.estimates]);
+  const detailedEstimate = useMemo(() => estimateDetailQuery.data?.estimates?.[0] || null, [estimateDetailQuery.data?.estimates]);
   const costCodeSuggestions = useMemo(
     () => (costCodesQuery.data?.costCodes ?? []).map((item) => ({ label: item.code, description: item.description || item.name || "" })),
     [costCodesQuery.data?.costCodes]
   );
+  const refreshEstimateQueries = useCallback(async () => {
+    await Promise.all([
+      standalone ? Promise.resolve(null) : estimateListQuery.refresh().catch(() => null),
+      initialEstimateId ? estimateDetailQuery.refresh().catch(() => null) : Promise.resolve(null),
+    ]);
+  }, [estimateDetailQuery, estimateListQuery, initialEstimateId, standalone]);
 
   const defaultTemplate = useMemo(() => templates.find((item) => item.is_default) || templates[0] || null, [templates]);
   const companyDetails = useMemo(() => {
@@ -1358,7 +1364,9 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     const equipment = new Map();
     const overhead = new Map();
 
-    estimates.forEach((estimate) => {
+    const suggestionSource = standalone ? [detailedEstimate].filter(Boolean) : [];
+
+    suggestionSource.forEach((estimate) => {
       (estimate.cost_codes ?? []).forEach((line) => {
         (line.laborEntries ?? []).forEach((entry) => {
           const label = entry.metadata?.title || entry.description;
@@ -1412,22 +1420,20 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       equipment: [...equipment.values()],
       overhead: [...overhead.values()],
     };
-  }, [estimates]);
+  }, [detailedEstimate, standalone]);
 
   useEffect(() => {
-    if (!initialEstimateId || initialDetailHydratedRef.current || !estimates.length) return;
-    const estimate = estimates.find((item) => item.id === initialEstimateId);
-    if (!estimate) return;
+    if (!initialEstimateId || initialDetailHydratedRef.current || !detailedEstimate) return;
     initialDetailHydratedRef.current = true;
     queueMicrotask(() => {
-      setForm(mapEstimateToForm(estimate, templates));
-      setActiveEstimateId(estimate.id);
-      setSelectedCostLineId(initialCostLineId || estimate.cost_codes?.[0]?.id || "");
+      setForm(mapEstimateToForm(detailedEstimate, templates));
+      setActiveEstimateId(detailedEstimate.id);
+      setSelectedCostLineId(initialCostLineId || detailedEstimate.cost_codes?.[0]?.id || "");
       setPdfReviewed(false);
       setDirty(false);
-      setStatusDraft(estimate.status || "draft");
+      setStatusDraft(detailedEstimate.status || "draft");
     });
-  }, [estimates, initialCostLineId, initialEstimateId, templates]);
+  }, [detailedEstimate, initialCostLineId, initialEstimateId, templates]);
 
   function setDirtyState() {
     setDirty(true);
@@ -1681,10 +1687,14 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     }
 
     if (nextStatus === "approved") {
+      setActiveAction("status");
       let createdEstimate = null;
       if (!form.id) {
-        createdEstimate = await persistEstimate();
-        if (!createdEstimate) return;
+        createdEstimate = await persistEstimate({ busyKey: "status" });
+        if (!createdEstimate) {
+          setActiveAction("");
+          return;
+        }
       }
       const estimateId = createdEstimate?.id || form.id || activeEstimateId;
       const res = await fetch("/api/estimate-workflow", {
@@ -1694,17 +1704,21 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       });
       const json = await res.json().catch(() => null);
       if (!res.ok) {
+        setActiveAction("");
         setError(formatApiError(json, "Unable to update estimate status."));
         return;
       }
-      await estimatesQuery.refresh();
+      invalidateApiQuery("/api/estimates?compact=1");
+      invalidateApiQuery("/api/estimates");
+      await refreshEstimateQueries();
       setForm((current) => ({ ...current, status: "approved", approvalStatus: "approved" }));
       setMessage("Estimate approved.");
       setStatusDialogOpen(false);
+      setActiveAction("");
       return;
     }
 
-    const saved = await persistEstimate({ status: nextStatus });
+    const saved = await persistEstimate({ status: nextStatus, busyKey: "status" });
     if (saved) setStatusDialogOpen(false);
   }
 
@@ -1717,10 +1731,10 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       return false;
     }
 
-    const saved = await persistEstimate({ silent: true });
+    const saved = await persistEstimate({ silent: true, busyKey: "send" });
     if (!saved) return false;
 
-    setSendBusy(true);
+    setActiveAction("send");
     setError("");
     setMessage("");
     const res = await fetch("/api/estimates/send", {
@@ -1729,15 +1743,16 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       body: JSON.stringify({ estimateId: saved.id || form.id || activeEstimateId, confirmSend: true }),
     });
     const json = await res.json().catch(() => null);
-    setSendBusy(false);
+    setActiveAction("");
 
     if (!res.ok) {
       setError(formatApiError(json, "Unable to send estimate."));
       return false;
     }
 
+    invalidateApiQuery("/api/estimates?compact=1");
     invalidateApiQuery("/api/estimates");
-    await estimatesQuery.refresh();
+    await refreshEstimateQueries();
     setForm((current) => ({ ...current, status: "sent" }));
     setMessage("Estimate sent from the configured SMTP account.");
     return true;
@@ -1783,7 +1798,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   }
 
   function openProjectDialog(estimate) {
-    const source = estimate || estimates.find((item) => item.id === form.id) || null;
+    const source = estimate || estimateList.find((item) => item.id === form.id) || detailedEstimate || null;
     const sourceClient = source?.client || clients.find((client) => client.id === (source?.client_id || form.clientId)) || null;
     setProjectEstimateId(source?.id || form.id || "");
     setProjectForm({
@@ -1832,27 +1847,27 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     }
 
     invalidateApiQuery("/api/projects");
+    invalidateApiQuery("/api/estimates?compact=1");
     invalidateApiQuery("/api/estimates");
-    await estimatesQuery.refresh().catch(() => null);
+    await refreshEstimateQueries();
     setProjectDialogOpen(false);
     setMessage("Project created from estimate.");
   }
 
   async function openPdf(mode = "download") {
-    setPreviewBusy(true);
-    const saved = await persistEstimate({ silent: true });
+    setActiveAction("preview");
+    const saved = await persistEstimate({ silent: true, busyKey: "preview" });
     if (!saved) {
-      setPreviewBusy(false);
       return;
     }
     const estimateId = saved.id || form.id || activeEstimateId;
     if (!estimateId) {
-      setPreviewBusy(false);
+      setActiveAction("");
       return;
     }
     const url = `/api/estimates?id=${estimateId}&export=pdf&disposition=inline`;
     window.open(url, "_blank", "noopener,noreferrer");
-    setPreviewBusy(false);
+    setActiveAction("");
     setPdfReviewed(true);
     setMessage("PDF preview opened.");
   }
@@ -1938,7 +1953,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     return "";
   }, [companyDetails.address, companyDetails.email, companyDetails.name, companyDetails.phone, form]);
 
-  const persistEstimate = useCallback(async ({ status, silent = false } = {}) => {
+  const persistEstimate = useCallback(async ({ status, silent = false, busyKey = "save" } = {}) => {
     const validationError = validateEstimate();
     if (validationError) {
       setError(validationError);
@@ -1948,7 +1963,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     const nextApprovalStatus =
       status === "rejected" ? "rejected" : status === "draft" ? "draft" : payload.approvalStatus;
     const nextPayload = status ? { ...payload, status, approvalStatus: nextApprovalStatus } : payload;
-    setBusy(true);
+    setActiveAction(busyKey);
     setError("");
     if (!silent) setMessage("");
 
@@ -1959,7 +1974,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     });
     const responseText = await res.text().catch(() => "");
     const json = parseApiResponseText(responseText);
-    setBusy(false);
+    setActiveAction("");
 
     if (!res.ok) {
       setError(formatApiError(json, `Unable to save estimate.${responseText ? ` ${String(responseText).slice(0, 220)}` : ""}`));
@@ -1971,12 +1986,14 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       setForm(mapEstimateToForm(saved, templates));
       setActiveEstimateId(saved.id);
       setDirty(false);
+      invalidateApiQuery("/api/estimates?compact=1");
       invalidateApiQuery("/api/estimates");
+      if (!standalone) estimateListQuery.refresh().catch(() => null);
       if (!silent) setMessage(status === "sent" ? "Estimate marked as sent." : "Estimate saved.");
       return saved;
     }
     return false;
-  }, [payload, form.id, templates, validateEstimate]);
+  }, [payload, templates, validateEstimate, estimateListQuery, standalone]);
 
   const laborColumns = [
     { key: "code", label: "Category",  placeholder: "Category", width: "w-40" },
@@ -1994,12 +2011,12 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
 
   const subcontractorColumns = [
     { key: "code", label: "Category", placeholder: "Category", width: "w-40" },
+    { key: "description", label: "Description", placeholder: "Description", width: "w-72", type: "textarea" },
     { key: "cost", label: "Cost", placeholder: "0" },
     { key: "workersCompPercent", label: "WC %", placeholder: "0" },
     { key: "liabilityPercent", label: "GL %", placeholder: "0" },
     { key: "overheadPercent", label: "Overhead %", placeholder: "0" },
     { key: "profitPercent", label: "Profit %", placeholder: "0" },
-    { key: "description", label: "Description", placeholder: "Description", width: "w-72", type: "textarea" },
   ];
 
   const materialColumns = [
@@ -2038,7 +2055,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
               {standalone ? "Review and edit this estimate on its own page." : "Open an estimate from the list or start a new one."}
             </div>
           </div> */}
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 justify-end w-full">
             {standalone ? (
               <button type="button" onClick={() => router.push(`/${roleBase}/estimates`)} className="acm-btn acm-btn-secondary h-10 px-4">Back</button>
             ) : null}
@@ -2051,11 +2068,11 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
 
       {!standalone ? (
         <section className="space-y-5">
-          {(clientsQuery.loading || templatesQuery.loading || estimatesQuery.loading || settingsQuery.loading) ? (
+          {(clientsQuery.loading || templatesQuery.loading || estimateListQuery.loading || settingsQuery.loading) ? (
             <div className="text-sm text-[color:var(--acm-muted-fg)]">Loading estimate workspace...</div>
           ) : null}
           <div className="grid gap-3 lg:grid-cols-3">
-            {estimates.map((estimate) => (
+            {estimateList.map((estimate) => (
               <CompactListRow
                 key={estimate.id}
                 primary={estimate.title || `Estimate #${estimate.estimate_number}`}
@@ -2101,10 +2118,10 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
 
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap gap-2">
-                  <BusyButton type="button" busy={previewBusy || busy} onClick={() => openPdf("preview")} className="acm-btn acm-btn-primary h-10 px-4">Preview PDF</BusyButton>
+                  <BusyButton type="button" busy={activeAction === "preview"} onClick={() => openPdf("preview")} className="acm-btn acm-btn-primary h-10 px-4">Preview PDF</BusyButton>
                   <BusyButton
                     type="button"
-                    busy={busy || sendBusy}
+                    busy={activeAction === "status" || activeAction === "send"}
                     onClick={() => {
                       setStatusDraft(form.status || "draft");
                       setStatusDialogOpen(true);
@@ -2113,7 +2130,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                   >
                     Change Status
                   </BusyButton>
-                  <BusyButton type="button" busy={busy} onClick={() => persistEstimate()} className="acm-btn acm-btn-secondary h-10 px-4">Save Details</BusyButton>
+                  <BusyButton type="button" busy={activeAction === "save"} onClick={() => persistEstimate()} className="acm-btn acm-btn-secondary h-10 px-4">Save Details</BusyButton>
                   {form.id ? (
                     <button type="button" onClick={() => openProjectDialog()} className="acm-btn acm-btn-secondary h-10 px-4">
                       Open Project
@@ -2268,7 +2285,22 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
               <input className={sheetInputClass()} value={projectForm.name} onChange={(event) => setProjectForm((current) => ({ ...current, name: event.target.value }))} />
             </LabeledInput>
             <LabeledInput label="Client Source">
-              <select className={sheetInputClass()} value={projectForm.clientMode} onChange={(event) => setProjectForm((current) => ({ ...current, clientMode: event.target.value }))}>
+              <select
+                className={sheetInputClass()}
+                value={projectForm.clientMode}
+                onChange={(event) => {
+                  const nextMode = event.target.value;
+                  setProjectForm((current) => ({
+                    ...current,
+                    clientMode: nextMode,
+                    clientId: nextMode === "existing" ? current.clientId : "",
+                    clientName: "",
+                    clientContact: "",
+                    clientEmail: "",
+                    clientAddress: "",
+                  }));
+                }}
+              >
                 <option value="existing">Use Existing Client</option>
                 <option value="new">Create New Client</option>
               </select>
@@ -2346,7 +2378,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
 
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setStatusDialogOpen(false)} className="acm-btn acm-btn-secondary h-10 px-4">Cancel</button>
-            <BusyButton type="button" busy={busy || sendBusy} onClick={handleStatusAction} className="acm-btn acm-btn-primary h-10 px-4">Apply</BusyButton>
+            <BusyButton type="button" busy={activeAction === "status" || activeAction === "send"} onClick={handleStatusAction} className="acm-btn acm-btn-primary h-10 px-4">Apply</BusyButton>
           </div>
         </div>
       </Modal>

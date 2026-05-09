@@ -982,7 +982,17 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
                   className={fieldClass()}
                   value={form.clientMode}
                   disabled={Boolean(filteredClient && !editingProject)}
-                  onChange={(e) => setForm((prev) => ({ ...prev, clientMode: e.target.value }))}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      clientMode: e.target.value,
+                      clientId: e.target.value === "existing" ? prev.clientId : "",
+                      clientName: "",
+                      clientContact: "",
+                      clientEmail: "",
+                      clientAddress: "",
+                    }))
+                  }
                 >
                   <option value="existing">Use Existing Client</option>
                   <option value="new">Create New Client</option>

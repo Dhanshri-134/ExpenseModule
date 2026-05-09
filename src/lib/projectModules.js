@@ -188,25 +188,34 @@ function escapePdfText(value) {
 }
 
 function wrapPdfLine(value, maxLength = 92) {
-  const text = String(value ?? "").trim();
+  const text = String(value ?? "").replace(/\r\n/g, "\n").trim();
   if (!text) return [""];
 
-  const words = text.split(/\s+/);
+  const segments = text.split("\n");
   const lines = [];
-  let current = "";
 
-  words.forEach((word) => {
-    const next = current ? `${current} ${word}` : word;
-    if (next.length > maxLength && current) {
-      lines.push(current);
-      current = word;
-    } else {
-      current = next;
+  segments.forEach((segment) => {
+    const words = segment.trim().split(/\s+/).filter(Boolean);
+    if (!words.length) {
+      lines.push("");
+      return;
     }
+
+    let current = "";
+    words.forEach((word) => {
+      const next = current ? `${current} ${word}` : word;
+      if (next.length > maxLength && current) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = next;
+      }
+    });
+
+    if (current) lines.push(current);
   });
 
-  if (current) lines.push(current);
-  return lines;
+  return lines.length ? lines : [""];
 }
 
 function formatPdfCurrency(value) {
@@ -279,20 +288,21 @@ function flattenEstimateRows(estimate) {
     const totalPrice = normalizeNumber(costCode.totalPrice);
     rows.push({
       code: groupCode || `CL-${index + 1}`,
+      category: groupCode || `CL-${index + 1}`,
       costCode: costCode.description || groupLabel,
-      manHours,
-      overheadCosts,
       laborCost,
       materialCost,
       equipmentCost,
+      overheadCosts,
       totalCost,
+      totalPrice,
+      manHours,
       overheadPercent,
       profitPercent,
       overhead,
       profit,
       commissionPercent,
       commission,
-      totalPrice,
     });
   });
 
@@ -328,9 +338,9 @@ function buildCostLineDetailSections(estimate) {
       groups: [
         {
           title: "Labor",
-          columns: ["Category", "Scope Of Work", "Classification", "ST Persons", "ST Days", "OT Persons", "OT Days", "Target Wage", "Overhead", "Profit", "Target Pay"],
-          widths: [42, 74, 58, 34, 30, 34, 30, 46, 38, 34, 44],
-          fontSize: 5.8,
+          columns: ["Category", "Scope Of Work", "Classification", "ST Persons", "ST Days", "OT Persons", "OT Days", "Target Wage", "Target Pay", "Total"],
+          widths: [42, 96, 56, 28, 28, 28, 28, 42, 44, 42],
+          fontSize: 5.5,
           rows: (costCode.laborEntries ?? []).map((entry) => [
             entry.metadata?.code || code || "-",
             entry.metadata?.description || entry.description || "-",
@@ -340,16 +350,15 @@ function buildCostLineDetailSections(estimate) {
             entry.metadata?.overtimePersons ?? "-",
             entry.metadata?.overtimeDays ?? "-",
             entry.metadata?.targetWage ? formatPdfCurrency(entry.metadata.targetWage) : "-",
-            percent(entry.metadata?.overheadPercent),
-            percent(entry.metadata?.profitPercent),
-            formatPdfCurrency(entry.metadata?.targetPay || entry.metadata?.finalTotal || entry.totalCost || 0),
+            formatPdfCurrency(entry.metadata?.targetPay || 0),
+            formatPdfCurrency(entry.metadata?.finalTotal || entry.totalCost || 0),
           ]),
         },
         {
           title: "Material",
-          columns: ["Category", "Item", "Quantity", "UOM", "Waste %", "Unit Rate", "Freight", "Tax %", "Overhead", "Profit", "Total"],
-          widths: [44, 86, 38, 30, 36, 46, 42, 34, 38, 34, 44],
-          fontSize: 5.8,
+          columns: ["Category", "Scope Of Work", "Quantity", "UOM", "Waste %", "Unit Rate", "Freight", "Tax %", "Total"],
+          widths: [40, 122, 34, 28, 34, 42, 38, 34, 42],
+          fontSize: 5.5,
           rows: (costCode.materialEntries ?? []).map((entry) => [
             entry.metadata?.code || "-",
             entry.description || label,
@@ -359,16 +368,14 @@ function buildCostLineDetailSections(estimate) {
             formatPdfCurrency(entry.unitRate || 0),
             formatPdfCurrency(entry.freight || 0),
             percent(entry.taxPercent),
-            percent(entry.metadata?.overheadPercent),
-            percent(entry.metadata?.profitPercent),
             formatPdfCurrency(entry.metadata?.finalTotal || entry.totalCost || 0),
           ]),
         },
         {
           title: "Equipment",
-          columns: ["Category", "Item", "Quantity", "Rental Days", "Unit Rate", "Freight", "Fuel %", "Tax %", "Overhead", "Profit", "Total"],
-          widths: [44, 88, 38, 42, 46, 42, 34, 34, 38, 34, 44],
-          fontSize: 5.8,
+          columns: ["Category", "Scope Of Work", "Quantity", "Rental Days", "Unit Rate", "Freight", "Fuel %", "Tax %", "Total"],
+          widths: [40, 116, 34, 42, 42, 38, 34, 34, 42],
+          fontSize: 5.5,
           rows: (costCode.equipmentEntries ?? []).map((entry) => [
             entry.metadata?.code || "-",
             entry.description || label,
@@ -378,14 +385,13 @@ function buildCostLineDetailSections(estimate) {
             formatPdfCurrency(entry.freight || 0),
             percent(entry.metadata?.fuelPercent),
             percent(entry.taxPercent),
-            percent(entry.metadata?.overheadPercent),
-            percent(entry.metadata?.profitPercent),
             formatPdfCurrency(entry.metadata?.finalTotal || entry.totalCost || 0),
           ]),
         },
         {
           title: "Overhead",
           columns: ["Code", "Description", "Qty", "Rate", "Total"],
+          widths: [58, 210, 78, 68, 68],
           rows: (costCode.overheadEntries ?? []).map((entry) => [
             entry.metadata?.code || "-",
             entry.description || label,
@@ -437,7 +443,7 @@ function estimateDocumentMeta(estimate) {
     : {};
 }
 
-function buildPdfDocument(estimate) {
+function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
   const meta = estimateDocumentMeta(estimate);
   const branding = {
     ...(estimate?.template?.configuration?.branding || {}),
@@ -454,6 +460,7 @@ function buildPdfDocument(estimate) {
   const customer = meta.customer || {};
   const company = meta.company || {};
   const totals = meta.totals || {};
+  const invoice = meta.invoice || {};
   const rows = flattenEstimateRows(estimate);
   const detailSections = buildCostLineDetailSections(estimate);
   const summary = estimate?.summary || {};
@@ -467,6 +474,21 @@ function buildPdfDocument(estimate) {
   let commands = [];
   let y = page.height - page.margin;
   let pageIndex = 0;
+  const documentHeading = documentType === "invoice" ? "Invoice" : (estimate?.title || "Estimate");
+  const documentNumberLabel = documentType === "invoice" ? "Invoice No" : "Estimate No";
+  const documentNumberValue =
+    documentType === "invoice"
+      ? invoice.invoiceReference || estimate?.invoice_reference || `INV-${estimate?.estimate_number || "Draft"}`
+      : `#${estimate?.estimate_number || "Draft"}`;
+
+  const financialRows = [
+    ["Labor Total", summary.laborCost ?? 0],
+    ["Material Total", summary.materialCost ?? 0],
+    ["Equipment Total", summary.equipmentCost ?? 0],
+    ["Direct Overhead", summary.directOverheadCost ?? 0],
+    ...(normalizeNumber(summary.futureCost) ? [["Future Cost", summary.futureCost]] : []),
+    ["Final Total", totals.grandTotal ?? summary.finalBid ?? summary.totalPrice ?? 0],
+  ];
 
   function startPage(mode = "summary") {
     commands = [];
@@ -476,12 +498,12 @@ function buildPdfDocument(estimate) {
     drawRect(commands, 0, page.height - 112, page.width, 112, accent, null);
     drawRect(commands, page.margin, page.height - 94, 48, 48, [255, 255, 255], null);
     drawText(commands, company.logoText || "ACM", page.margin + 10, page.height - 77, 16);
-    drawText(commands, company.name || branding.companyName || "Your Company", page.margin + 62, page.height - 62, 18, white);
-    drawText(commands, company.address || "Company address", page.margin + 62, page.height - 79, 10, white);
-    drawText(commands, [company.contactPhone, company.contactEmail].filter(Boolean).join(" | ") || "Phone | Email", page.margin + 62, page.height - 94, 10, white);
-    drawText(commands, estimate?.title || "Estimate", page.width - 180, page.height - 62, 18, white);
-    drawText(commands, `#${estimate?.estimate_number || "Draft"}`, page.width - 180, page.height - 80, 11, white);
-    drawText(commands, formatPdfDate(estimate?.estimate_date), page.width - 180, page.height - 95, 10, white);
+    drawWrappedText(commands, company.name || branding.companyName || "Your Company", page.margin + 62, page.height - 62, 230, 16, 14, white);
+    drawWrappedText(commands, company.address || "Company address", page.margin + 62, page.height - 82, 230, 8.5, 10, white);
+    drawWrappedText(commands, [company.contactPhone, company.contactEmail].filter(Boolean).join("  ") || "Phone  Email", page.margin + 62, page.height - 96, 230, 8.5, 10, white);
+    drawWrappedText(commands, documentHeading, page.width - 176, page.height - 62, 134, 16, 14, white);
+    drawWrappedText(commands, documentNumberValue, page.width - 176, page.height - 82, 134, 10, 10, white);
+    drawText(commands, formatPdfDate(estimate?.estimate_date), page.width - 176, page.height - 96, 9, white);
 
     y = page.height - headerHeight - 40;
     if (mode === "summary") {
@@ -489,29 +511,24 @@ function buildPdfDocument(estimate) {
       drawRect(commands, page.width - page.margin - 216, y - 104, 216, 104, [255, 255, 255], line);
       drawText(commands, "Customer Details", page.margin + 14, y - 20, 11);
       drawText(commands, customer.name || estimate?.client?.name || "Client name", page.margin + 14, y - 36, 12);
-      // drawRect(commands, page.margin + 14, y - 96, 112, 18, accentSoft, line, 0.7);
-      // drawRect(commands, page.margin + 136, y - 96, 116, 18, accentSoft, line, 0.7);
-      drawText(commands, customer.email || estimate?.client?.email || "-", page.margin + 14, y - 50, 8);
-      drawText(commands, customer.phone || estimate?.client?.contact || "-", page.margin + 140, y - 50, 8);
-      drawWrappedText(commands, customer.address || estimate?.client?.address || "-", page.margin + 14, y - 60, 238, 9, 12);
+      drawWrappedText(commands, customer.email || estimate?.client?.email || "-", page.margin + 14, y - 50, 112, 8, 10);
+      drawWrappedText(commands, customer.phone || estimate?.client?.contact || "-", page.margin + 140, y - 50, 112, 8, 10);
+      drawWrappedText(commands, customer.address || estimate?.client?.address || "-", page.margin + 14, y - 66, 238, 9, 12);
 
-      drawText(commands, "Estimate Details", page.width - page.margin - 202, y - 20, 11);
-      drawText(commands, `Title: ${estimate?.title || "Estimate"}`, page.width - page.margin - 202, y - 36, 10);
-      drawText(commands, `Estimate No: #${estimate?.estimate_number || "Draft"}`, page.width - page.margin - 202, y - 50, 10);
-      drawText(commands, `Date: ${formatPdfDate(estimate?.estimate_date)}`, page.width - page.margin - 202, y - 64, 10);
-      drawText(commands, `Valid Until: ${formatPdfDate(validUntil)}`, page.width - page.margin - 202, y - 78, 10);
+      drawText(commands, documentType === "invoice" ? "Invoice Details" : "Estimate Details", page.width - page.margin - 202, y - 20, 11);
+      drawWrappedText(commands, `${documentNumberLabel}: ${documentNumberValue}`, page.width - page.margin - 202, y - 36, 10, 12);
+      drawText(commands, `Date: ${formatPdfDate(estimate?.estimate_date)}`, page.width - page.margin - 202, y - 54, 10);
+      drawText(commands, `Valid Until: ${formatPdfDate(validUntil)}`, page.width - page.margin - 202, y - 68, 10);
+      if (documentType === "invoice") {
+        drawText(commands, `Status: ${String(estimate?.invoice_status || "draft").replaceAll("_", " ")}`, page.width - page.margin - 202, y - 82, 10);
+      }
 
       y -= 128;
       drawRect(commands, page.margin, y - 18, page.width - page.margin * 2, 18, accent, null);
-      [["Cost Codes", page.margin + 8], ["Man Hours", page.margin + 100], ["OH Costs", page.margin + 164], ["Labor", page.margin + 224], ["Material", page.margin + 282], ["Equipment", page.margin + 344], ["Total Cost", page.margin + 414]].forEach(([label, x]) => {
-        drawText(commands, label, x, y - 12, 7, white);
+      [["Category", page.margin + 8], ["Scope Of Work", page.margin + 78], ["Labor", page.margin + 250], ["Material", page.margin + 308], ["Equipment", page.margin + 370], ["Overhead", page.margin + 432], ["Total", page.margin + 494]].forEach(([label, x]) => {
+        drawText(commands, label, x, y - 12, 6.5, white);
       });
       y -= 22;
-      drawRect(commands, page.margin, y - 18, page.width - page.margin * 2, 18, accent, null);
-      [["OH %", page.margin + 8], ["Profit %", page.margin + 62], ["OH", page.margin + 126], ["Profit", page.margin + 184], ["Comm %", page.margin + 244], ["Commission", page.margin + 304], ["Total Price", page.margin + 388]].forEach(([label, x]) => {
-        drawText(commands, label, x, y - 12, 7, white);
-      });
-      y -= 24;
     } else {
       drawRect(commands, page.margin, y - 34, page.width - page.margin * 2, 34, accentSoft, line);
       drawText(commands, "Each Cost Line Details", page.margin + 14, y - 22, 13);
@@ -528,35 +545,24 @@ function buildPdfDocument(estimate) {
   startPage("summary");
 
   rows.forEach((row) => {
-    const codeLines = wrapPdfLine(row.costCode || row.code || "-", 16);
-    const rowHeight = Math.max(34, codeLines.length * 10 + 10);
+    const scopeLines = wrapPdfLine(row.costCode || row.code || "-", 30);
+    const rowHeight = Math.max(34, scopeLines.length * 10 + 10);
     if (y - rowHeight - 18 < 180) {
       closePage();
       startPage();
     }
 
     drawRect(commands, page.margin, y - rowHeight + 4, page.width - page.margin * 2, rowHeight, [255, 255, 255], line, 0.6);
-    drawText(commands, row.code || "-", page.margin + 8, y - 11, 7);
-    codeLines.forEach((lineText, index) => {
-      drawText(commands, lineText, page.margin + 54, y - 11 - index * 9, 7);
+    drawText(commands, row.category || row.code || "-", page.margin + 8, y - 11, 7);
+    scopeLines.forEach((lineText, index) => {
+      drawText(commands, lineText, page.margin + 82, y - 11 - index * 9, 7);
     });
-    drawText(commands, normalizeNumber(row.manHours).toFixed(2), page.margin + 100, y - 11, 7);
-    drawText(commands, formatPdfCurrency(row.overheadCosts || 0), page.margin + 154, y - 11, 7);
-    drawText(commands, formatPdfCurrency(row.laborCost || 0), page.margin + 214, y - 11, 7);
-    drawText(commands, formatPdfCurrency(row.materialCost || 0), page.margin + 272, y - 11, 7);
-    drawText(commands, formatPdfCurrency(row.equipmentCost || 0), page.margin + 334, y - 11, 7);
-    drawText(commands, formatPdfCurrency(row.totalCost || 0), page.margin + 406, y - 11, 7);
+    drawText(commands, formatPdfCurrency(row.laborCost || 0), page.margin + 250, y - 11, 6.5);
+    drawText(commands, formatPdfCurrency(row.materialCost || 0), page.margin + 308, y - 11, 6.5);
+    drawText(commands, formatPdfCurrency(row.equipmentCost || 0), page.margin + 370, y - 11, 6.5);
+    drawText(commands, formatPdfCurrency(row.overheadCosts || 0), page.margin + 432, y - 11, 6.5);
+    drawText(commands, formatPdfCurrency(row.totalPrice || row.totalCost || 0), page.margin + 494, y - 11, 6.5);
     y -= rowHeight;
-
-    drawRect(commands, page.margin, y - 14, page.width - page.margin * 2, 14, [248, 250, 252], line, 0.4);
-    drawText(commands, `${normalizeNumber(row.overheadPercent).toFixed(0)}%`, page.margin + 8, y - 9, 7);
-    drawText(commands, `${normalizeNumber(row.profitPercent).toFixed(0)}%`, page.margin + 62, y - 9, 7);
-    drawText(commands, formatPdfCurrency(row.overhead || 0), page.margin + 110, y - 9, 7);
-    drawText(commands, formatPdfCurrency(row.profit || 0), page.margin + 168, y - 9, 7);
-    drawText(commands, `${normalizeNumber(row.commissionPercent).toFixed(0)}%`, page.margin + 244, y - 9, 7);
-    drawText(commands, formatPdfCurrency(row.commission || 0), page.margin + 292, y - 9, 7);
-    drawText(commands, formatPdfCurrency(row.totalPrice || 0), page.margin + 382, y - 9, 7);
-    y -= 16;
     y -= 6;
   });
 
@@ -566,23 +572,24 @@ function buildPdfDocument(estimate) {
   }
 
   const totalsX = page.width - page.margin - 202;
-  drawRect(commands, totalsX, y - 110, 202, 110, accentSoft, line);
+  drawRect(commands, totalsX, y - 18 - financialRows.length * 16 - 18, 202, 18 + financialRows.length * 16 + 18, accentSoft, line);
   drawText(commands, "Summary", totalsX + 14, y - 18, 12);
-  [
-    ["Subtotal", totals.subtotal ?? summary.baseCost ?? 0],
-    ["Discount", totals.discountAmount ?? 0],
-    ["Tax", totals.taxAmount ?? 0],
-    ["Additional Charges", totals.additionalCharges ?? 0],
-    ["Total", totals.grandTotal ?? summary.finalBid ?? summary.totalPrice ?? 0],
-  ].forEach(([label, value], index) => {
+  financialRows.forEach(([label, value], index) => {
     const rowY = y - 40 - index * 16;
     drawText(commands, label, totalsX + 14, rowY, 10);
-    drawText(commands, formatPdfCurrency(value), totalsX + 124, rowY, index === 4 ? 11 : 10);
+    drawText(commands, formatPdfCurrency(value), totalsX + 114, rowY, index === financialRows.length - 1 ? 11 : 10);
   });
 
-  drawRect(commands, page.margin, y - 110, 270, 110, [255, 255, 255], line);
-  drawText(commands, "Notes", page.margin + 14, y - 18, 11);
-  drawWrappedText(commands, notes || "Thank you for the opportunity to provide this estimate.", page.margin + 14, y - 36, 240, 9, 12);
+  const leftBoxHeight = documentType === "invoice" ? 126 : 110;
+  drawRect(commands, page.margin, y - leftBoxHeight, 270, leftBoxHeight, [255, 255, 255], line);
+  drawText(commands, documentType === "invoice" ? "Invoice Notes" : "Notes", page.margin + 14, y - 18, 11);
+  if (documentType === "invoice") {
+    drawWrappedText(commands, invoice.scopeOfWork || "Scope of work pending.", page.margin + 14, y - 36, 240, 9, 12);
+    drawText(commands, "Total Code", page.margin + 14, y - 84, 10);
+    drawWrappedText(commands, invoice.totalCode || "-", page.margin + 14, y - 100, 240, 9, 12);
+  } else {
+    drawWrappedText(commands, notes || "Thank you for the opportunity to provide this estimate.", page.margin + 14, y - 36, 240, 9, 12);
+  }
 
   y -= 134;
   drawRect(commands, page.margin, y - 82, page.width - page.margin * 2, 82, [255, 255, 255], line);
@@ -612,11 +619,6 @@ function buildPdfDocument(estimate) {
   detailSections.forEach((section) => {
     startPage("detail");
     drawText(commands, `${section.code ? `${section.code} - ` : ""}${section.label}`, page.margin, y, 14);
-    if (section.description) {
-      y -= 18;
-      drawWrappedText(commands, section.description, page.margin, y, page.width - page.margin * 2, 9, 12);
-      y -= 12;
-    }
     y -= 18;
 
     section.groups.forEach((group) => {
@@ -661,8 +663,8 @@ function buildPdfDocument(estimate) {
   return pages;
 }
 
-function estimateToRawPdfBuffer(estimate) {
-  const pages = buildPdfDocument(estimate);
+function estimateToRawPdfBuffer(estimate, options = {}) {
+  const pages = buildPdfDocument(estimate, options);
   const objects = [];
   const pageIds = [];
   const fontId = 3 + pages.length * 2;
@@ -791,8 +793,8 @@ async function embedPdfImage(pdfDoc, value) {
   }
 }
 
-export async function estimateToPdfBuffer(estimate) {
-  const baseBuffer = estimateToRawPdfBuffer(estimate);
+export async function estimateToPdfBuffer(estimate, options = {}) {
+  const baseBuffer = estimateToRawPdfBuffer(estimate, options);
   const meta = estimateDocumentMeta(estimate);
   const company = meta.company || {};
   const pdfDoc = await PDFDocument.load(baseBuffer);

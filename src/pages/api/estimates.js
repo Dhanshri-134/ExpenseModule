@@ -36,7 +36,9 @@ const QuerySchema = z.object({
   clientId: optionalUuid,
   id: optionalUuid,
   export: z.string().optional(),
+  document: z.enum(["estimate", "invoice"]).optional(),
   disposition: z.enum(["attachment", "inline"]).optional(),
+  compact: z.string().optional(),
 });
 
 const LaborRateSchema = z.object({
@@ -407,7 +409,8 @@ export default async function handler(req, res) {
     const parsed = QuerySchema.safeParse(req.query);
     if (!parsed.success) return sendError(res, 400, "invalid_query", parsed.error.flatten());
 
-    const { projectId, clientId, id, export: exportType, disposition } = parsed.data;
+    const { projectId, clientId, id, export: exportType, document = "estimate", disposition, compact } = parsed.data;
+    const useCompactResponse = compact === "1" || compact === "true";
 
     let query = ctx.admin.from("project_estimates").select("*").eq("company_id", ctx.company.id);
     if (id) query = query.eq("id", id);
@@ -462,9 +465,9 @@ export default async function handler(req, res) {
         res.setHeader("Cache-Control", "no-store, max-age=0");
         res.setHeader(
           "Content-Disposition",
-          `${disposition === "inline" ? "inline" : "attachment"}; filename="estimate-${enrichedEstimate.estimate_number}.pdf"`
+          `${disposition === "inline" ? "inline" : "attachment"}; filename="${document === "invoice" ? "invoice" : "estimate"}-${enrichedEstimate.estimate_number}.pdf"`
         );
-        res.status(200).send(await estimateToPdfBuffer(enrichedEstimate));
+        res.status(200).send(await estimateToPdfBuffer(enrichedEstimate, { documentType: document }));
         return;
       }
 
@@ -474,7 +477,7 @@ export default async function handler(req, res) {
       return;
     }
 
-    const estimatesWithGraph = await attachEstimateGraphs(ctx.admin, visible);
+    const estimatesWithGraph = useCompactResponse ? visible : await attachEstimateGraphs(ctx.admin, visible);
     const estimatesWithRelations = await attachEstimateRelations(ctx, estimatesWithGraph);
     const estimates = await enrichEstimates(ctx.admin, ctx.company.id, estimatesWithRelations);
     return sendOk(res, { estimates });

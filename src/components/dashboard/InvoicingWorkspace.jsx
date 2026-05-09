@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/router";
 import { BusyButton, CompactListRow } from "@/components/dashboard/DashboardUi";
 import { useApiQuery, invalidateApiQuery } from "@/lib/client/apiQuery";
 
@@ -53,16 +54,6 @@ function getInvoiceErrorMessage(error) {
   return error;
 }
 
-function MetricCard({ label, value, helper }) {
-  return (
-    <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-4">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">{label}</div>
-      <div className="mt-2 text-2xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">{value}</div>
-      {helper ? <div className="mt-2 text-sm text-[color:var(--acm-muted-fg)]">{helper}</div> : null}
-    </div>
-  );
-}
-
 function InlineMessage({ error, message }) {
   if (!error && !message) return null;
   return (
@@ -74,15 +65,18 @@ function InlineMessage({ error, message }) {
 
 function downloadInvoicePdf(estimateId) {
   if (!estimateId) return;
-  const url = `/api/estimates?id=${estimateId}&export=pdf&disposition=attachment`;
+  const url = `/api/estimates?id=${estimateId}&export=pdf&document=invoice&disposition=attachment`;
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
-export function InvoicingWorkspace({ roleBase = "owner" }) {
-  const estimatesQuery = useApiQuery("/api/estimates");
+export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "", standalone = false }) {
+  const router = useRouter();
+  const estimatesQuery = useApiQuery(standalone && initialEstimateId ? `/api/estimates?id=${initialEstimateId}&compact=1` : "/api/estimates?compact=1");
   const settingsQuery = useApiQuery("/api/settings");
-  const [activeEstimateId, setActiveEstimateId] = useState("");
+  const [activeEstimateId, setActiveEstimateId] = useState(initialEstimateId);
   const [invoiceReference, setInvoiceReference] = useState("");
+  const [invoiceScopeOfWork, setInvoiceScopeOfWork] = useState("");
+  const [invoiceTotalCode, setInvoiceTotalCode] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busyAction, setBusyAction] = useState("");
@@ -101,21 +95,13 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
     [activeEstimateId, invoiceCandidates]
   );
   const effectiveInvoiceReference = invoiceReference || activeEstimate?.invoice_reference || "";
+  const invoiceMeta = activeEstimate?.summary?.documentMeta?.invoice || {};
 
-  const metrics = useMemo(() => {
-    const draft = invoiceCandidates.filter((estimate) => estimate.invoice_status === "draft");
-    const completed = invoiceCandidates.filter((estimate) => estimate.invoice_status === "completed");
-    const ready = invoiceCandidates.filter((estimate) => !estimate.invoice_status || estimate.invoice_status === "not_started");
-    const totalValue = invoiceCandidates.reduce((sum, estimate) => sum + getInvoiceAmount(estimate), 0);
-
-    return {
-      total: invoiceCandidates.length,
-      ready: ready.length,
-      draft: draft.length,
-      completed: completed.length,
-      totalValue,
-    };
-  }, [invoiceCandidates]);
+  useEffect(() => {
+    setInvoiceReference(activeEstimate?.invoice_reference || invoiceMeta.invoiceReference || "");
+    setInvoiceScopeOfWork(invoiceMeta.scopeOfWork || "");
+    setInvoiceTotalCode(invoiceMeta.totalCode || "");
+  }, [activeEstimate?.id, activeEstimate?.invoice_reference, invoiceMeta.invoiceReference, invoiceMeta.scopeOfWork, invoiceMeta.totalCode]);
 
   async function runInvoiceAction(action, body, successMessage) {
     setBusyAction(action);
@@ -134,6 +120,7 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
       return false;
     }
 
+    invalidateApiQuery("/api/estimates?compact=1");
     invalidateApiQuery("/api/estimates");
     await estimatesQuery.refresh().catch(() => null);
     setMessage(successMessage);
@@ -148,6 +135,8 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
         estimateId: activeEstimate.id,
         action: "mark_invoice_ready",
         invoiceReference: effectiveInvoiceReference.trim() || null,
+        scopeOfWork: invoiceScopeOfWork.trim() || null,
+        totalCode: invoiceTotalCode.trim() || null,
       },
       "Invoice moved to draft."
     );
@@ -157,67 +146,64 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
 
   return (
     <div className="space-y-6">
-      <section className={cardClass()}>
+      {/* <section className={cardClass()}>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="text-sm font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Invoices</div>
-            <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">Invoice control</h1>
-            {/* <div className="mt-3 max-w-3xl text-sm leading-6 text-[color:var(--acm-muted-fg)]">
-              Approved estimates now move through invoice draft and completed stages here, instead of landing on a placeholder screen.
-            </div> */}
+            <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">{standalone ? "Invoice Details" : "Invoices"}</h1>
           </div>
-          <Link href={`/${roleBase}/estimates`} className="acm-btn acm-btn-secondary h-10 px-4">
-            Open Estimates
-          </Link>
+          {standalone ? (
+            <Link href={`/${roleBase}/invoicing`} className="acm-btn acm-btn-secondary h-10 px-4">
+              Back
+            </Link>
+          ) : (
+            <Link href={`/${roleBase}/estimates`} className="acm-btn acm-btn-secondary h-10 px-4">
+              Open Estimates
+            </Link>
+          )}
         </div>
-      </section>
+      </section> */}
 
       <InlineMessage error={estimatesQuery.error || settingsQuery.error || error} message={message} />
 
-      <section className="hidden sm:flex grid gap-4 md:grid-cols-2 xl:grid-cols-5 ">
-        <MetricCard label="Approved Estimates" value={metrics.total} helper="Ready to invoice" />
-        <MetricCard label="Not Started" value={metrics.ready} helper="Awaiting draft invoice" />
-        <MetricCard label="Draft Invoices" value={metrics.draft} helper="Saved invoice references" />
-        <MetricCard label="Completed" value={metrics.completed} helper="Previously completed" />
-        <MetricCard label="Invoice Value" value={formatCurrency(metrics.totalValue)} helper="Current visible pipeline" />
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-        <div className={cardClass()}>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-xl font-bold text-[color:var(--acm-fg)]">Invoice Queue</div>
-              <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">Approved estimates waiting for invoice actions.</div>
-            </div>
-          </div>
-
-          <div className="mt-4 space-y-3">
-            {invoiceCandidates.length ? invoiceCandidates.map((estimate) => (
-              <CompactListRow
-                key={estimate.id}
-                primary={estimate.title || `Estimate #${estimate.estimate_number}`}
-                secondary={`${estimate.client?.name || "Client"} | ${formatDate(estimate.estimate_date)}`}
-                tertiary={`${formatCurrency(getInvoiceAmount(estimate))} | Ref ${estimate.invoice_reference || "Pending"}`}
-                onClick={() => {
-                  setActiveEstimateId(estimate.id);
-                  setInvoiceReference(estimate.invoice_reference || "");
-                  setMessage("");
-                  setError("");
-                }}
-                actions={
-                  <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${getInvoiceTone(estimate.invoice_status)}`}>
-                    {getInvoiceLabel(estimate.invoice_status)}
-                  </span>
-                }
-              />
-            )) : (
-              <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-8 text-sm text-[color:var(--acm-muted-fg)]">
-                No approved estimates are ready for invoicing yet.
+      {!standalone ? (
+        <section className="grid gap-6">
+          {/* <div> */}
+            {/* <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-xl font-bold text-[color:var(--acm-fg)]">Invoice Queue</div>
+                <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">Approved estimates waiting for invoice actions.</div>
               </div>
-            )}
-          </div>
-        </div>
+            </div> */}
 
+            <div className="mt-4 space-y-3 grid grid-cols-3 gap-6">
+              {invoiceCandidates.length ? invoiceCandidates.map((estimate) => (
+                <CompactListRow
+                  key={estimate.id}
+                  primary={estimate.title || `Estimate #${estimate.estimate_number}`}
+                  secondary={`${estimate.client?.name || "Client"} | ${formatDate(estimate.estimate_date)}`}
+                  tertiary={`${formatCurrency(getInvoiceAmount(estimate))} | Ref: ${estimate.invoice_reference || "Pending"}`}
+                  onClick={() => {
+                    router.push(`/${roleBase}/invoicing/${estimate.id}`);
+                  }}
+                  actions={
+                    <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${getInvoiceTone(estimate.invoice_status)}`}>
+                      {getInvoiceLabel(estimate.invoice_status)}
+                    </span>
+                  }
+                />
+              )) : (
+                <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-8 text-sm text-[color:var(--acm-muted-fg)]">
+                  No approved estimates are ready for invoicing yet.
+                </div>
+              )}
+            </div>
+          {/* </div> */}
+        </section>
+      ) : null}
+
+      {standalone ? (
+      <section>
         <div className={cardClass()}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -276,6 +262,28 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
                 />
               </div>
 
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-[color:var(--acm-fg)]">Scope of Work</label>
+                <textarea
+                  className={fieldClass()}
+                  rows={4}
+                  placeholder="Enter scope of work"
+                  value={invoiceScopeOfWork}
+                  onChange={(event) => setInvoiceScopeOfWork(event.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-[color:var(--acm-fg)]">Total Code</label>
+                <textarea
+                  className={fieldClass()}
+                  rows={3}
+                  placeholder="Enter total code"
+                  value={invoiceTotalCode}
+                  onChange={(event) => setInvoiceTotalCode(event.target.value)}
+                />
+              </div>
+
               <div className="flex flex-wrap gap-3">
                 <BusyButton type="button" busy={busyAction === "draft"} onClick={markDraft} className="acm-btn acm-btn-primary h-10 px-4">
                   Create Invoice
@@ -292,6 +300,7 @@ export function InvoicingWorkspace({ roleBase = "owner" }) {
           )}
         </div>
       </section>
+      ) : null}
     </div>
   );
 }

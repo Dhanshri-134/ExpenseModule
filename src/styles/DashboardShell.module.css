@@ -218,7 +218,7 @@
   border: 1px solid var(--acm-accent-border);
   border-radius: 999px;
   background: var(--acm-accent-soft);
-  box-shadow: 0 12px 28px rgba(224, 33, 138, 0.12);
+  /* box-shadow: 0 12px 28px rgba(224, 33, 138, 0.12); */
 }
 
 .avatarImage {
