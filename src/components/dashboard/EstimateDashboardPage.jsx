@@ -2306,7 +2306,17 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
               {standalone ? "Review and edit this estimate on its own page." : "Open an estimate from the list or start a new one."}
             </div>
           </div> */}
-          <div className="flex flex-wrap gap-2 justify-end w-full">
+          {!standalone ? (
+            <div className="min-w-[260px] flex-1 md:max-w-md">
+              <input
+                className={sheetInputClass("h-10")}
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search estimates by title, number, client, status, or value"
+              />
+            </div>
+          ) : null}
+          <div className="flex flex-wrap gap-2 justify-end">
             {standalone ? (
               <button type="button" onClick={() => router.push(`/${roleBase}/estimates`)} className="acm-btn acm-btn-secondary h-10 px-4">Back</button>
             ) : null}
@@ -2322,9 +2332,6 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
           {(clientsQuery.loading || templatesQuery.loading || estimateListQuery.loading || settingsQuery.loading) ? (
             <div className="text-sm text-[color:var(--acm-muted-fg)]">Loading estimate workspace...</div>
           ) : null}
-          <div>
-            <input className={sheetInputClass("h-10")} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search estimates by title, number, client, status, or value" />
-          </div>
           <div className="grid gap-3 lg:grid-cols-3">
             {filteredEstimateList.map((estimate) => (
               <CompactListRow
