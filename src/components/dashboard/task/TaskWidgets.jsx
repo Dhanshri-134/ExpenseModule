@@ -105,29 +105,49 @@ export function TaskCard({
   onReviewAssignment,
 }) {
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onOpen}
-      className="w-full rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 text-left shadow-[0_18px_40px_rgba(0,0,0,0.08)] transition hover:border-[color:var(--acm-accent-border)]"
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      className="w-full cursor-pointer rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 text-left shadow-[0_18px_40px_rgba(0,0,0,0.08)] transition hover:border-[color:var(--acm-accent-border)]"
     >
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="text-xl font-bold text-[color:var(--acm-fg)]">{task.title ?? "-"}</div>
+            <div className="text-xl font-bold text-[color:var(--acm-fg)]">
+              {task.title ?? "-"}
+            </div>
+
             <StatusBadge status={task.status} />
           </div>
+
           <div className="mt-2 text-sm text-[color:var(--acm-muted-fg)]">
             Project: {task.project?.name ?? "-"} | {task.dateRangeLabel}
           </div>
-          <div className="mt-3 text-sm text-[color:var(--acm-fg)]">{task.description ?? "-"}</div>
+
+          <div className="mt-3 text-sm text-[color:var(--acm-fg)]">
+            {task.description ?? "-"}
+          </div>
+
           <div className="mt-4 text-sm text-[color:var(--acm-muted-fg)]">
             Assigned Users: {task.assignedUsersLabel}
           </div>
+
           <div className="mt-2 text-sm text-[color:var(--acm-muted-fg)]">
-            Approving Person: {task.approverLabel} | {task.approvalRoleLabel}
+            Approving Person: {task.approverLabel} |{" "}
+            {task.approvalRoleLabel}
           </div>
+
           {task.remarkLabel ? (
-            <div className="mt-2 text-sm text-rose-700">Remark: {task.remarkLabel}</div>
+            <div className="mt-2 text-sm text-rose-700">
+              Remark: {task.remarkLabel}
+            </div>
           ) : null}
         </div>
 
@@ -144,6 +164,7 @@ export function TaskCard({
               Edit
             </button>
           ) : null}
+
           {canDelete ? (
             <BusyButton
               type="button"
@@ -169,14 +190,18 @@ export function TaskCard({
                 }}
                 className="acm-btn acm-btn-primary h-9 px-3 text-xs"
               >
-                {assignment.status === "rejected" ? "Resubmit" : "Submit"}
+                {assignment.status === "rejected"
+                  ? "Resubmit"
+                  : "Submit"}
               </button>
             ) : null
           )}
 
           {task.can_approve
             ? (task.assignments ?? [])
-                .filter((assignment) => assignment.status === "submitted")
+                .filter(
+                  (assignment) => assignment.status === "submitted"
+                )
                 .map((assignment) => (
                   <button
                     key={`review-${assignment.id}`}
@@ -193,7 +218,7 @@ export function TaskCard({
             : null}
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 

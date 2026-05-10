@@ -679,8 +679,8 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
   }
 
   y -= leftBoxHeight + 24;
-  drawRect(commands, page.margin, y - 82, page.width - page.margin * 2, 82, [255, 255, 255], line);
-  drawText(commands, "Terms", page.margin + 14, y - 44, 11);
+  drawRect(commands, page.margin, y - 44, page.width - page.margin * 2, 44, [255, 255, 255], line);
+  drawText(commands, "Terms", page.margin + 14, y - 22, 11);
   drawWrappedText(commands, terms, page.margin + 14, y - 36, page.width - page.margin * 2 - 28, 9, 12);
 
   y -= 102;

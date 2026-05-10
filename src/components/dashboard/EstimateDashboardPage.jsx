@@ -54,6 +54,12 @@ function toPercent(value) {
   return Math.abs(parsed) > 1 ? parsed / 100 : parsed;
 }
 
+function formatDecimalInput(value) {
+  const numeric = toNumber(value);
+  if (!Number.isFinite(numeric)) return "";
+  return String(Number(numeric.toFixed(2)));
+}
+
 function formatCurrency(value) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -98,6 +104,21 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim());
 }
 
+function matchesSearchQuery(query, ...values) {
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  if (!normalizedQuery) return true;
+  return values
+    .flatMap((value) => {
+      if (Array.isArray(value)) return value;
+      if (value && typeof value === "object") return Object.values(value);
+      return [value];
+    })
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .includes(normalizedQuery);
+}
+
 function companyInitials(name) {
   const parts = String(name || "")
     .trim()
@@ -127,6 +148,8 @@ function createLaborEntry() {
     overtimePersons: "",
     overtimeDays: "",
     targetWage: "",
+    targetWageBase: "",
+    targetWageMarkupPercent: "",
     overheadPercent: "",
     profitPercent: "",
   };
@@ -463,6 +486,8 @@ function flattenEstimateCostLines(costCodes = []) {
         overtimePersons: entry.metadata?.overtimePersons ?? "",
         overtimeDays: entry.metadata?.overtimeDays ?? "",
         targetWage: entry.metadata?.targetWage ?? "",
+        targetWageBase: entry.metadata?.targetWageBase ?? entry.metadata?.targetWage ?? "",
+        targetWageMarkupPercent: entry.metadata?.targetWageMarkupPercent ?? "",
         overheadPercent: entry.metadata?.overheadPercent ?? "",
         profitPercent: entry.metadata?.profitPercent ?? "",
       });
@@ -718,6 +743,8 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
             overtimePersons: toNumber(entry.overtimePersons),
             overtimeDays: toNumber(entry.overtimeDays),
             targetWage: toNumber(entry.targetWage),
+            targetWageBase: toNumber(entry.targetWageBase || entry.targetWage),
+            targetWageMarkupPercent: toNumber(entry.targetWageMarkupPercent),
             overheadPercent: toNumber(entry.overheadPercent),
             profitPercent: toNumber(entry.profitPercent),
             overheadAmount: markup.overheadAmount,
@@ -1067,6 +1094,18 @@ function TableCellInput({ value, onChange, onKeyDown, list, placeholder = "", ty
   );
 }
 
+function TargetWageTrigger({ value, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`${sheetInputClass("min-w-[120px] rounded-md border border-[color:var(--acm-border)] px-2 text-left text-[0.7rem] font-semibold")} cursor-pointer`}
+    >
+      {value ? `${formatCurrency(value)}/hr` : "Set target wage"}
+    </button>
+  );
+}
+
 function buildVisibleColumns(columns) {
   const visible = [];
   for (let index = 0; index < columns.length; index += 1) {
@@ -1098,6 +1137,7 @@ function SectionTable({
   onToggle,
   addLabel,
   summaryColumns = [],
+  context = null,
 }) {
   const visibleColumns = buildVisibleColumns(columns);
   const stackedDetailColumn = visibleColumns.find((column) => column.type === "textarea");
@@ -1172,14 +1212,24 @@ function SectionTable({
                                 </div>
                               </div>
                             ) : (
-                              <TableCellInput
-                                value={row[column.key]}
-                                list={column.listId || (column.list ? datalistId : undefined)}
-                                type={column.type || "text"}
-                                placeholder={column.placeholder}
-                                onChange={(event) => onChange(row.id, column.key, event.target.value)}
-                                onKeyDown={onKeyDown}
-                              />
+                              column.renderInput ? (
+                                column.renderInput({
+                                  row,
+                                  column,
+                                  derived,
+                                  context,
+                                  onChange: (nextValue) => onChange(row.id, column.key, nextValue),
+                                })
+                              ) : (
+                                <TableCellInput
+                                  value={row[column.key]}
+                                  list={column.listId || (column.list ? datalistId : undefined)}
+                                  type={column.type || "text"}
+                                  placeholder={column.placeholder}
+                                  onChange={(event) => onChange(row.id, column.key, event.target.value)}
+                                  onKeyDown={onKeyDown}
+                                />
+                              )
                             )}
                           </td>
                         ))}
@@ -1257,6 +1307,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const [templateBusy, setTemplateBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [form, setForm] = useState(() => emptyEstimateForm());
   const [templateForm, setTemplateForm] = useState(emptyTemplateForm);
   const [activeEstimateId, setActiveEstimateId] = useState("");
@@ -1267,6 +1318,13 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const [statusDraft, setStatusDraft] = useState("draft");
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
+  const [targetWageDialog, setTargetWageDialog] = useState({
+    open: false,
+    lineId: "",
+    rowId: "",
+    baseWage: "",
+    markupPercent: "",
+  });
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectEstimateId, setProjectEstimateId] = useState("");
   const [projectForm, setProjectForm] = useState({
@@ -1288,6 +1346,22 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     [templatesQuery.data?.templates]
   );
   const estimateList = useMemo(() => estimateListQuery.data?.estimates ?? [], [estimateListQuery.data?.estimates]);
+  const filteredEstimateList = useMemo(
+    () =>
+      estimateList.filter((estimate) =>
+        matchesSearchQuery(
+          searchQuery,
+          estimate.title,
+          estimate.estimate_number,
+          estimate.client?.name,
+          estimate.client?.email,
+          estimate.status,
+          estimate.summary?.finalBid,
+          estimate.summary?.totalPrice
+        )
+      ),
+    [estimateList, searchQuery]
+  );
   const detailedEstimate = useMemo(() => estimateDetailQuery.data?.estimates?.[0] || null, [estimateDetailQuery.data?.estimates]);
   const costCodeSuggestions = useMemo(
     () => (costCodesQuery.data?.costCodes ?? []).map((item) => ({ label: item.code, description: item.description || item.name || "" })),
@@ -1525,6 +1599,55 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       }),
     }));
     setDirtyState();
+  }
+
+  function openTargetWageDialog(lineId, row) {
+    setTargetWageDialog({
+      open: true,
+      lineId,
+      rowId: row.id,
+      baseWage: row.targetWageBase || row.targetWage || "",
+      markupPercent: row.targetWageMarkupPercent || "",
+    });
+  }
+
+  function closeTargetWageDialog() {
+    setTargetWageDialog({
+      open: false,
+      lineId: "",
+      rowId: "",
+      baseWage: "",
+      markupPercent: "",
+    });
+  }
+
+  function applyTargetWageDialog(event) {
+    event.preventDefault();
+    const baseWage = toNumber(targetWageDialog.baseWage);
+    const markupPercent = toNumber(targetWageDialog.markupPercent);
+    const finalWage = baseWage * (1 + markupPercent / 100);
+
+    setForm((current) => ({
+      ...current,
+      costLines: current.costLines.map((line) => {
+        if (line.id !== targetWageDialog.lineId) return line;
+        return {
+          ...line,
+          laborEntries: (line.laborEntries ?? []).map((row) =>
+            row.id === targetWageDialog.rowId
+              ? {
+                  ...row,
+                  targetWage: formatDecimalInput(finalWage),
+                  targetWageBase: formatDecimalInput(baseWage),
+                  targetWageMarkupPercent: formatDecimalInput(markupPercent),
+                }
+              : row
+          ),
+        };
+      }),
+    }));
+    setDirtyState();
+    closeTargetWageDialog();
   }
 
   function updateRate(lineId, laborId, rateId, key, value) {
@@ -2024,7 +2147,14 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     { key: "straightTimeDays", label: "ST Days",  placeholder: "0", width: "w-20" },
     { key: "overtimePersons", label: "OT Persons",  placeholder: "0", width: "w-20" },
     { key: "overtimeDays", label: "OT Days",  placeholder: "0" },
-    { key: "targetWage", label: "Target Wage",  placeholder: "0" },
+    {
+      key: "targetWage",
+      label: "Labor Rate",
+      placeholder: "0",
+      renderInput: ({ row, context }) => (
+        <TargetWageTrigger value={row.targetWage} onClick={() => openTargetWageDialog(context?.lineId || "", row)} />
+      ),
+    },
     { key: "overheadPercent", label: "Overhead",  placeholder: "0" },
     { key: "profitPercent", label: "Profit",  placeholder: "0" },
   ];
@@ -2088,8 +2218,11 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
           {(clientsQuery.loading || templatesQuery.loading || estimateListQuery.loading || settingsQuery.loading) ? (
             <div className="text-sm text-[color:var(--acm-muted-fg)]">Loading estimate workspace...</div>
           ) : null}
+          <div>
+            <input className={sheetInputClass()} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search estimates by title, number, client, status, or value" />
+          </div>
           <div className="grid gap-3 lg:grid-cols-3">
-            {estimateList.map((estimate) => (
+            {filteredEstimateList.map((estimate) => (
               <CompactListRow
                 key={estimate.id}
                 primary={estimate.title || `Estimate #${estimate.estimate_number}`}
@@ -2112,6 +2245,11 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                 actions={<StatusPill status={estimate.status || "draft"} />}
               />
             ))}
+            {!filteredEstimateList.length ? (
+              <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-8 text-sm text-[color:var(--acm-muted-fg)] lg:col-span-3">
+                No estimates match the current search.
+              </div>
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -2214,6 +2352,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                         sectionKey="laborEntries"
                         rows={line.laborEntries ?? []}
                         columns={laborColumns}
+                        context={{ lineId: line.id }}
                         summaryColumns={[
                           { key: "targetPay", label: "Target Pay", render: (row, derived) => formatCurrency(derived.targetPay) },
                         ]}
@@ -2430,6 +2569,37 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
             <BusyButton type="button" busy={activeAction === "status" || activeAction === "send"} onClick={handleStatusAction} className="acm-btn acm-btn-primary h-10 px-4">Apply</BusyButton>
           </div>
         </div>
+      </Modal>
+
+      <Modal open={targetWageDialog.open} title="Target Wage" onClose={closeTargetWageDialog} maxWidth="max-w-md">
+        <form onSubmit={applyTargetWageDialog} className="grid gap-4">
+          <LabeledInput label="Target Wage">
+            <input
+              className={sheetInputClass()}
+              inputMode="decimal"
+              value={targetWageDialog.baseWage}
+              onChange={(event) => setTargetWageDialog((current) => ({ ...current, baseWage: event.target.value }))}
+              placeholder="30"
+            />
+          </LabeledInput>
+          <LabeledInput label="Markup %">
+            <input
+              className={sheetInputClass()}
+              inputMode="decimal"
+              value={targetWageDialog.markupPercent}
+              onChange={(event) => setTargetWageDialog((current) => ({ ...current, markupPercent: event.target.value }))}
+              placeholder="20"
+            />
+          </LabeledInput>
+          <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
+            Calculated Labor Rate: <span className="font-bold">{formatCurrency(toNumber(targetWageDialog.baseWage) * (1 + toNumber(targetWageDialog.markupPercent) / 100))}/hr</span>
+          </div>
+          <div className="flex justify-end">
+            <button type="submit" className="acm-btn acm-btn-primary h-10 px-5">
+              OK
+            </button>
+          </div>
+        </form>
       </Modal>
     </div>
   );

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Modal from "@/components/dashboard/Modal";
 import { BusyButton } from "@/components/dashboard/DashboardUi";
+import { sendJson } from "@/lib/client/apiClient";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
 import {
   AppDialog,
@@ -37,6 +38,21 @@ function formatDateTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+function matchesSearchQuery(query, ...values) {
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  if (!normalizedQuery) return true;
+  return values
+    .flatMap((value) => {
+      if (Array.isArray(value)) return value;
+      if (value && typeof value === "object") return Object.values(value);
+      return [value];
+    })
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .includes(normalizedQuery);
 }
 
 function getProjectDefaultId(projects) {
@@ -300,6 +316,7 @@ export function TasksManagerPage({
   const [statusFilter, setStatusFilter] = useState("all");
   const [projectFilter, setProjectFilter] = useState(fixedProjectId || "all");
   const [roleFilter, setRoleFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [submitOpen, setSubmitOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -369,6 +386,20 @@ export function TasksManagerPage({
         if (roleBase !== "owner" && roleFilter !== "all" && !(task.assignments ?? []).some((assignment) => assignment.role === roleFilter)) {
           return false;
         }
+        if (
+          !matchesSearchQuery(
+            searchQuery,
+            task.title,
+            task.description,
+            task.project?.name,
+            task.approver?.name,
+            task.approver?.user_code,
+            (task.assignments ?? []).map((assignment) => assignment.assignee?.name || assignment.assignee?.user_code),
+            (task.assignments ?? []).map((assignment) => assignment.status)
+          )
+        ) {
+          return false;
+        }
         return true;
       })
       .sort((left, right) => {
@@ -380,7 +411,7 @@ export function TasksManagerPage({
         return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
       })
       .map(buildDecoratedTask);
-  }, [currentUserId, projectFilter, roleBase, roleFilter, sortBy, statusFilter, tab, tabs]);
+  }, [currentUserId, projectFilter, roleBase, roleFilter, searchQuery, sortBy, statusFilter, tab, tabs]);
 
   function resetForm(nextProjectId = fixedProjectId || "") {
     setForm(normalizeTaskForm(nextProjectId));
@@ -450,22 +481,20 @@ export function TasksManagerPage({
       description: form.description.trim(),
     };
 
-    const res = await fetch("/api/tasks", {
-      method: editingTask ? "PUT" : "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(json?.error || "task_save_failed");
-      setSaveBusy(false);
-      return;
-    }
+    try {
+      await sendJson("/api/tasks", {
+        method: editingTask ? "PUT" : "POST",
+        body: payload,
+      });
 
-    setMessage(editingTask ? "Task updated." : "Task created.");
-    setOpen(false);
-    await refreshTaskData(true);
-    setSaveBusy(false);
+      setMessage(editingTask ? "Task updated." : "Task created.");
+      setOpen(false);
+      await refreshTaskData(true);
+    } catch (requestError) {
+      setError(requestError.message || "task_save_failed");
+    } finally {
+      setSaveBusy(false);
+    }
   }
 
   function requestDelete(task) {
@@ -479,23 +508,21 @@ export function TasksManagerPage({
         setError("");
         setMessage("");
         setDeleteTaskId(task.id);
-        const res = await fetch("/api/tasks", {
-          method: "DELETE",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ id: task.id }),
-        });
-        const json = await res.json().catch(() => null);
-        if (!res.ok) {
-          setError(json?.error || "task_delete_failed");
+        try {
+          await sendJson("/api/tasks", {
+            method: "DELETE",
+            body: { id: task.id },
+          });
+
+          setMessage(`${task.title} deleted.`);
           setDeleteTaskId("");
           setDialogState((current) => ({ ...current, open: false }));
-          return;
+          await refreshTaskData();
+        } catch (requestError) {
+          setError(requestError.message || "task_delete_failed");
+          setDeleteTaskId("");
+          setDialogState((current) => ({ ...current, open: false }));
         }
-
-        setMessage(`${task.title} deleted.`);
-        setDeleteTaskId("");
-        setDialogState((current) => ({ ...current, open: false }));
-        await refreshTaskData();
       },
     });
   }
@@ -531,27 +558,25 @@ export function TasksManagerPage({
     setMessage("");
     setSubmitBusy(true);
 
-    const res = await fetch("/api/task-submissions", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    try {
+      await sendJson("/api/task-submissions", {
+        method: "POST",
+        body: {
         taskAssignmentId: selectedAssignment.id,
         workDescription: submitForm.workDescription.trim(),
         files: submitForm.files,
         blocker: submitForm.blocker.trim() || null,
-      }),
-    });
-    const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(json?.error || "task_submission_failed");
-      setSubmitBusy(false);
-      return;
-    }
+        },
+      });
 
-    setMessage(selectedAssignment.status === "rejected" ? "Task resubmitted." : "Task submitted.");
-    setSubmitOpen(false);
-    await refreshTaskData();
-    setSubmitBusy(false);
+      setMessage(selectedAssignment.status === "rejected" ? "Task resubmitted." : "Task submitted.");
+      setSubmitOpen(false);
+      await refreshTaskData();
+    } catch (requestError) {
+      setError(requestError.message || "task_submission_failed");
+    } finally {
+      setSubmitBusy(false);
+    }
   }
 
   function openReview(task, assignment) {
@@ -577,28 +602,26 @@ export function TasksManagerPage({
     setMessage("");
     setReviewBusy(true);
 
-    const res = await fetch("/api/task-approvals", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    try {
+      await sendJson("/api/task-approvals", {
+        method: "POST",
+        body: {
         taskAssignmentId: selectedAssignment.id,
         action: reviewForm.action,
         comment: reviewForm.comment.trim() || null,
-      }),
-    });
-    const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(json?.error || "task_review_failed");
-      setReviewBusy(false);
-      return;
-    }
+        },
+      });
 
-    setMessage(reviewForm.action === "approved" ? "Task approved." : "Task rejected.");
-    setSelectedTask(null);
-    setSelectedAssignment(null);
-    setReviewOpen(false);
-    await refreshTaskData();
-    setReviewBusy(false);
+      setMessage(reviewForm.action === "approved" ? "Task approved." : "Task rejected.");
+      setSelectedTask(null);
+      setSelectedAssignment(null);
+      setReviewOpen(false);
+      await refreshTaskData();
+    } catch (requestError) {
+      setError(requestError.message || "task_review_failed");
+    } finally {
+      setReviewBusy(false);
+    }
   }
 
   const reviewFiles = normalizeSubmissionFiles(selectedAssignment?.latest_submission);
@@ -629,7 +652,8 @@ export function TasksManagerPage({
             ))}
           </div>
 
-          <div className={`grid gap-3 ${roleBase === "owner" ? "md:grid-cols-3" : "md:grid-cols-2 xl:grid-cols-4"}`}>
+          <div className={`grid gap-3 ${roleBase === "owner" ? "md:grid-cols-4" : "md:grid-cols-3 xl:grid-cols-4"}`}>
+            <input className={fieldClass()} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search tasks, assignees, or projects" />
             <select className={fieldClass()} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
               <option value="latest">Latest Created</option>
               <option value="deadline">Deadline</option>

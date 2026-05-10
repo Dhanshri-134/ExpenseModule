@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { BusyButton, CompactListRow } from "@/components/dashboard/DashboardUi";
+import { sendJson } from "@/lib/client/apiClient";
 import { useApiQuery, invalidateApiQuery } from "@/lib/client/apiQuery";
 
 function cardClass(extra = "") {
@@ -54,6 +55,21 @@ function getInvoiceErrorMessage(error) {
   return error;
 }
 
+function matchesSearchQuery(query, ...values) {
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  if (!normalizedQuery) return true;
+  return values
+    .flatMap((value) => {
+      if (Array.isArray(value)) return value;
+      if (value && typeof value === "object") return Object.values(value);
+      return [value];
+    })
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .includes(normalizedQuery);
+}
+
 function InlineMessage({ error, message }) {
   if (!error && !message) return null;
   return (
@@ -74,12 +90,11 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
   const estimatesQuery = useApiQuery(standalone && initialEstimateId ? `/api/estimates?id=${initialEstimateId}&compact=1` : "/api/estimates?compact=1");
   const settingsQuery = useApiQuery("/api/settings");
   const [activeEstimateId, setActiveEstimateId] = useState(initialEstimateId);
-  const [invoiceReference, setInvoiceReference] = useState("");
-  const [invoiceScopeOfWork, setInvoiceScopeOfWork] = useState("");
-  const [invoiceTotalCode, setInvoiceTotalCode] = useState("");
+  const [invoiceDrafts, setInvoiceDrafts] = useState({});
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busyAction, setBusyAction] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const invoiceCandidates = useMemo(() => {
     const rows = estimatesQuery.data?.estimates || [];
@@ -89,42 +104,54 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
       return approvalStatus === "approved" || status === "approved" || estimate.invoice_status === "draft" || estimate.invoice_status === "completed";
     });
   }, [estimatesQuery.data?.estimates]);
+  const filteredInvoiceCandidates = useMemo(
+    () =>
+      invoiceCandidates.filter((estimate) =>
+        matchesSearchQuery(
+          searchQuery,
+          estimate.title,
+          estimate.estimate_number,
+          estimate.client?.name,
+          estimate.invoice_reference,
+          estimate.invoice_status,
+          estimate.summary?.finalBid,
+          estimate.summary?.totalPrice
+        )
+      ),
+    [invoiceCandidates, searchQuery]
+  );
 
   const activeEstimate = useMemo(
-    () => invoiceCandidates.find((estimate) => estimate.id === activeEstimateId) || invoiceCandidates[0] || null,
-    [activeEstimateId, invoiceCandidates]
+    () => filteredInvoiceCandidates.find((estimate) => estimate.id === activeEstimateId) || filteredInvoiceCandidates[0] || null,
+    [activeEstimateId, filteredInvoiceCandidates]
   );
-  const effectiveInvoiceReference = invoiceReference || activeEstimate?.invoice_reference || "";
   const invoiceMeta = activeEstimate?.summary?.documentMeta?.invoice || {};
-
-  useEffect(() => {
-    setInvoiceReference(activeEstimate?.invoice_reference || invoiceMeta.invoiceReference || "");
-    setInvoiceScopeOfWork(invoiceMeta.scopeOfWork || "");
-    setInvoiceTotalCode(invoiceMeta.totalCode || "");
-  }, [activeEstimate?.id, activeEstimate?.invoice_reference, invoiceMeta.invoiceReference, invoiceMeta.scopeOfWork, invoiceMeta.totalCode]);
+  const activeDraft = activeEstimate?.id ? invoiceDrafts[activeEstimate.id] || {} : {};
+  const effectiveInvoiceReference = activeDraft.invoiceReference ?? activeEstimate?.invoice_reference ?? invoiceMeta.invoiceReference ?? "";
+  const invoiceScopeOfWork = activeDraft.invoiceScopeOfWork ?? invoiceMeta.scopeOfWork ?? "";
+  const invoiceTotalCode = activeDraft.invoiceTotalCode ?? invoiceMeta.totalCode ?? "";
 
   async function runInvoiceAction(action, body, successMessage) {
     setBusyAction(action);
     setError("");
     setMessage("");
-    const res = await fetch("/api/estimate-workflow", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const json = await res.json().catch(() => null);
-    setBusyAction("");
+    try {
+      await sendJson("/api/estimate-workflow", {
+        method: "POST",
+        body,
+      });
 
-    if (!res.ok) {
-      setError(getInvoiceErrorMessage(json?.error || "invoice_action_failed"));
+      invalidateApiQuery("/api/estimates?compact=1");
+      invalidateApiQuery("/api/estimates");
+      await estimatesQuery.refresh().catch(() => null);
+      setMessage(successMessage);
+      return true;
+    } catch (requestError) {
+      setError(getInvoiceErrorMessage(requestError.message || "invoice_action_failed"));
       return false;
+    } finally {
+      setBusyAction("");
     }
-
-    invalidateApiQuery("/api/estimates?compact=1");
-    invalidateApiQuery("/api/estimates");
-    await estimatesQuery.refresh().catch(() => null);
-    setMessage(successMessage);
-    return true;
   }
 
   async function markDraft() {
@@ -176,8 +203,11 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
               </div>
             </div> */}
 
+            <div>
+              <input className={fieldClass()} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search invoices by estimate, client, reference, status, or value" />
+            </div>
             <div className="mt-4 space-y-3 grid grid-cols-3 gap-6">
-              {invoiceCandidates.length ? invoiceCandidates.map((estimate) => (
+              {filteredInvoiceCandidates.length ? filteredInvoiceCandidates.map((estimate) => (
                 <CompactListRow
                   key={estimate.id}
                   primary={estimate.title || `Estimate #${estimate.estimate_number}`}
@@ -194,7 +224,7 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
                 />
               )) : (
                 <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-8 text-sm text-[color:var(--acm-muted-fg)]">
-                  No approved estimates are ready for invoicing yet.
+                  No invoices match the current search.
                 </div>
               )}
             </div>
@@ -258,7 +288,15 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
                   className={fieldClass()}
                   placeholder="QB-INV-1001"
                   value={effectiveInvoiceReference}
-                  onChange={(event) => setInvoiceReference(event.target.value)}
+                  onChange={(event) =>
+                    setInvoiceDrafts((current) => ({
+                      ...current,
+                      [activeEstimate.id]: {
+                        ...(current[activeEstimate.id] || {}),
+                        invoiceReference: event.target.value,
+                      },
+                    }))
+                  }
                 />
               </div>
 
@@ -269,7 +307,15 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
                   rows={6}
                   placeholder="Enter scope of work"
                   value={invoiceScopeOfWork}
-                  onChange={(event) => setInvoiceScopeOfWork(event.target.value)}
+                  onChange={(event) =>
+                    setInvoiceDrafts((current) => ({
+                      ...current,
+                      [activeEstimate.id]: {
+                        ...(current[activeEstimate.id] || {}),
+                        invoiceScopeOfWork: event.target.value,
+                      },
+                    }))
+                  }
                 />
               </div>
 
@@ -280,7 +326,15 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
                   rows={5}
                   placeholder="Enter total code"
                   value={invoiceTotalCode}
-                  onChange={(event) => setInvoiceTotalCode(event.target.value)}
+                  onChange={(event) =>
+                    setInvoiceDrafts((current) => ({
+                      ...current,
+                      [activeEstimate.id]: {
+                        ...(current[activeEstimate.id] || {}),
+                        invoiceTotalCode: event.target.value,
+                      },
+                    }))
+                  }
                 />
               </div>
 

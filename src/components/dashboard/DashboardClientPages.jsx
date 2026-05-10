@@ -9,13 +9,16 @@ import { ProjectEstimatesPage, ProjectFieldReportsPage } from "@/components/dash
 import { TasksManagerPage as TaskModulePage } from "@/components/dashboard/task/TasksManagerPage";
 import PasswordInput from "@/components/shared/PasswordInput";
 import {
+  ExpenseIcon,
   InsightsIcon,
-  ProjectsIcon,
   PulseIcon,
+  ProjectsIcon,
+  ReportIcon,
   TeamIcon,
 } from "@/components/dashboard/icons";
+import { pooledGetJson, sendJson } from "@/lib/client/apiClient";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, Plus, Search, Sparkles, Trash2 } from "lucide-react";
 
 function cardClass(extra = "") {
   return `rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 ${extra}`.trim();
@@ -63,6 +66,47 @@ function formatCompactNumber(value) {
   if (absoluteValue >= 1_000) return format(1_000, "K");
 
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(numericValue);
+}
+
+function buildSearchText(...values) {
+  return values
+    .flatMap((value) => {
+      if (Array.isArray(value)) return value;
+      if (value && typeof value === "object") return Object.values(value);
+      return [value];
+    })
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function matchesSearchQuery(query, ...values) {
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  if (!normalizedQuery) return true;
+  return buildSearchText(...values).includes(normalizedQuery);
+}
+
+function generatePasswordPreview() {
+  const charset = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  let token = "";
+  for (let index = 0; index < 8; index += 1) {
+    token += charset[Math.floor(Math.random() * charset.length)];
+  }
+  return `Shris@${token}9`;
+}
+
+function SearchField({ value, onChange, placeholder = "Search..." }) {
+  return (
+    <label className="relative block min-w-[220px] flex-1">
+      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[color:var(--acm-muted-fg)]" />
+      <input
+        className={`${fieldClass()} pl-10`}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+      />
+    </label>
+  );
 }
 
 function MetricChip({ label, value, icon: Icon, onClick, tone }) {
@@ -369,13 +413,10 @@ function ProfileModal({ open, title, details, onClose, onSendEmail, actions }) {
 }
 
 async function sendCredentialEmail(userId) {
-  const res = await fetch("/api/send-credentials", {
+  const json = await sendJson("/api/send-credentials", {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ userId }),
+    body: { userId },
   });
-  const json = await res.json().catch(() => null);
-  // if (!res.ok) throw new Error(json?.error || "send_credentials_failed");
   if (json?.delivery?.mailto) {
     window.location.href = json.delivery.mailto;
   }
@@ -423,295 +464,239 @@ function UpdatesCard({ logs }) {
   );
 }
 
-export function DashboardOverview({ roleBase, canManageStaff = false }) {
+export function DashboardOverview({ roleBase }) {
   const router = useRouter();
   const dashboard = useApi("/api/dashboard");
-  const projects = useApi("/api/projects");
-  const staff = useApi("/api/staff");
-  const tasks = useApi("/api/tasks");
-  const [drilldown, setDrilldown] = useState({ open: false, title: "", items: [], type: "" });
-  const [selectedProject, setSelectedProject] = useState(null);
-  const [selectedStaff, setSelectedStaff] = useState(null);
-  const [selectedTask, setSelectedTask] = useState(null);
+  const estimates = useApi("/api/estimates?compact=1");
+  const [drilldown, setDrilldown] = useState({ open: false, title: "", items: [] });
+  const [selectedEstimate, setSelectedEstimate] = useState(null);
 
-  const summary = dashboard.data?.summary;
-  const projectList = projects.data?.projects ?? [];
-  const managers = staff.data?.staff?.managers ?? [];
-  const employees = staff.data?.staff?.employees ?? [];
-  const staffList = [
-    ...(canManageStaff ? managers : []),
-    ...employees,
-  ];
-  const taskGroups = tasks.data ?? { tasks: [], assignedTasks: [], approvedByMe: [] };
-  const taskList = taskGroups.tasks ?? [];
-  const taskSummary = summary?.tasks ?? {};
-  const projectStatusGroups = [
-    {
-      label: "Live",
-      value: summary?.projects?.live ?? 0,
-      items: projectList.filter((project) => {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const start = project.start_date ? new Date(project.start_date) : null;
-        const end = project.end_date ? new Date(project.end_date) : null;
-        return (!start || start <= today) && (!end || end >= today);
-      }),
-      tone: "success",
-    },
-    {
-      label: "Complete",
-      value: summary?.projects?.complete ?? 0,
-      items: projectList.filter((project) => {
-        const end = project.end_date ? new Date(project.end_date) : null;
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        return Boolean(end && end < today);
-      }),
-      tone: "default",
-    },
-    {
-      label: "On Hold",
-      value: summary?.projects?.onhold ?? 0,
-      items: projectList.filter((project) => {
-        const start = project.start_date ? new Date(project.start_date) : null;
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        return Boolean(start && start > today);
-      }),
-      tone: "default",
-    },
-  ];
-  const staffGroups = [
-    { label: "Managers", value: summary?.staff?.managers ?? 0, items: managers, tone: "default" },
-    { label: "Employees", value: summary?.staff?.employees ?? 0, items: employees, tone: "default" },
-  ];
-  const taskGroupsForOverview = getTaskStatusGroups(roleBase, taskGroups, taskSummary);
+  const projectSummary = dashboard.data?.summary?.projects ?? { total: 0, live: 0, complete: 0, onhold: 0 };
+  const taskSummary = dashboard.data?.summary?.tasks ?? {};
+  const estimateList = estimates.data?.estimates ?? [];
+  const draftEstimates = estimateList.filter((item) => (item.status || "draft") === "draft");
+  const sentEstimates = estimateList.filter((item) => item.status === "sent");
+  const approvedEstimates = estimateList.filter((item) => {
+    const approvalStatus = String(item.approval_status || item.approvalStatus || item.status || "").toLowerCase();
+    return approvalStatus === "approved";
+  });
+  const readyInvoices = approvedEstimates.filter((item) => !item.invoice_status);
+  const draftInvoices = approvedEstimates.filter((item) => item.invoice_status === "draft");
+  const completedInvoices = approvedEstimates.filter((item) => item.invoice_status === "completed");
 
-  function openDrilldown(title, items, type) {
-    setDrilldown({ open: true, title, items, type });
+  function openDrilldown(title, items) {
+    setDrilldown({ open: true, title, items });
   }
 
-  return (
-    <>
-      {/* <SectionHeader title="Overview" /> */}
-
-      <section className="grid gap-3 xl:grid-cols-[1fr_1fr_1.15fr]">
+  if (roleBase !== "owner") {
+    return (
+      <section className="grid gap-3 xl:grid-cols-2">
         <OverviewCard
           title="Projects"
-          value={formatCompactNumber(summary?.projects?.total ?? 0)}
+          value={formatCompactNumber(projectSummary.total)}
           icon={ProjectsIcon}
-          accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 22%, transparent), transparent 70%)"
+          accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 18%, transparent), transparent 72%)"
           onOpen={() => router.push(`/${roleBase}/projects`)}
           openLabel="Open Projects"
-          stats={projectStatusGroups.map((group) => ({
-            key: group.label,
-            label: group.label,
-            value: formatCompactNumber(group.value),
-            onClick: () => openDrilldown(`${group.label} Projects`, group.items, "project"),
-            tone: group.tone,
-          }))}
-        />
-
-        <OverviewCard
-          title="Staff"
-          value={formatCompactNumber(staffList.length)}
-          icon={TeamIcon}
-          accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 14%, transparent), transparent 72%)"
-          onOpen={() => openDrilldown("All Staff", staffList, "staff")}
-          openLabel="Open Staff"
-          stats={staffGroups.map((group) => ({
-            key: group.label,
-            label: group.label,
-            value: formatCompactNumber(group.value),
-            onClick: () => openDrilldown(group.label, group.items, "staff"),
-            tone: group.tone,
-          }))}
+          stats={[
+            { key: "live-projects", label: "Live", value: formatCompactNumber(projectSummary.live) },
+            { key: "complete-projects", label: "Complete", value: formatCompactNumber(projectSummary.complete), tone: "success" },
+            { key: "onhold-projects", label: "Planned", value: formatCompactNumber(projectSummary.onhold), tone: "warning" },
+          ]}
         />
 
         <OverviewCard
           title="Tasks"
-          value={formatCompactNumber(roleBase === "owner" ? taskSummary.todayAssigned ?? 0 : taskSummary.myTasks?.total ?? 0)}
-          icon={PulseIcon}
-          accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 18%, transparent), color-mix(in srgb, var(--acm-surface-2) 55%, transparent) 52%, transparent 85%)"
+          value={formatCompactNumber(roleBase === "manager" ? taskSummary.assignedTasks?.assigned ?? 0 : taskSummary.myTasks?.total ?? 0)}
+          icon={InsightsIcon}
+          accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 16%, transparent), transparent 74%)"
           onOpen={() => router.push(`/${roleBase}/tasks`)}
           openLabel="Open Tasks"
-          layout="stack"
-          stats={taskGroupsForOverview.map((group, index) => ({
-            key: group.key,
-            label: group.label,
-            value: formatCompactNumber(group.value),
-            onClick: () => openDrilldown(group.label, group.items, "task"),
-            tone: index === 0 ? "success" : "default",
-          }))}
+          stats={
+            roleBase === "manager"
+              ? [
+                  { key: "manager-assigned", label: "Assigned", value: formatCompactNumber(taskSummary.assignedTasks?.assigned ?? 0) },
+                  { key: "manager-approved", label: "Completed", value: formatCompactNumber(taskSummary.assignedTasks?.completed ?? 0), tone: "success" },
+                  { key: "manager-review", label: "To Review", value: formatCompactNumber(taskSummary.approvingTasks?.toBeApproved ?? 0), tone: "warning" },
+                ]
+              : [
+                  { key: "employee-total", label: "My Tasks", value: formatCompactNumber(taskSummary.myTasks?.total ?? 0) },
+                  { key: "employee-complete", label: "Completed", value: formatCompactNumber(taskSummary.myTasks?.completed ?? 0), tone: "success" },
+                  { key: "employee-review", label: "Approvals", value: formatCompactNumber(taskSummary.approvingTasks?.toBeApproved ?? 0), tone: "warning" },
+                ]
+          }
         />
       </section>
+    );
+  }
 
-      {/* <section className="mt-4 grid gap-4 xl:grid-cols-2">
-        <div className={cardClass()}>
-          <SectionHeader title="Projects" action={<Link href={`/${roleBase}/projects`} className="text-sm font-semibold text-[color:var(--acm-accent)]">Open</Link>} />
-          <div className="space-y-3">
-            {projectList.slice(0, 3).map((project) => (
-              <CompactListRow
-                key={project.id}
-                primary={project.name}
-                secondary={project.job_number}
-                tertiary={`${project.client?.name || "-"} | ${project.location || "-"}`}
-                onClick={() => setSelectedProject(project)}
-              />
-            ))}
-          </div>
-        </div>
-        <div className={cardClass()}>
-          <SectionHeader title="Tasks" action={<Link href={`/${roleBase}/tasks`} className="text-sm font-semibold text-[color:var(--acm-accent)]">Open</Link>} />
-          <div className="space-y-3">
-            {taskList.slice(0, 3).map((task) => (
-              <CompactListRow
-                key={task.id}
-                primary={task.title}
-                secondary={task.project?.name || "-"}
-                tertiary={`${formatDate(task.start_date)} to ${formatDate(task.end_date)}`}
-                onClick={() => setSelectedTask(task)}
-              />
-            ))}
-          </div>
-        </div>
-      </section> */}
+  return (
+    <>
+      <section className="grid gap-3 xl:grid-cols-2">
+        <OverviewCard
+          title="Projects"
+          value={formatCompactNumber(projectSummary.total)}
+          icon={ProjectsIcon}
+          accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 18%, transparent), transparent 72%)"
+          onOpen={() => router.push(`/${roleBase}/projects`)}
+          openLabel="Open Projects"
+          stats={[
+            { key: "live-projects", label: "Live", value: formatCompactNumber(projectSummary.live) },
+            { key: "complete-projects", label: "Complete", value: formatCompactNumber(projectSummary.complete), tone: "success" },
+            { key: "onhold-projects", label: "Planned", value: formatCompactNumber(projectSummary.onhold), tone: "warning" },
+          ]}
+        />
+
+        <OverviewCard
+          title="Estimates"
+          value={formatCompactNumber(estimateList.length)}
+          icon={ExpenseIcon}
+          accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 22%, transparent), transparent 70%)"
+          onOpen={() => router.push(`/${roleBase}/estimates`)}
+          openLabel="Open Estimates"
+          stats={[
+            {
+              key: "draft-estimates",
+              label: "Draft",
+              value: formatCompactNumber(draftEstimates.length),
+              onClick: () => openDrilldown("Draft Estimates", draftEstimates),
+            },
+            {
+              key: "sent-estimates",
+              label: "Sent",
+              value: formatCompactNumber(sentEstimates.length),
+              onClick: () => openDrilldown("Sent Estimates", sentEstimates),
+            },
+            {
+              key: "approved-estimates",
+              label: "Approved",
+              value: formatCompactNumber(approvedEstimates.length),
+              onClick: () => openDrilldown("Approved Estimates", approvedEstimates),
+              tone: "success",
+            },
+          ]}
+        />
+
+        <OverviewCard
+          title="Invoicing"
+          value={formatCompactNumber(approvedEstimates.length)}
+          icon={ReportIcon}
+          accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 16%, transparent), transparent 72%)"
+          onOpen={() => router.push(`/${roleBase}/invoicing`)}
+          openLabel="Open Invoices"
+          stats={[
+            {
+              key: "invoice-ready",
+              label: "Ready",
+              value: formatCompactNumber(readyInvoices.length),
+              onClick: () => openDrilldown("Ready For Invoicing", readyInvoices),
+            },
+            {
+              key: "invoice-draft",
+              label: "Draft",
+              value: formatCompactNumber(draftInvoices.length),
+              onClick: () => openDrilldown("Draft Invoices", draftInvoices),
+              tone: "warning",
+            },
+            {
+              key: "invoice-complete",
+              label: "Completed",
+              value: formatCompactNumber(completedInvoices.length),
+              onClick: () => openDrilldown("Completed Invoices", completedInvoices),
+              tone: "success",
+            },
+          ]}
+        />
+
+        <OverviewCard
+          title="Tasks"
+          value={formatCompactNumber(taskSummary.todayAssigned ?? 0)}
+          icon={InsightsIcon}
+          accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 16%, transparent), transparent 74%)"
+          onOpen={() => router.push(`/${roleBase}/tasks`)}
+          openLabel="Open Tasks"
+          stats={[
+            { key: "tasks-today", label: "Assigned Today", value: formatCompactNumber(taskSummary.todayAssigned ?? 0) },
+            { key: "tasks-complete", label: "Completed", value: formatCompactNumber(taskSummary.completed ?? 0), tone: "success" },
+            { key: "invoice-pipeline", label: "Invoice Pipeline", value: formatCompactNumber(approvedEstimates.length), tone: "warning" },
+          ]}
+        />
+      </section>
 
       <DrilldownModal
         open={drilldown.open}
         title={drilldown.title}
         items={drilldown.items}
         emptyMessage="No matching records yet."
-        onClose={() => setDrilldown({ open: false, title: "", items: [], type: "" })}
-        renderItem={(item) => {
-          if (drilldown.type === "project") {
-            return (
-              <CompactListRow
-                key={item.id}
-                primary={item.name}
-                secondary={item.job_number}
-                tertiary={`${item.client?.name || "-"} | ${item.location || "-"}`}
-                onClick={() => {
-                  setDrilldown({ open: false, title: "", items: [], type: "" });
-                  setSelectedProject(item);
-                }}
-              />
-            );
-          }
-
-          if (drilldown.type === "task") {
-            return (
-              <CompactListRow
-                key={item.id}
-                primary={item.title}
-                secondary={item.project?.name || "-"}
-                tertiary={`${formatDate(item.start_date)} to ${formatDate(item.end_date)} | ${item.approval_role || "-"}`}
-                onClick={() => {
-                  setDrilldown({ open: false, title: "", items: [], type: "" });
-                  setSelectedTask(item);
-                }}
-              />
-            );
-          }
-
-          return (
-            <CompactListRow
-              key={item.user_id}
-              primary={item.name || item.user_name || item.user_code}
-              secondary={`${item.user_name || item.user_code} | ${item.user_code}`}
-              tertiary={`${roleName(item.role)} | ${getProjectAssignmentSummary(item)}`}
-              onClick={() => {
-                setDrilldown({ open: false, title: "", items: [], type: "" });
-                setSelectedStaff(item);
-              }}
-            />
-          );
-        }}
+        onClose={() => setDrilldown({ open: false, title: "", items: [] })}
+        renderItem={(item) => (
+          <CompactListRow
+            key={item.id}
+            primary={item.title || `Estimate #${item.estimate_number}`}
+            secondary={`${item.client?.name || "Client"} | ${formatDate(item.estimate_date)}`}
+            tertiary={`${formatCompactNumber(item.summary?.finalBid || item.summary?.totalPrice || 0)} | ${item.invoice_reference || item.invoice_status || item.status || "Draft"}`}
+            onClick={() => {
+              setDrilldown({ open: false, title: "", items: [] });
+              setSelectedEstimate(item);
+            }}
+          />
+        )}
       />
 
       <ProfileModal
-        open={Boolean(selectedProject)}
-        title="Project Profile"
+        open={Boolean(selectedEstimate)}
+        title="Estimate Snapshot"
         details={
-          selectedProject
+          selectedEstimate
             ? [
-                { label: "Job Number", value: selectedProject.job_number },
-                { label: "Project", value: selectedProject.name },
-                { label: "Client", value: selectedProject.client?.name || "-" },
-                { label: "Location", value: selectedProject.location || "-" },
-                { label: "Start Date", value: formatDate(selectedProject.start_date) },
-                { label: "End Date", value: formatDate(selectedProject.end_date) },
-                { label: "Estimate Budget", value: `$${selectedProject.contract_value}` },
+                { label: "Estimate", value: selectedEstimate.title || `Estimate #${selectedEstimate.estimate_number}` },
+                { label: "Client", value: selectedEstimate.client?.name || "-" },
+                { label: "Estimate Date", value: formatDate(selectedEstimate.estimate_date) },
+                { label: "Status", value: selectedEstimate.status || "draft" },
+                { label: "Approval", value: selectedEstimate.approval_status || selectedEstimate.approvalStatus || "-" },
+                { label: "Invoice Status", value: selectedEstimate.invoice_status || "Not started" },
               ]
             : []
         }
-        onClose={() => setSelectedProject(null)}
+        onClose={() => setSelectedEstimate(null)}
         actions={
-          selectedProject ? (
+          selectedEstimate ? (
             <button
               type="button"
               onClick={() => {
-                setSelectedProject(null);
-                router.push(`/${roleBase}/project/${selectedProject.id}/overview`);
+                setSelectedEstimate(null);
+                router.push(`/${roleBase}/estimates/${selectedEstimate.id}`);
               }}
               className="acm-btn acm-btn-primary h-10 px-4"
             >
-              Go to Project Dashboard
+              Open Estimate
             </button>
           ) : null
         }
       />
-
-      <ProfileModal
-        open={Boolean(selectedStaff)}
-        title="User Profile"
-        details={
-          selectedStaff
-            ? [
-                { label: "User Code", value: selectedStaff.user_code },
-                { label: "User Name", value: selectedStaff.user_name || selectedStaff.user_code },
-                { label: "Name", value: selectedStaff.name },
-                { label: "Email", value: selectedStaff.email },
-                { label: "Mobile", value: selectedStaff.mobile },
-                { label: "Role", value: roleName(selectedStaff.role) },
-                { label: "Projects", value: getProjectAssignmentSummary(selectedStaff) },
-              ]
-            : []
-        }
-        onClose={() => setSelectedStaff(null)}
-        actions={
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedStaff(null);
-              router.push(`/${roleBase}${roleBase === "owner" ? "/staff" : "/projects"}`);
-            }}
-            className="acm-btn acm-btn-primary h-10 px-4"
-          >
-            {roleBase === "owner" ? "Open Staff Directory" : "Open Projects"}
-          </button>
-        }
-      />
-
-      <ProfileModal
-        open={Boolean(selectedTask)}
-        title="Task Profile"
-        details={selectedTask ? buildTaskDetails(selectedTask) : []}
-        onClose={() => setSelectedTask(null)}
-        actions={
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedTask(null);
-              router.push(`/${roleBase}/tasks`);
-            }}
-            className="acm-btn acm-btn-primary h-10 px-4"
-          >
-            Open Task Board
-          </button>
-        }
-      />
     </>
+  );
+}
+
+function CollapsibleSection({
+  title,
+  open,
+  onToggle,
+  compact = false,
+  helper = "",
+  children,
+}) {
+  return (
+    <section className={cardClass(compact ? "p-4" : "")}>
+      <button type="button" onClick={onToggle} className="flex w-full items-center justify-between gap-3 text-left">
+        <div>
+          <div className="text-xl font-bold text-[color:var(--acm-fg)]">{title}</div>
+          {helper ? <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{helper}</div> : null}
+        </div>
+        {open ? <ChevronDown className="h-5 w-5 text-[color:var(--acm-muted-fg)]" /> : <ChevronRight className="h-5 w-5 text-[color:var(--acm-muted-fg)]" />}
+      </button>
+      {open ? <div className={compact ? "mt-4" : "mt-5"}>{children}</div> : null}
+    </section>
   );
 }
 
@@ -726,6 +711,7 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
   const [profileProject, setProfileProject] = useState(null);
   const [formBusy, setFormBusy] = useState(false);
   const [deletingProjectId, setDeletingProjectId] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [form, setForm] = useState({
     id: "",
     name: "",
@@ -747,6 +733,16 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
   const visibleProjects = filterClientId
     ? projectList.filter((project) => project.client_id === filterClientId)
     : projectList;
+  const filteredProjects = visibleProjects.filter((project) =>
+    matchesSearchQuery(
+      searchQuery,
+      project.name,
+      project.job_number,
+      project.location,
+      project.client?.name,
+      project.client?.email
+    )
+  );
 
   function openCreate() {
     setEditingProject(null);
@@ -793,10 +789,10 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
     setMessage("");
     setFormBusy(true);
 
-    const res = await fetch(editingProject ? "/api/project" : "/api/projects", {
-      method: editingProject ? "PUT" : "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    try {
+      const json = await sendJson(editingProject ? "/api/project" : "/api/projects", {
+        method: editingProject ? "PUT" : "POST",
+        body: {
         ...form,
         clientId: form.clientMode === "existing" ? form.clientId || null : null,
         clientName: form.clientMode === "new" ? form.clientName : null,
@@ -804,22 +800,20 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
         clientEmail: form.clientMode === "new" ? form.clientEmail : null,
         clientAddress: form.clientMode === "new" ? form.clientAddress : null,
         contractValue: Number(form.contractValue || 0),
-      }),
-    });
-    const json = await res.json().catch(() => null);
-    // if (!res.ok) {
-    //   setError(json?.error || "project_save_failed");
-    //   setFormBusy(false);
-    //   return;
-    // }
+        },
+      });
 
-    setMessage(editingProject ? "Project updated" : `Created ${json.project.job_number}`);
-    if (editingProject) {
-      setOpen(false);
+      setMessage(editingProject ? "Project updated" : `Created ${json?.project?.job_number || "project"}`);
+      if (editingProject) {
+        setOpen(false);
+      }
+      invalidateApiQuery("/api/dashboard");
+      await projects.refresh();
+    } catch (requestError) {
+      setError(requestError.message || "project_save_failed");
+    } finally {
+      setFormBusy(false);
     }
-    invalidateApiQuery("/api/dashboard");
-    await projects.refresh();
-    setFormBusy(false);
   }
 
   async function deleteProject(project) {
@@ -828,21 +822,19 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
     setError("");
     setMessage("");
     setDeletingProjectId(project.id);
-    const res = await fetch("/api/project", {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: project.id }),
-    });
-    const json = await res.json().catch(() => null);
-    // if (!res.ok) {
-    //   setError(json?.error || "project_delete_failed");
-    //   setDeletingProjectId("");
-    //   return;
-    // }
-    setMessage(`${project.name} deleted`);
-    invalidateApiQuery("/api/dashboard");
-    await projects.refresh();
-    setDeletingProjectId("");
+    try {
+      await sendJson("/api/project", {
+        method: "DELETE",
+        body: { id: project.id },
+      });
+      setMessage(`${project.name} deleted`);
+      invalidateApiQuery("/api/dashboard");
+      await projects.refresh();
+    } catch (requestError) {
+      setError(requestError.message || "project_delete_failed");
+    } finally {
+      setDeletingProjectId("");
+    }
   }
 
   return (
@@ -871,13 +863,17 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
 
       <InlineMessage error={projects.error || error} message={message} />
 
+      <div className="mt-4">
+        <SearchField value={searchQuery} onChange={setSearchQuery} placeholder="Search projects by name, job number, client, or location" />
+      </div>
+
       <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {visibleProjects.map((project) => (
+        {filteredProjects.map((project) => (
           <CompactListRow
             key={project.id}
             primary={project.name}
             secondary={<>{project.job_number} <br />{project.client?.name || "-"}</>}
-            tertiary={<>{project.location || "-"} <br />{formatDate(project.start_date)} to ${formatDate(project.end_date)}</>}
+            tertiary={<>{project.location || "-"} <br />{formatDate(project.start_date)} to {formatDate(project.end_date)}</>}
             onClick={() => setProfileProject(project)}
             actions={
               <div className="flex flex-wrap gap-2">
@@ -906,6 +902,11 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
             }
           />
         ))}
+        {!filteredProjects.length ? (
+          <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-8 text-sm text-[color:var(--acm-muted-fg)] md:col-span-2 xl:col-span-3">
+            No projects match the current search.
+          </div>
+        ) : null}
       </section>
 
       <ProfileModal
@@ -1066,6 +1067,7 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [formBusy, setFormBusy] = useState(false);
   const [convertBusyId, setConvertBusyId] = useState("");
   const [selectedLead, setSelectedLead] = useState(null);
@@ -1099,6 +1101,9 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
   });
 
   const leadList = (leads.data?.leads ?? []).filter((lead) => lead.status !== "converted");
+  const filteredLeads = leadList.filter((lead) =>
+    matchesSearchQuery(searchQuery, lead.name, lead.contact, lead.email, lead.address, lead.status, lead.nextFollowUpDate)
+  );
 
   function openCreate() {
     setForm({
@@ -1121,25 +1126,18 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
     setMessage("");
     setFormBusy(true);
 
-    const res = await fetch("/api/leads", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    const json = await res.json().catch(() => null);
-
-    // if (!res.ok) {
-    //   setError(json?.error || "lead_create_failed");
-    //   setFormBusy(false);
-    //   return;
-    // }
-
-    setOpen(false);
-    setMessage("Lead created");
-    invalidateApiQuery("/api/leads");
-    invalidateApiQuery("/api/dashboard");
-    await leads.refresh();
-    setFormBusy(false);
+    try {
+      await sendJson("/api/leads", { method: "POST", body: form });
+      setOpen(false);
+      setMessage("Lead created");
+      invalidateApiQuery("/api/leads");
+      invalidateApiQuery("/api/dashboard");
+      await leads.refresh();
+    } catch (requestError) {
+      setError(requestError.message || "lead_create_failed");
+    } finally {
+      setFormBusy(false);
+    }
   }
 
   function openLeadEdit() {
@@ -1164,26 +1162,23 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
     setFollowUpMessage("");
     setFollowUpError("");
 
-    const res = await fetch("/api/leads", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: selectedLead.id, ...leadEditForm }),
-    });
-    const json = await res.json().catch(() => null);
+    try {
+      const json = await sendJson("/api/leads", {
+        method: "PUT",
+        body: { id: selectedLead.id, ...leadEditForm },
+      });
 
-    // if (!res.ok) {
-    //   setFollowUpError(json?.error || "lead_update_failed");
-    //   setLeadEditBusy(false);
-    //   return;
-    // }
-
-    const updatedLead = { ...selectedLead, ...(json?.lead || leadEditForm) };
-    setSelectedLead(updatedLead);
-    setLeadEditOpen(false);
-    setFollowUpMessage("Lead updated");
-    invalidateApiQuery("/api/leads");
-    await leads.refresh();
-    setLeadEditBusy(false);
+      const updatedLead = { ...selectedLead, ...(json?.lead || leadEditForm) };
+      setSelectedLead(updatedLead);
+      setLeadEditOpen(false);
+      setFollowUpMessage("Lead updated");
+      invalidateApiQuery("/api/leads");
+      await leads.refresh();
+    } catch (requestError) {
+      setFollowUpError(requestError.message || "lead_update_failed");
+    } finally {
+      setLeadEditBusy(false);
+    }
   }
 
   async function convertLead(lead) {
@@ -1192,24 +1187,20 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
     setMessage("");
     setConvertBusyId(lead.id);
 
-    const res = await fetch("/api/lead", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: lead.id }),
-    });
-    const json = await res.json().catch(() => null);
-
-    // if (!res.ok) {
-    //   setError(json?.error || "lead_convert_failed");
-    //   setConvertBusyId("");
-    //   return;
-    // }
-
-    setMessage("Lead converted to client");
-    invalidateApiQuery("/api/clients");
-    invalidateApiQuery("/api/leads");
-    await leads.refresh();
-    setConvertBusyId("");
+    try {
+      await sendJson("/api/lead", {
+        method: "PUT",
+        body: { id: lead.id },
+      });
+      setMessage("Lead converted to client");
+      invalidateApiQuery("/api/clients");
+      invalidateApiQuery("/api/leads");
+      await leads.refresh();
+    } catch (requestError) {
+      setError(requestError.message || "lead_convert_failed");
+    } finally {
+      setConvertBusyId("");
+    }
   }
 
   async function saveFollowUp(e) {
@@ -1220,32 +1211,29 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
     setFollowUpError("");
     setFollowUpBusy(true);
 
-    const res = await fetch("/api/lead-followups", {
-      method: editingFollowUpId ? "PUT" : "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    try {
+      await sendJson("/api/lead-followups", {
+        method: editingFollowUpId ? "PUT" : "POST",
+        body: {
         id: editingFollowUpId || undefined,
         leadId: selectedLead.id,
         note: followUpForm.note,
         nextFollowUpDate: followUpForm.nextFollowUpDate,
         status: followUpForm.status,
-      }),
-    });
-    const json = await res.json().catch(() => null);
+        },
+      });
 
-    // if (!res.ok) {
-    //   setFollowUpError(json?.error || "lead_followup_create_failed");
-    //   setFollowUpBusy(false);
-    //   return;
-    // }
-
-    setFollowUpForm({ note: "", nextFollowUpDate: "", status: "pending" });
-    setEditingFollowUpId("");
-    setFollowUpFormOpen(false);
-    setFollowUpMessage(editingFollowUpId ? "Follow-up updated" : "Follow-up saved");
-    invalidateApiQuery("/api/leads");
-    await Promise.all([followUps.refresh(), leads.refresh()]);
-    setFollowUpBusy(false);
+      setFollowUpForm({ note: "", nextFollowUpDate: "", status: "pending" });
+      setEditingFollowUpId("");
+      setFollowUpFormOpen(false);
+      setFollowUpMessage(editingFollowUpId ? "Follow-up updated" : "Follow-up saved");
+      invalidateApiQuery("/api/leads");
+      await Promise.all([followUps.refresh(), leads.refresh()]);
+    } catch (requestError) {
+      setFollowUpError(requestError.message || "lead_followup_create_failed");
+    } finally {
+      setFollowUpBusy(false);
+    }
   }
 
   function openFollowUpForm(item = null) {
@@ -1269,23 +1257,20 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
     setFollowUpMessage("");
     setFollowUpError("");
 
-    const res = await fetch("/api/lead-followups", {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: item.id }),
-    });
-    const json = await res.json().catch(() => null);
+    try {
+      await sendJson("/api/lead-followups", {
+        method: "DELETE",
+        body: { id: item.id },
+      });
 
-    // if (!res.ok) {
-    //   setFollowUpError(json?.error || "lead_followup_delete_failed");
-    //   setDeletingFollowUpId("");
-    //   return;
-    // }
-
-    setFollowUpMessage("Follow-up deleted");
-    invalidateApiQuery("/api/leads");
-    await Promise.all([followUps.refresh(), leads.refresh()]);
-    setDeletingFollowUpId("");
+      setFollowUpMessage("Follow-up deleted");
+      invalidateApiQuery("/api/leads");
+      await Promise.all([followUps.refresh(), leads.refresh()]);
+    } catch (requestError) {
+      setFollowUpError(requestError.message || "lead_followup_delete_failed");
+    } finally {
+      setDeletingFollowUpId("");
+    }
   }
 
   return (
@@ -1312,8 +1297,12 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
 
       <InlineMessage error={leads.error || error} message={message} />
 
+      <div className="mt-4">
+        <SearchField value={searchQuery} onChange={setSearchQuery} placeholder="Search leads by name, contact, email, or follow-up date" />
+      </div>
+
       <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {leadList.map((lead) => (
+        {filteredLeads.map((lead) => (
           <CompactListRow
             key={lead.id}
             primary={lead.name}
@@ -1355,6 +1344,11 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
             }
           />
         ))}
+        {!filteredLeads.length ? (
+          <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-8 text-sm text-[color:var(--acm-muted-fg)] md:col-span-2 xl:col-span-3">
+            No leads match the current search.
+          </div>
+        ) : null}
       </section>
 
       <Modal open={open} title="Create Lead" onClose={() => setOpen(false)}>
@@ -1533,6 +1527,7 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [formBusy, setFormBusy] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedClient, setSelectedClient] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteBusyId, setDeleteBusyId] = useState("");
@@ -1547,6 +1542,9 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
   });
 
   const clientList = clients.data?.clients ?? [];
+  const filteredClients = clientList.filter((client) =>
+    matchesSearchQuery(searchQuery, client.name, client.contact, client.email, client.address, client.projectCount)
+  );
 
   function openCreate() {
     setForm({
@@ -1569,24 +1567,17 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
     setMessage("");
     setFormBusy(true);
 
-    const res = await fetch("/api/clients", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    const json = await res.json().catch(() => null);
-
-    // if (!res.ok) {
-    //   setError(json?.error || "client_create_failed");
-    //   setFormBusy(false);
-    //   return;
-    // }
-
-    setOpen(false);
-    setMessage("Client created");
-    invalidateApiQuery("/api/clients");
-    await clients.refresh();
-    setFormBusy(false);
+    try {
+      await sendJson("/api/clients", { method: "POST", body: form });
+      setOpen(false);
+      setMessage("Client created");
+      invalidateApiQuery("/api/clients");
+      await clients.refresh();
+    } catch (requestError) {
+      setError(requestError.message || "client_create_failed");
+    } finally {
+      setFormBusy(false);
+    }
   }
 
   function openClientEdit(client) {
@@ -1611,25 +1602,22 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
     setMessage("");
     setFormBusy(true);
 
-    const res = await fetch("/api/clients", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: selectedClient.id, ...form }),
-    });
-    const json = await res.json().catch(() => null);
+    try {
+      const json = await sendJson("/api/clients", {
+        method: "PUT",
+        body: { id: selectedClient.id, ...form },
+      });
 
-    if (!res.ok) {
-      setError(json?.error || "client_update_failed");
+      setSelectedClient(json?.client || { ...selectedClient, ...form });
+      setEditOpen(false);
+      setMessage("Client updated");
+      invalidateApiQuery("/api/clients");
+      await clients.refresh();
+    } catch (requestError) {
+      setError(requestError.message || "client_update_failed");
+    } finally {
       setFormBusy(false);
-      return;
     }
-
-    setSelectedClient(json?.client || { ...selectedClient, ...form });
-    setEditOpen(false);
-    setMessage("Client updated");
-    invalidateApiQuery("/api/clients");
-    await clients.refresh();
-    setFormBusy(false);
   }
 
   async function deleteClient(client) {
@@ -1640,25 +1628,22 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
     setError("");
     setMessage("");
 
-    const res = await fetch("/api/clients", {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: client.id }),
-    });
-    const json = await res.json().catch(() => null);
+    try {
+      await sendJson("/api/clients", {
+        method: "DELETE",
+        body: { id: client.id },
+      });
 
-    if (!res.ok) {
-      setError(json?.error || "client_delete_failed");
+      if (selectedClient?.id === client.id) setSelectedClient(null);
+      setEditOpen(false);
+      setMessage("Client deleted");
+      invalidateApiQuery("/api/clients");
+      await clients.refresh();
+    } catch (requestError) {
+      setError(requestError.message || "client_delete_failed");
+    } finally {
       setDeleteBusyId("");
-      return;
     }
-
-    if (selectedClient?.id === client.id) setSelectedClient(null);
-    setEditOpen(false);
-    setMessage("Client deleted");
-    invalidateApiQuery("/api/clients");
-    await clients.refresh();
-    setDeleteBusyId("");
   }
 
   return (
@@ -1682,8 +1667,12 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
         </button>
       </div> */}
 
+      <div className="mt-4">
+        <SearchField value={searchQuery} onChange={setSearchQuery} placeholder="Search clients by name, contact, email, address, or project count" />
+      </div>
+
       <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {clientList.map((client) => (
+        {filteredClients.map((client) => (
           <CompactListRow
             key={client.id}
             primary={client.name}
@@ -1718,6 +1707,11 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
             }
           />
         ))}
+        {!filteredClients.length ? (
+          <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-8 text-sm text-[color:var(--acm-muted-fg)] md:col-span-2 xl:col-span-3">
+            No clients match the current search.
+          </div>
+        ) : null}
       </section>
 
       <Modal open={open} title="Create Client" onClose={() => setOpen(false)}>
@@ -2213,14 +2207,12 @@ export function StaffManagerPage({
   ownerMode = false,
   fixedProjectId = "",
   readOnly = false,
-  canAssignManagers = false,
   currentUserId = "",
 }) {
   const staff = useApi("/api/staff");
   const projects = useApi("/api/projects");
   const [tab, setTab] = useState("managers");
   const [open, setOpen] = useState(false);
-  const [assignOpen, setAssignOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -2230,9 +2222,10 @@ export function StaffManagerPage({
   const [historyLoading, setHistoryLoading] = useState(false);
   const [editingStaff, setEditingStaff] = useState(null);
   const [createBusy, setCreateBusy] = useState(false);
-  const [assignBusy, setAssignBusy] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
   const [deleteUserId, setDeleteUserId] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [generatedPassword, setGeneratedPassword] = useState(() => generatePasswordPreview());
   const [form, setForm] = useState({
     name: "",
     userName: "",
@@ -2241,22 +2234,12 @@ export function StaffManagerPage({
     mobile: "",
     hourlyRate: "",
     craft: "",
-    projectId: "",
-    password: "",
   });
-  const [assignForm, setAssignForm] = useState({
-    userId: "",
-    projectId: "",
-    role: allowManagerCreation ? "manager" : "employee",
-    hourlyRate: "",
-  });
-
   const staffData = useMemo(() => staff.data?.staff ?? { managers: [], employees: [], subcontractors: [] }, [staff.data]);
-  const projectList = projects.data?.projects ?? [];
-  const availableProjects = fixedProjectId ? projectList.filter((project) => project.id === fixedProjectId) : projectList;
-  const defaultProjectId = fixedProjectId || getProjectDefaultId(availableProjects);
-  const selectedProjectId = form.projectId || defaultProjectId;
-  const selectedAssignmentProjectId = assignForm.projectId || defaultProjectId;
+  const staffPreview = useApiQuery(
+    open ? `/api/staff?mode=preview&role=${encodeURIComponent(form.role)}` : "",
+    { enabled: open }
+  );
   const visibleStaffData = useMemo(() => {
     if (!fixedProjectId) return staffData;
 
@@ -2270,9 +2253,36 @@ export function StaffManagerPage({
       subcontractors: staffData.subcontractors.filter(inProject),
     };
   }, [fixedProjectId, staffData]);
+  const visibleStaffList = (visibleStaffData[tab] ?? []).filter((item) =>
+    matchesSearchQuery(
+      searchQuery,
+      item.name,
+      item.user_name,
+      item.user_code,
+      item.email,
+      item.mobile,
+      item.craft,
+      item.role,
+      getProjectAssignmentSummary(item, fixedProjectId)
+    )
+  );
 
   function canManageThisStaff(item) {
     return !readOnly && (ownerMode ? item.role !== "owner" : item.role === "employee" && item.user_id !== currentUserId);
+  }
+
+  function openCreateStaffModal() {
+    setGeneratedPassword(generatePasswordPreview());
+    setForm({
+      name: "",
+      userName: "",
+      role: allowManagerCreation ? "manager" : "employee",
+      email: "",
+      mobile: "",
+      hourlyRate: "",
+      craft: "",
+    });
+    setOpen(true);
   }
 
   async function createStaff(e) {
@@ -2281,30 +2291,29 @@ export function StaffManagerPage({
     setError("");
     setMessage("");
     setCreateBusy(true);
-    const res = await fetch("/api/staff", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    try {
+      const json = await sendJson("/api/staff", {
+        method: "POST",
+        body: {
         ...form,
         hourlyRate: Number(form.hourlyRate || 0),
         craft: form.craft?.trim() || null,
-        projectId: selectedProjectId || null,
+        projectId: fixedProjectId || null,
         userName: form.userName?.trim() || null,
-        password: form.password?.trim() || null,
-      }),
-    });
-    const json = await res.json().catch(() => null);
-    // if (!res.ok) {
-    //   setError(json?.error || "staff_create_failed");
-    //   setCreateBusy(false);
-    //   return;
-    // }
-    setMessage(`Created. User ID: ${json.staff.user_code}, User Name: ${json.auth.userName}, Password: ${json.auth.temporaryPassword}`);
-    setOpen(false);
-    invalidateApiQuery("/api/dashboard");
-    invalidateApiQuery("/api/staff");
-    await Promise.all([staff.refresh(), projects.refresh()]);
-    setCreateBusy(false);
+        password: generatedPassword,
+        },
+      });
+
+      setMessage(`Created. User ID: ${json?.staff?.user_code || "-"}, User Name: ${json?.auth?.userName || "-"}, Password: ${json?.auth?.temporaryPassword || generatedPassword}`);
+      setOpen(false);
+      invalidateApiQuery("/api/dashboard");
+      invalidateApiQuery("/api/staff");
+      await Promise.all([staff.refresh(), projects.refresh()]);
+    } catch (requestError) {
+      setError(requestError.message || "staff_create_failed");
+    } finally {
+      setCreateBusy(false);
+    }
   }
 
   async function updateStaff(e) {
@@ -2314,10 +2323,10 @@ export function StaffManagerPage({
     setError("");
     setMessage("");
     setEditBusy(true);
-    const res = await fetch("/api/staff", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    try {
+      await sendJson("/api/staff", {
+        method: "PUT",
+        body: {
         userId: editingStaff.user_id,
         name: editingStaff.name,
         userName: editingStaff.user_name,
@@ -2326,49 +2335,17 @@ export function StaffManagerPage({
         hourlyRate: Number(editingStaff.hourly_rate || 0),
         craft: editingStaff.craft || "",
         password: editingStaff.password || "",
-      }),
-    });
-    const json = await res.json().catch(() => null);
-    // if (!res.ok) {
-    //   setError(json?.error || "staff_update_failed");
-    //   setEditBusy(false);
-    //   return;
-    // }
-    setMessage("Staff updated");
-    setEditOpen(false);
-    invalidateApiQuery("/api/staff");
-    await staff.refresh();
-    setEditBusy(false);
-  }
-
-  async function assignProject(e) {
-    e.preventDefault();
-    if (assignBusy) return;
-    setError("");
-    setMessage("");
-    setAssignBusy(true);
-    const res = await fetch("/api/project-assignments", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        ...assignForm,
-        projectId: selectedAssignmentProjectId,
-        hourlyRate: Number(assignForm.hourlyRate || 0),
-      }),
-    });
-    const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(json?.error || "assignment_failed");
-      setAssignBusy(false);
-      return;
+        },
+      });
+      setMessage("Staff updated");
+      setEditOpen(false);
+      invalidateApiQuery("/api/staff");
+      await staff.refresh();
+    } catch (requestError) {
+      setError(requestError.message || "staff_update_failed");
+    } finally {
+      setEditBusy(false);
     }
-    setMessage(json?.message || "Project assigned");
-    setAssignOpen(false);
-    invalidateApiQuery("/api/staff");
-    invalidateApiQuery("/api/projects");
-    invalidateApiQuery("/api/dashboard");
-    await Promise.all([staff.refresh(), projects.refresh()]);
-    setAssignBusy(false);
   }
 
   async function deleteStaff(item) {
@@ -2377,22 +2354,20 @@ export function StaffManagerPage({
     setError("");
     setMessage("");
     setDeleteUserId(item.user_id);
-    const res = await fetch("/api/staff", {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ userId: item.user_id }),
-    });
-    const json = await res.json().catch(() => null);
-    // if (!res.ok) {
-    //   setError(json?.error || "staff_delete_failed");
-    //   setDeleteUserId("");
-    //   return;
-    // }
-    setMessage("Staff deleted");
-    invalidateApiQuery("/api/staff");
-    invalidateApiQuery("/api/dashboard");
-    await Promise.all([staff.refresh(), projects.refresh()]);
-    setDeleteUserId("");
+    try {
+      await sendJson("/api/staff", {
+        method: "DELETE",
+        body: { userId: item.user_id },
+      });
+      setMessage("Staff deleted");
+      invalidateApiQuery("/api/staff");
+      invalidateApiQuery("/api/dashboard");
+      await Promise.all([staff.refresh(), projects.refresh()]);
+    } catch (requestError) {
+      setError(requestError.message || "staff_delete_failed");
+    } finally {
+      setDeleteUserId("");
+    }
   }
 
   async function onSendEmail(userId) {
@@ -2420,15 +2395,14 @@ export function StaffManagerPage({
     setHistoryOpen(true);
     setHistoryLoading(true);
     setHistoryItems([]);
-    const res = await fetch(`/api/activity-logs?userId=${item.user_id}`);
-    const json = await res.json().catch(() => null);
-    // if (!res.ok) {
-    //   setError(json?.error || "history_fetch_failed");
-    //   setHistoryLoading(false);
-    //   return;
-    // }
-    setHistoryItems(json?.logs ?? []);
-    setHistoryLoading(false);
+    try {
+      const json = await pooledGetJson(`/api/activity-logs?userId=${item.user_id}`);
+      setHistoryItems(json?.logs ?? []);
+    } catch (requestError) {
+      setError(requestError.message || "history_fetch_failed");
+    } finally {
+      setHistoryLoading(false);
+    }
   }
 
   return (
@@ -2438,10 +2412,7 @@ export function StaffManagerPage({
         action={
           readOnly ? null : (
             <div className="flex gap-2">
-              <button type="button" onClick={() => setAssignOpen(true)} className="acm-btn acm-btn-secondary h-10 px-4">
-                Assign Project
-              </button>
-              <button type="button" onClick={() => setOpen(true)} className="acm-btn acm-btn-primary h-10 px-4">
+              <button type="button" onClick={openCreateStaffModal} className="acm-btn acm-btn-primary h-10 px-4">
                 Create
               </button>
             </div>
@@ -2463,8 +2434,12 @@ export function StaffManagerPage({
 
       <InlineMessage error={staff.error || error} message={message} />
 
+      <div className="mt-4">
+        <SearchField value={searchQuery} onChange={setSearchQuery} placeholder="Search staff by name, ID, email, craft, role, or project" />
+      </div>
+
       <section className="mt-4 space-y-3">
-        {(visibleStaffData[tab] ?? []).map((item) => (
+        {visibleStaffList.map((item) => (
           <CompactListRow
             key={item.user_id}
             primary={item.name || item.user_name || item.user_code}
@@ -2495,6 +2470,11 @@ export function StaffManagerPage({
             }
           />
         ))}
+        {!visibleStaffList.length ? (
+          <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-8 text-sm text-[color:var(--acm-muted-fg)]">
+            No staff match the current search.
+          </div>
+        ) : null}
       </section>
 
       <ProfileModal
@@ -2602,63 +2582,29 @@ export function StaffManagerPage({
                 <input className={fieldClass()} value={form.craft} onChange={(e) => setForm((prev) => ({ ...prev, craft: e.target.value }))} />
               </LabeledField>
             ) : null}
-            <LabeledField label="Assigned Project">
-              <select className={fieldClass()} value={selectedProjectId} onChange={(e) => setForm((prev) => ({ ...prev, projectId: e.target.value }))} disabled={Boolean(fixedProjectId)}>
-                <option value="">Select project</option>
-                {availableProjects.map((project) => (
-                  <option key={project.id} value={project.id}>{project.name}</option>
-                ))}
-              </select>
-            </LabeledField>
+            {fixedProjectId ? (
+              <div className="rounded-[16px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm text-[color:var(--acm-muted-fg)]">
+                Staff created here will be attached to this project automatically.
+              </div>
+            ) : null}
           </FieldGroup>
           <FieldGroup title="Credentials">
             <LabeledField label="User Name">
               <input className={fieldClass()} value={form.userName} onChange={(e) => setForm((prev) => ({ ...prev, userName: e.target.value }))} />
             </LabeledField>
-            <LabeledField label="User ID">
-              <input className={fieldClass()} value="Auto-generated on save" disabled />
+            <LabeledField label="Generated User ID">
+              <input className={fieldClass()} value={staffPreview.data?.preview?.userCode || "Generating..."} disabled />
             </LabeledField>
-            <LabeledField label="Password">
-              <PasswordInput className={fieldClass()} placeholder="Leave blank for auto-generated password" value={form.password} onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))} />
+            <LabeledField label="Generated Password">
+              <PasswordInput className={fieldClass()} value={generatedPassword} onChange={() => {}} readOnly />
             </LabeledField>
+            <button type="button" onClick={() => setGeneratedPassword(generatePasswordPreview())} className="acm-btn acm-btn-secondary h-10 px-4 w-fit">
+              <Sparkles size={16} />
+              Regenerate Password
+            </button>
           </FieldGroup>
           {managerProjectOnly ? <div className="text-sm text-[color:var(--acm-muted-fg)]">Manager can create employees only inside an assigned project.</div> : null}
           <BusyButton type="submit" busy={createBusy} className="acm-btn acm-btn-primary">Save</BusyButton>
-        </form>
-      </Modal>
-
-      <Modal open={assignOpen} title="Assign Project" onClose={() => setAssignOpen(false)}>
-        <form onSubmit={assignProject} className="grid gap-3">
-          <LabeledField label="Select Staff">
-            <select className={fieldClass()} value={assignForm.userId} onChange={(e) => setAssignForm((prev) => ({ ...prev, userId: e.target.value }))}>
-              <option value="">Select staff</option>
-              {[...staffData.managers, ...staffData.employees].map((item) => (
-                <option key={item.user_id} value={item.user_id}>{getStaffOptionLabel(item)}</option>
-              ))}
-              {(staffData.subcontractors ?? []).map((item) => (
-                <option key={item.user_id} value={item.user_id}>{getStaffOptionLabel(item)}</option>
-              ))}
-            </select>
-          </LabeledField>
-          <LabeledField label="Select Project">
-            <select className={fieldClass()} value={selectedAssignmentProjectId} onChange={(e) => setAssignForm((prev) => ({ ...prev, projectId: e.target.value }))} disabled={Boolean(fixedProjectId)}>
-              <option value="">Select project</option>
-              {availableProjects.map((project) => (
-                <option key={project.id} value={project.id}>{project.name}</option>
-              ))}
-            </select>
-          </LabeledField>
-          <LabeledField label="Role">
-            <select className={fieldClass()} value={assignForm.role} onChange={(e) => setAssignForm((prev) => ({ ...prev, role: e.target.value }))}>
-              {allowManagerCreation ? <option value="manager">Manager</option> : null}
-              <option value="employee">Employee</option>
-              <option value="subcontractor">Subcontractor</option>
-            </select>
-          </LabeledField>
-          <LabeledField label="Hourly Rate">
-            <input className={fieldClass()} inputMode="decimal" value={assignForm.hourlyRate} onChange={(e) => setAssignForm((prev) => ({ ...prev, hourlyRate: e.target.value }))} />
-          </LabeledField>
-          <BusyButton type="submit" busy={assignBusy} className="acm-btn acm-btn-primary">Assign</BusyButton>
         </form>
       </Modal>
 
@@ -2827,7 +2773,13 @@ export function SettingsPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [profileBusy, setProfileBusy] = useState(false);
+  const [companyBusy, setCompanyBusy] = useState(false);
   const [passwordBusy, setPasswordBusy] = useState(false);
+  const [sectionState, setSectionState] = useState({
+    personal: true,
+    company: true,
+    credentials: true,
+  });
   const [profileForm, setProfileForm] = useState(null);
   const [companyForm, setCompanyForm] = useState(null);
   const [passwordForm, setPasswordForm] = useState({
@@ -2902,29 +2854,61 @@ export function SettingsPage() {
     }
   }
 
+  function getPersistedProfilePayload() {
+    return {
+      name: settings.data?.profile?.name || "",
+      userName: settings.data?.profile?.userName || settings.data?.profile?.userCode || "",
+      email: settings.data?.profile?.email || "",
+      mobile: settings.data?.profile?.mobile || "",
+      address: settings.data?.profile?.address || "",
+    };
+  }
+
+  async function updateSettings(payload, successMessage) {
+    setError("");
+    setMessage("");
+    try {
+      await sendJson("/api/settings", {
+        method: "PUT",
+        body: payload,
+      });
+      setMessage(successMessage);
+      await settings.refresh();
+    }
+    catch (requestError) {
+      setError(requestError.message || "settings_update_failed");
+      throw requestError;
+    }
+  }
+
   async function saveProfile(e) {
     e.preventDefault();
     if (profileBusy) return;
-    setError("");
-    setMessage("");
     setProfileBusy(true);
-    const res = await fetch("/api/settings", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        ...resolvedProfileForm,
-        ...(isOwner ? { company: resolvedCompanyForm } : {}),
-      }),
-    });
-    const json = await res.json().catch(() => null);
-    // if (!res.ok) {
-    //   setError(json?.error || "settings_update_failed");
-    //   setProfileBusy(false);
-    //   return;
-    // }
-    setMessage(isOwner ? "Profile and company details updated." : "Personal details updated.");
-    await settings.refresh();
-    setProfileBusy(false);
+    try {
+      await updateSettings({ ...resolvedProfileForm }, "Personal details updated.");
+    } catch {}
+    finally {
+      setProfileBusy(false);
+    }
+  }
+
+  async function saveCompany(e) {
+    e.preventDefault();
+    if (companyBusy || !isOwner) return;
+    setCompanyBusy(true);
+    try {
+      await updateSettings(
+        {
+          ...getPersistedProfilePayload(),
+          company: resolvedCompanyForm,
+        },
+        "Company details updated."
+      );
+    } catch {}
+    finally {
+      setCompanyBusy(false);
+    }
   }
 
   async function changePassword(e) {
@@ -2944,25 +2928,21 @@ export function SettingsPage() {
       return;
     }
 
-    const res = await fetch("/api/settings", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        ...resolvedProfileForm,
-        password: passwordForm.password,
-        ...(isOwner ? { company: resolvedCompanyForm } : {}),
-      }),
-    });
-    const json = await res.json().catch(() => null);
-    // if (!res.ok) {
-    //   setError(json?.error || "password_update_failed");
-    //   setPasswordBusy(false);
-    //   return;
-    // }
+    try {
+      await updateSettings(
+        {
+          ...getPersistedProfilePayload(),
+          password: passwordForm.password,
+        },
+        "Credentials updated."
+      );
 
-    setPasswordForm({ password: "", confirmPassword: "" });
-    setMessage("Credentials updated.");
-    setPasswordBusy(false);
+      setPasswordForm({ password: "", confirmPassword: "" });
+    } catch (requestError) {
+      setError(requestError.message || "password_update_failed");
+    } finally {
+      setPasswordBusy(false);
+    }
   }
 
   return (
@@ -2971,111 +2951,117 @@ export function SettingsPage() {
       <InlineMessage error={settings.error || error} message={message} />
 
       <section className="grid gap-4">
-        <form onSubmit={saveProfile} className="grid gap-4">
-          <div className={`grid gap-4 ${isOwner ? "xl:grid-cols-2" : ""}`}>
-            <div className={cardClass()}>
-              <SectionHeader title="Personal Details" />
-              <div className="grid gap-3">
-            <LabeledField label="Name">
-              <input className={fieldClass()} value={resolvedProfileForm.name} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), name: e.target.value }))} />
-            </LabeledField>
-            <LabeledField label="User ID">
-              <input className={fieldClass()} value={resolvedProfileForm.userCode} readOnly />
-            </LabeledField>
-            <LabeledField label="User Name">
-              <input className={fieldClass()} value={resolvedProfileForm.userName} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), userName: e.target.value }))} />
-            </LabeledField>
-            <LabeledField label="Email">
-              <input className={fieldClass()} type="email" value={resolvedProfileForm.email} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), email: e.target.value }))} />
-            </LabeledField>
-            <LabeledField label="Mobile">
-              <input className={fieldClass()} value={resolvedProfileForm.mobile} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), mobile: e.target.value }))} />
-            </LabeledField>
-            <LabeledField label="Address">
-              <textarea className={fieldClass()} rows={4} value={resolvedProfileForm.address} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), address: e.target.value }))} />
-            </LabeledField>
-              </div>
+        <CollapsibleSection
+          title="Personal Details"
+          helper="Primary user profile and contact information."
+          open={sectionState.personal}
+          onToggle={() => setSectionState((current) => ({ ...current, personal: !current.personal }))}
+        >
+          <form onSubmit={saveProfile} className="grid gap-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <LabeledField label="Name">
+                <input className={fieldClass()} value={resolvedProfileForm.name} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), name: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="User ID">
+                <input className={fieldClass()} value={resolvedProfileForm.userCode} readOnly />
+              </LabeledField>
+              <LabeledField label="User Name">
+                <input className={fieldClass()} value={resolvedProfileForm.userName} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), userName: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="Email">
+                <input className={fieldClass()} type="email" value={resolvedProfileForm.email} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), email: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="Mobile">
+                <input className={fieldClass()} value={resolvedProfileForm.mobile} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), mobile: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="Address">
+                <textarea className={fieldClass()} rows={4} value={resolvedProfileForm.address} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), address: e.target.value }))} />
+              </LabeledField>
             </div>
+            <BusyButton type="submit" busy={profileBusy} className="acm-btn acm-btn-primary w-fit px-5">Save Details</BusyButton>
+          </form>
+        </CollapsibleSection>
 
-            {isOwner ? (
-              <div className={cardClass()}>
-                <SectionHeader title="Company Details" />
-                <div className="mb-3 text-sm text-[color:var(--acm-muted-fg)]">
-                  These details are fetched automatically into estimate PDFs and outgoing email sends.
-                </div>
-                <div className="grid gap-4">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <LabeledField label="Company Name">
-                      <input className={fieldClass()} value={resolvedCompanyForm.name} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), name: e.target.value, stampLabel: e.target.value || (prev ?? resolvedCompanyForm).stampLabel }))} />
-                    </LabeledField>
-                    <LabeledField label="Company Code">
-                      <input className={fieldClass()} value={resolvedCompanyForm.code} readOnly />
-                    </LabeledField>
-                    <LabeledField label="Company Email">
-                      <input className={fieldClass()} type="email" value={resolvedCompanyForm.email} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), email: e.target.value }))} />
-                    </LabeledField>
-                    <LabeledField label="Company Contact">
-                      <input className={fieldClass()} value={resolvedCompanyForm.contact} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), contact: e.target.value }))} />
-                    </LabeledField>
-                  </div>
-                  <LabeledField label="Company Address">
-                    <textarea className={fieldClass()} rows={4} value={resolvedCompanyForm.address} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), address: e.target.value }))} />
+        {isOwner ? (
+          <CollapsibleSection
+            title="Company Details"
+            helper="These details feed estimate PDFs, invoice records, and outgoing mail."
+            open={sectionState.company}
+            onToggle={() => setSectionState((current) => ({ ...current, company: !current.company }))}
+          >
+            <form onSubmit={saveCompany} className="grid gap-4">
+              <div className="grid gap-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <LabeledField label="Company Name">
+                    <input className={fieldClass()} value={resolvedCompanyForm.name} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), name: e.target.value, stampLabel: e.target.value || (prev ?? resolvedCompanyForm).stampLabel }))} />
                   </LabeledField>
+                  <LabeledField label="Company Code">
+                    <input className={fieldClass()} value={resolvedCompanyForm.code} readOnly />
+                  </LabeledField>
+                  <LabeledField label="Company Email">
+                    <input className={fieldClass()} type="email" value={resolvedCompanyForm.email} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), email: e.target.value }))} />
+                  </LabeledField>
+                  <LabeledField label="Company Contact">
+                    <input className={fieldClass()} value={resolvedCompanyForm.contact} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), contact: e.target.value }))} />
+                  </LabeledField>
+                </div>
+                <LabeledField label="Company Address">
+                  <textarea className={fieldClass()} rows={4} value={resolvedCompanyForm.address} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), address: e.target.value }))} />
+                </LabeledField>
 
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <div className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
-                      <div className="mb-3 text-sm font-semibold text-[color:var(--acm-fg)]">Logo</div>
-                      {resolvedCompanyForm.logoDataUrl ? <img src={resolvedCompanyForm.logoDataUrl} alt="Company logo" className="h-28 w-full rounded-[16px] object-contain bg-white p-2" /> : <div className="flex h-28 items-center justify-center rounded-[16px] bg-[color:var(--acm-surface)] text-sm text-[color:var(--acm-muted-fg)]">No logo uploaded</div>}
-                      <AssetUploadField label="Upload Logo" helper={resolvedCompanyForm.logoDataUrl ? "Logo uploaded." : "Choose a logo image."} onChange={(e) => handleAssetUpload("logoDataUrl", e.target.files?.[0])} />
-                    </div>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
+                    <div className="mb-3 text-sm font-semibold text-[color:var(--acm-fg)]">Logo</div>
+                    {resolvedCompanyForm.logoDataUrl ? <img src={resolvedCompanyForm.logoDataUrl} alt="Company logo" className="h-28 w-full rounded-[16px] object-contain bg-white p-2" /> : <div className="flex h-28 items-center justify-center rounded-[16px] bg-[color:var(--acm-surface)] text-sm text-[color:var(--acm-muted-fg)]">No logo uploaded</div>}
+                    <AssetUploadField label="Upload Logo" helper={resolvedCompanyForm.logoDataUrl ? "Logo uploaded." : "Choose a logo image."} onChange={(e) => handleAssetUpload("logoDataUrl", e.target.files?.[0])} />
+                  </div>
 
-                    <div className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
-                      <div className="mb-3 flex items-center justify-between gap-3">
-                        <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Signature</div>
-                        <button type="button" onClick={() => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), signatureDataUrl: buildSignatureDataUrl((prev ?? resolvedCompanyForm).signatureName || resolvedProfileForm.name) }))} className="acm-btn acm-btn-secondary h-9 px-3">Generate</button>
-                      </div>
-                      <LabeledField label="Owner Name">
-                        <input className={fieldClass()} value={resolvedCompanyForm.signatureName} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), signatureName: e.target.value }))} />
-                      </LabeledField>
-                      {resolvedCompanyForm.signatureDataUrl ? <img src={resolvedCompanyForm.signatureDataUrl} alt="Owner signature" className="mt-3 h-28 w-full rounded-[16px] object-contain bg-white p-2" /> : null}
-                      <AssetUploadField label="Upload Signature" helper={resolvedCompanyForm.signatureDataUrl ? "Signature ready." : "Choose a signature image or generate one."} onChange={(e) => handleAssetUpload("signatureDataUrl", e.target.files?.[0])} />
+                  <div className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Signature</div>
+                      <button type="button" onClick={() => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), signatureDataUrl: buildSignatureDataUrl((prev ?? resolvedCompanyForm).signatureName || resolvedProfileForm.name) }))} className="acm-btn acm-btn-secondary h-9 px-3">Generate</button>
                     </div>
+                    <LabeledField label="Owner Name">
+                      <input className={fieldClass()} value={resolvedCompanyForm.signatureName} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), signatureName: e.target.value }))} />
+                    </LabeledField>
+                    {resolvedCompanyForm.signatureDataUrl ? <img src={resolvedCompanyForm.signatureDataUrl} alt="Owner signature" className="mt-3 h-28 w-full rounded-[16px] object-contain bg-white p-2" /> : null}
+                    <AssetUploadField label="Upload Signature" helper={resolvedCompanyForm.signatureDataUrl ? "Signature ready." : "Choose a signature image or generate one."} onChange={(e) => handleAssetUpload("signatureDataUrl", e.target.files?.[0])} />
+                  </div>
 
-                    <div className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
-                      <div className="mb-3 flex items-center justify-between gap-3">
-                        <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Stamp</div>
-                        <button type="button" onClick={() => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), stampDataUrl: buildStampDataUrl((prev ?? resolvedCompanyForm).stampLabel || (prev ?? resolvedCompanyForm).name) }))} className="acm-btn acm-btn-secondary h-9 px-3">Generate</button>
-                      </div>
-                      <LabeledField label="Stamp Label">
-                        <input className={fieldClass()} value={resolvedCompanyForm.stampLabel} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), stampLabel: e.target.value }))} />
-                      </LabeledField>
-                      {resolvedCompanyForm.stampDataUrl ? <img src={resolvedCompanyForm.stampDataUrl} alt="Company stamp" className="mt-3 h-28 w-full rounded-[16px] object-contain bg-white p-2" /> : null}
-                      <AssetUploadField label="Upload Stamp" helper={resolvedCompanyForm.stampDataUrl ? "Stamp ready." : "Choose a stamp image or generate one."} onChange={(e) => handleAssetUpload("stampDataUrl", e.target.files?.[0])} />
+                  <div className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Stamp</div>
+                      <button type="button" onClick={() => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), stampDataUrl: buildStampDataUrl((prev ?? resolvedCompanyForm).stampLabel || (prev ?? resolvedCompanyForm).name) }))} className="acm-btn acm-btn-secondary h-9 px-3">Generate</button>
                     </div>
+                    <LabeledField label="Stamp Label">
+                      <input className={fieldClass()} value={resolvedCompanyForm.stampLabel} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), stampLabel: e.target.value }))} />
+                    </LabeledField>
+                    {resolvedCompanyForm.stampDataUrl ? <img src={resolvedCompanyForm.stampDataUrl} alt="Company stamp" className="mt-3 h-28 w-full rounded-[16px] object-contain bg-white p-2" /> : null}
+                    <AssetUploadField label="Upload Stamp" helper={resolvedCompanyForm.stampDataUrl ? "Stamp ready." : "Choose a stamp image or generate one."} onChange={(e) => handleAssetUpload("stampDataUrl", e.target.files?.[0])} />
                   </div>
                 </div>
               </div>
-            ) : null}
-          </div>
+              <BusyButton type="submit" busy={companyBusy} className="acm-btn acm-btn-primary w-fit px-5">Save Details</BusyButton>
+            </form>
+          </CollapsibleSection>
+        ) : null}
 
-          <BusyButton type="submit" busy={profileBusy} className="acm-btn acm-btn-primary w-fit px-5">Save Details</BusyButton>
-        </form>
-
-        <div className={cardClass()}>
-          <SectionHeader title="Change Credentials" />
-          <div className="mb-3 text-sm text-[color:var(--acm-muted-fg)]">
-            Update your user name and password for future logins. Your User ID stays fixed.
-          </div>
-          <form onSubmit={changePassword} className="grid gap-3">
+        <CollapsibleSection
+          title="Change Credentials"
+          helper="Update your user name and password for future logins. Your User ID stays fixed."
+          open={sectionState.credentials}
+          onToggle={() => setSectionState((current) => ({ ...current, credentials: !current.credentials }))}
+        >
+          <form onSubmit={changePassword} className="grid gap-3 md:grid-cols-2">
             <LabeledField label="New Password">
               <PasswordInput className={fieldClass()} value={passwordForm.password} onChange={(e) => setPasswordForm((prev) => ({ ...prev, password: e.target.value }))} />
             </LabeledField>
             <LabeledField label="Confirm Password">
               <PasswordInput className={fieldClass()} value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))} />
             </LabeledField>
-            <BusyButton type="submit" busy={passwordBusy} className="acm-btn acm-btn-primary">Update Credentials</BusyButton>
+            <BusyButton type="submit" busy={passwordBusy} className="acm-btn acm-btn-primary w-fit">Update Credentials</BusyButton>
           </form>
-        </div>
+        </CollapsibleSection>
       </section>
     </>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { pooledGetJson } from "@/lib/client/apiClient";
 
 const DEFAULT_TTL_MS = 30_000;
 const queryStore = new Map();
@@ -49,11 +50,7 @@ async function runQuery(key, options = {}) {
 
   entry.promise = (async () => {
     try {
-      const res = await fetch(key, { signal });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(json?.error || "request_failed");
-      }
+      const json = await pooledGetJson(key, { signal });
       entry.data = json;
       entry.error = "";
       entry.updatedAt = Date.now();

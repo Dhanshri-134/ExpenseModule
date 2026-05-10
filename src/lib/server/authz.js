@@ -1,6 +1,7 @@
 import { createSupabasePagesServerClient } from "@/lib/pages/supabaseServerClient";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { buildDashboardViewer } from "@/lib/dashboard";
+import { extractCompanyAssetMetadata } from "@/lib/server/companyAssets";
 
 export async function getRequestContext(req, res) {
   const supabase = createSupabasePagesServerClient(req, res);
@@ -30,13 +31,15 @@ export async function getRequestContext(req, res) {
 
   const { data: company, error: companyError } = await admin
     .from("companies")
-    .select("id, name, code")
+    .select("id, name, code, metadata")
     .eq("id", membership.company_id)
     .maybeSingle();
 
   if (companyError || !company) {
     return { ok: false, status: 403, error: "company_not_found" };
   }
+
+  const companyMetadata = extractCompanyAssetMetadata(admin, company?.metadata);
 
   const { data: projectAssignments, error: assignmentError } = await admin
     .from("project_users")
@@ -76,6 +79,7 @@ export async function getRequestContext(req, res) {
       role,
       avatarUrl: user.user_metadata?.avatar_url ?? null,
       companyName: company.name,
+      companyLogoUrl: companyMetadata.logoUrl || "",
     }),
   };
 }

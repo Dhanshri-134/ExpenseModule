@@ -61,11 +61,44 @@ async function canManageExistingStaff(ctx, targetUserId) {
   return (targetAssignments ?? []).some((item) => item.role === "employee");
 }
 
+async function buildStaffPreview(ctx, role) {
+  const resolvedRole = role === "manager" ? "manager" : role === "subcontractor" ? "subcontractor" : "employee";
+  const { data: counter } = await ctx.admin
+    .from("company_role_counters")
+    .select("last_number")
+    .eq("company_id", ctx.company.id)
+    .eq("role", resolvedRole)
+    .maybeSingle();
+
+  const nextRoleNumber = Number(counter?.last_number || 0) + 1;
+  const paddedNumber = String(nextRoleNumber).padStart(3, "0");
+  const companyCode = ctx.company.code || "ACM";
+  const creatorRoleNumber = ctx.membership?.role_number || null;
+
+  const userCode =
+    ctx.role === "manager" && resolvedRole === "employee" && creatorRoleNumber
+      ? `${companyCode}-M${creatorRoleNumber}-E-${paddedNumber}`
+      : resolvedRole === "manager"
+        ? `${companyCode}-M-${paddedNumber}`
+        : `${companyCode}-E-${paddedNumber}`;
+
+  return {
+    userCode,
+    temporaryPassword: "Shris@xxxxxxxx9",
+  };
+}
+
 export default async function handler(req, res) {
   const ctx = await getRequestContext(req, res);
   if (!ctx.ok) return sendError(res, ctx.status, ctx.error);
 
   if (req.method === "GET") {
+    if (req.query.mode === "preview") {
+      const previewRole = String(req.query.role || "employee");
+      const preview = await buildStaffPreview(ctx, previewRole);
+      return sendOk(res, { preview });
+    }
+
     const { data: companyUsers, error } = await ctx.admin
       .from("company_users")
       .select("company_id, user_id, role, user_code, user_name, mobile_no, hourly_rate, craft, created_in_project_id, person_id, created_at")
@@ -78,7 +111,7 @@ export default async function handler(req, res) {
 
     let filtered = companyUsers ?? [];
     if (ctx.role === "manager") {
-      const employeeIds = new Set();
+      const visibleUserIds = new Set([ctx.user.id]);
       const managedProjectIds = ctx.projectAssignments
         .filter((item) => item.role === "manager")
         .map((item) => item.project_id);
@@ -90,11 +123,11 @@ export default async function handler(req, res) {
           .in("project_id", managedProjectIds);
 
         (scopedAssignments ?? [])
-          .filter((item) => item.role === "employee")
-          .forEach((item) => employeeIds.add(item.user_id));
+          .filter((item) => item.role === "employee" || item.role === "subcontractor")
+          .forEach((item) => visibleUserIds.add(item.user_id));
       }
 
-      filtered = filtered.filter((item) => item.user_id === ctx.user.id || employeeIds.has(item.user_id));
+      filtered = filtered.filter((item) => visibleUserIds.has(item.user_id));
     } else if (ctx.role === "employee") {
       filtered = filtered.filter((item) => item.user_id === ctx.user.id);
     }
@@ -183,6 +216,7 @@ export default async function handler(req, res) {
       staff: {
         managers: enriched.filter((item) => item.role === "manager"),
         employees: enriched.filter((item) => item.role === "employee"),
+        subcontractors: enriched.filter((item) => item.role === "subcontractor"),
       },
     });
   }

@@ -123,6 +123,7 @@ export function buildDashboardViewer({
   role,
   avatarUrl = null,
   companyName,
+  companyLogoUrl = "",
 }) {
   const safeRole = normalizeRole(role) || "owner";
   const fallbackName = companyName ? `${companyName} Admin` : ROLE_LABELS[safeRole] ?? "User";
@@ -137,6 +138,7 @@ export function buildDashboardViewer({
     roleLabel: ROLE_LABELS[safeRole] ?? "User",
     roleBadge: DASHBOARD_ROLE_META[safeRole]?.badge ?? "Workspace Member",
     avatarUrl,
+    companyLogoUrl,
     initials: getInitials(name || fallbackName),
   };
 }

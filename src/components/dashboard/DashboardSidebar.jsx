@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import styles from "@/styles/DashboardShell.module.css";
@@ -21,8 +20,8 @@ function NavItem({ item, active }) {
   );
 }
 
-function ViewerCard({ viewer }) {
-  const hasPhoto = Boolean(viewer?.avatarUrl);
+function ViewerCard({ viewer, logo }) {
+  const hasPhoto = Boolean(logo);
 
   return (
     <div className={styles.viewerCard}>
@@ -31,21 +30,14 @@ function ViewerCard({ viewer }) {
           {hasPhoto ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={viewer.avatarUrl}
+              src={logo}
               alt={viewer.name}
               className={styles.avatarImage}
             />
           ) : (
-            <>
-              <Image
-                src="/assets/logo.png"
-                alt="ACM Desk logo"
-                width={28}
-                height={28}
-                className="opacity-95"
-              />
-              <span className="sr-only">{viewer.initials}</span>
-            </>
+            <span aria-hidden="true" className="text-sm font-bold text-[color:var(--acm-fg)]">
+              {viewer.initials}
+            </span>
           )}
         </div>
         <div className={styles.viewerMeta}>
@@ -60,6 +52,7 @@ function ViewerCard({ viewer }) {
 }
 
 export default function DashboardSidebar({
+  companyName,
   navigation,
   viewer,
   showBackButton,
@@ -69,6 +62,7 @@ export default function DashboardSidebar({
 }) {
   const router = useRouter();
   const currentPath = router.asPath.split("?")[0];
+  const sidebarLogo = viewer?.companyLogoUrl || "/assets/logo.png";
 
   return (
     <>
@@ -96,7 +90,14 @@ export default function DashboardSidebar({
           </button>
         ) : null} */}
 
-        <div className={styles.sidebarTop}>
+        {/* <div className={styles.sidebarTop}>
+          <div className="flex items-center">
+            <img
+              src={sidebarLogo}
+              alt={`${companyName || "Company"} logo`}
+              className="h-12 w-auto max-w-[180px] object-contain"
+            />
+          </div>
           <button
             type="button"
             onClick={onClose}
@@ -104,9 +105,9 @@ export default function DashboardSidebar({
           >
             Close
           </button>
-        </div>
+        </div> */}
 
-        <ViewerCard viewer={viewer} />
+        <ViewerCard viewer={viewer} logo={sidebarLogo} />
 
         <nav className={styles.nav}>
           {navigation.map((item) => {

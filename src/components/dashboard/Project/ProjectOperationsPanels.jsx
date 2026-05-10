@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Modal from "@/components/dashboard/Modal";
 import { BusyButton, CompactListRow } from "@/components/dashboard/DashboardUi";
+import { sendJson } from "@/lib/client/apiClient";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
 import { ProjectEstimatesWorkspace } from "@/components/dashboard/Project/ProjectEstimateTemplate";
 
@@ -80,6 +81,21 @@ function formatApiError(json, fallback) {
   return fallback;
 }
 
+function matchesSearchQuery(query, ...values) {
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  if (!normalizedQuery) return true;
+  return values
+    .flatMap((value) => {
+      if (Array.isArray(value)) return value;
+      if (value && typeof value === "object") return Object.values(value);
+      return [value];
+    })
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .includes(normalizedQuery);
+}
+
 function SectionHeader({ title, action }) {
   return (
     <div className="mb-4 flex items-center justify-between gap-3">
@@ -150,12 +166,27 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
   const reportsQuery = useApiQuery(projectId ? `/api/field-reports?projectId=${projectId}` : null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selectedReport, setSelectedReport] = useState(null);
   const [form, setForm] = useState(() => createFieldReportForm(projectId));
 
   const reports = reportsQuery.data?.reports ?? [];
+  const filteredReports = reports.filter((report) =>
+    matchesSearchQuery(
+      searchQuery,
+      report.location,
+      report.report_date,
+      report.report_time,
+      report.weather_conditions,
+      report.temperature_range,
+      report.comments,
+      report.created_by?.name,
+      report.created_by?.user_name,
+      report.work_activities?.map((entry) => entry.text)
+    )
+  );
   const canManageReports = roleBase === "manager" || roleBase === "owner";
   const useDetailedInspectionForm = canManageReports;
   const canCreateReports = Boolean(projectId);
@@ -297,44 +328,39 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
     setMessage("");
 
     const method = form.id ? "PUT" : "POST";
-    const res = await fetch("/api/field-reports", {
-      method,
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    const json = await res.json().catch(() => null);
+    try {
+      await sendJson("/api/field-reports", {
+        method,
+        body: form,
+      });
 
-    if (!res.ok) {
-      setError(formatApiError(json, "field_report_save_failed"));
+      setMessage(form.id ? "Field report updated." : "Field report created.");
+      setOpen(false);
+      invalidateApiQuery(`/api/field-reports?projectId=${projectId}`);
+      await reportsQuery.refresh();
+    } catch (requestError) {
+      setError(formatApiError(requestError.payload, "field_report_save_failed"));
+    } finally {
       setBusy(false);
-      return;
     }
-
-    setMessage(form.id ? "Field report updated." : "Field report created.");
-    setOpen(false);
-    invalidateApiQuery(`/api/field-reports?projectId=${projectId}`);
-    await reportsQuery.refresh();
-    setBusy(false);
   }
 
   async function deleteReport(report) {
     if (!window.confirm(`Delete field report for ${formatDate(report.report_date)}?`)) return;
     setError("");
     setMessage("");
-    const res = await fetch("/api/field-reports", {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: report.id, projectId }),
-    });
-    const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(formatApiError(json, "field_report_delete_failed"));
-      return;
+    try {
+      await sendJson("/api/field-reports", {
+        method: "DELETE",
+        body: { id: report.id, projectId },
+      });
+      setMessage("Field report deleted.");
+      if (selectedReport?.id === report.id) setSelectedReport(null);
+      invalidateApiQuery(`/api/field-reports?projectId=${projectId}`);
+      await reportsQuery.refresh();
+    } catch (requestError) {
+      setError(formatApiError(requestError.payload, "field_report_delete_failed"));
     }
-    setMessage("Field report deleted.");
-    if (selectedReport?.id === report.id) setSelectedReport(null);
-    invalidateApiQuery(`/api/field-reports?projectId=${projectId}`);
-    await reportsQuery.refresh();
   }
 
   return (
@@ -357,14 +383,18 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
           <div className="text-lg font-bold text-[color:var(--acm-fg)]">Daily Inspection Archive</div>
         </div>
 
+        <div className="mb-4">
+          <input className={fieldClass()} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search reports by location, weather, date, creator, or notes" />
+        </div>
+
         <div className="grid gap-4 lg:grid-cols-2">
-          {!reports.length ? (
+          {!filteredReports.length ? (
             <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-6 text-sm text-[color:var(--acm-muted-fg)] lg:col-span-2">
-              No field reports recorded for this project yet.
+              No field reports match the current search.
             </div>
           ) : null}
 
-          {reports.map((report) => (
+          {filteredReports.map((report) => (
             <div key={report.id} className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
               <CompactListRow
               key={report.id}
