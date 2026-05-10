@@ -1,9 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import DashboardSidebar from "@/components/dashboard/DashboardSidebar";
+import { useApiQuery } from "@/lib/client/apiQuery";
 import styles from "@/styles/DashboardShell.module.css";
+
+function withCacheBuster(url, token) {
+  const value = String(url || "").trim();
+  if (!value || !token) return value;
+  return `${value}${value.includes("?") ? "&" : "?"}v=${encodeURIComponent(token)}`;
+}
 
 export default function DashboardShell({
   companyName,
@@ -15,6 +22,20 @@ export default function DashboardShell({
   children,
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const settingsQuery = useApiQuery("/api/settings");
+  const liveLogoUrl = settingsQuery.data?.company?.logoDataUrl || "";
+  const resolvedViewer = useMemo(() => {
+    if (!viewer) return viewer;
+    const cacheToken = settingsQuery.updatedAt || "initial";
+    const nextLogo = liveLogoUrl
+      ? withCacheBuster(liveLogoUrl, cacheToken)
+      : viewer.companyLogoUrl || "";
+
+    return {
+      ...viewer,
+      companyLogoUrl: nextLogo,
+    };
+  }, [liveLogoUrl, settingsQuery.updatedAt, viewer]);
 
   return (
     <div className={styles.shell}>
@@ -22,7 +43,7 @@ export default function DashboardShell({
         <DashboardSidebar
           companyName={companyName}
           navigation={navigation}
-          viewer={viewer}
+          viewer={resolvedViewer}
           showBackButton={showBackButton}
           backHref={backHref}
           mobileOpen={mobileOpen}

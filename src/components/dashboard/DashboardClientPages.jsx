@@ -2907,6 +2907,8 @@ export function SettingsPage() {
         body: payload,
       });
       setMessage(successMessage);
+      invalidateApiQuery("/api/settings");
+      invalidateApiQuery("/api/dashboard");
       await settings.refresh();
     }
     catch (requestError) {
