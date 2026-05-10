@@ -449,6 +449,12 @@ function approximatePdfTextWidth(text, size = 10) {
   return String(text ?? "").length * size * 0.52;
 }
 
+function drawRightAlignedText(commands, text, rightX, y, size = 10, fillRgb = [15, 23, 42]) {
+  const safeText = String(text ?? "");
+  const width = approximatePdfTextWidth(safeText, size);
+  drawText(commands, safeText, rightX - width, y, size, fillRgb);
+}
+
 function drawRect(commands, x, y, width, height, fillRgb, strokeRgb = null, lineWidth = 1) {
   if (fillRgb) commands.push(`${pdfColor(fillRgb)} rg`);
   if (strokeRgb) commands.push(`${pdfColor(strokeRgb)} RG`);
@@ -488,40 +494,39 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
   const customerName = customer.name || estimate?.client?.name || "Client";
   const customerAddress = customer.address || estimate?.client?.address || "";
   const customerContact = customer.contact || estimate?.client?.contact || "";
-  const customerEmail = customer.email || estimate?.client?.email || "";
+  const customerEmail = customer.email || customer.phone || estimate?.client?.email || "";
+  const ownerName = company.signatureName || company.ownerName || "";
   const companyLines = [
     company.name || branding.companyName || "Your Company",
     company.address || "",
+    ownerName ? `Owner: ${ownerName}` : "",
     [company.contactPhone, company.contactEmail].filter(Boolean).join("  "),
   ].filter(Boolean);
 
-  const companyX = page.width - page.margin - 210;
+  const companyRightX = page.width - page.margin;
   companyLines.forEach((lineText, index) => {
-    drawText(commands, lineText, companyX, page.height - 58 - index * 14, index === 0 ? 10.5 : 8.8, ink);
+    drawRightAlignedText(commands, lineText, companyRightX, page.height - 58 - index * 14, index === 0 ? 10.5 : 8.8, ink);
   });
-  const detailStartY = page.height - 58 - companyLines.length * 14;
-  drawText(commands, formatPdfDate(estimate?.estimate_date), page.width - page.margin - 90, detailStartY - 18, 12, ink);
-  if (validUntil) {
-    drawText(commands, `Valid Until: ${formatPdfDate(validUntil)}`, companyX, detailStartY - 18, 8.8, muted);
-  }
   commands.push(`${pdfColor(accent)} RG`);
   commands.push("1 w");
   commands.push(`${page.margin} ${page.height - 125} m ${page.width - page.margin} ${page.height - 125} l S`);
 
-  y = page.height - 152;
+  const datesY = page.height - 140;
+  drawText(commands, `Created Date: ${formatPdfDate(estimate?.estimate_date)}`, page.margin, datesY, 9, ink);
+  if (validUntil) {
+    drawRightAlignedText(commands, `Validation Date: ${formatPdfDate(validUntil)}`, companyRightX, datesY, 9, ink);
+  }
+
+  y = page.height - 168;
   drawText(commands, "Customer Details", page.margin, y, 11, accent);
   const customerBlockTop = y - 10;
-  const customerBlockHeight = 58;
+  const customerBlockHeight = 62;
   drawRect(commands, page.margin, customerBlockTop - customerBlockHeight, page.width - page.margin * 2, customerBlockHeight, null, line, 0.8);
-  drawText(commands, "Customer", page.margin + 12, customerBlockTop - 16, 8.5, muted);
-  drawText(commands, customerName, page.margin + 12, customerBlockTop - 31, 10, ink);
-  if (customerAddress) {
-    drawWrappedText(commands, customerAddress, page.margin + 12, customerBlockTop - 45, 220, 8.5, 10, muted);
-  }
-  drawText(commands, "Contact", page.margin + 265, customerBlockTop - 16, 8.5, muted);
-  drawText(commands, customerContact || "-", page.margin + 265, customerBlockTop - 31, 9.2, ink);
-  drawText(commands, "Email", page.margin + 265, customerBlockTop - 45, 8.5, muted);
-  drawText(commands, customerEmail || "-", page.margin + 300, customerBlockTop - 45, 9.2, ink);
+  drawText(commands, `Customer: ${customerName || "-"}`, page.margin + 12, customerBlockTop - 16, 8.8, ink);
+  drawText(commands, `Contact: ${customerContact || "-"}`, page.margin + 12, customerBlockTop - 30, 8.8, ink);
+  drawText(commands, `Email: ${customerEmail || "-"}`, page.margin + 12, customerBlockTop - 44, 8.8, ink);
+  const customerAddressLine = fitPdfCellText(`Address: ${customerAddress || "-"}`, page.width - page.margin * 2 - 24, 8.8);
+  drawText(commands, customerAddressLine, page.margin + 12, customerBlockTop - 58, 8.8, ink);
   y = customerBlockTop - customerBlockHeight - 26;
 
   const tableWidth = 470;
@@ -716,7 +721,7 @@ export async function estimateToPdfBuffer(estimate, options = {}) {
   if (signatureImage) {
     const dimensions = signatureImage.scaleToFit(130, 58);
     firstPage.drawImage(signatureImage, {
-      x: 420,
+      x: 423,
       y: 72,
       width: dimensions.width,
       height: dimensions.height,
@@ -727,7 +732,7 @@ export async function estimateToPdfBuffer(estimate, options = {}) {
   if (stampImage) {
     const dimensions = stampImage.scaleToFit(84, 84);
     firstPage.drawImage(stampImage, {
-      x: 332,
+      x: 42,
       y: 58,
       width: dimensions.width,
       height: dimensions.height,

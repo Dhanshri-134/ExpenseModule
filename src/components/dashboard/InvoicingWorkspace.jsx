@@ -205,9 +205,9 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
 
             <div className="flex flex-wrap items-center justify-between gap-3">
               <input className={fieldClass()} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search invoices by estimate, client, reference, status, or value" />
-              <div className="text-sm font-medium text-[color:var(--acm-muted-fg)]">
+              {/* <div className="text-sm font-medium text-[color:var(--acm-muted-fg)]">
                 {filteredInvoiceCandidates.length} invoice{filteredInvoiceCandidates.length === 1 ? "" : "s"}
-              </div>
+              </div> */}
             </div>
             <div className="mt-4 space-y-3 grid grid-cols-3 gap-6">
               {filteredInvoiceCandidates.length ? filteredInvoiceCandidates.map((estimate) => (
