@@ -172,6 +172,7 @@ export function buildEstimateComputation(payload = {}) {
 
     laborRates.push(...processedLabor.laborRates);
     processedCostCodes.push({
+      id: costCode.id || null,
       displayOrder: index,
       costCodeId: costCode.costCodeId || costCode.costCode?.id || null,
       code: normalizeText(costCode.code || costCode.costCode?.code),
@@ -329,6 +330,7 @@ export async function persistEstimateGraph(admin, ctx, estimate, computed) {
     const { data: itemRow, error: itemError } = await admin
       .from("estimate_cost_code_items")
       .insert({
+        ...(row.id ? { id: row.id } : {}),
         estimate_id: estimate.id,
         company_id: ctx.company.id,
         project_id: estimate.project_id,
@@ -478,6 +480,28 @@ function buildLegacyLineItemsFromCostCodes(costCodes = []) {
   }));
 }
 
+function splitSubcontractorLaborEntries(entries = []) {
+  const laborEntries = [];
+  const subcontractorEntries = [];
+
+  for (const entry of entries ?? []) {
+    if (entry?.metadata?.kind === "subcontractor") {
+      subcontractorEntries.push({
+        ...entry,
+        cost: toNumber(entry.metadata?.cost),
+        workersCompPercent: toNumber(entry.metadata?.workersCompPercent),
+        liabilityPercent: toNumber(entry.metadata?.liabilityPercent),
+        overheadPercent: toNumber(entry.metadata?.overheadPercent),
+        profitPercent: toNumber(entry.metadata?.profitPercent),
+      });
+      continue;
+    }
+    laborEntries.push(entry);
+  }
+
+  return { laborEntries, subcontractorEntries };
+}
+
 export async function loadEstimateGraph(admin, estimateIds = []) {
   if (!estimateIds.length) return new Map();
 
@@ -600,6 +624,7 @@ export async function loadEstimateGraph(admin, estimateIds = []) {
 
   for (const row of costCodeItems ?? []) {
     const estimateRows = graph.get(row.estimate_id) ?? [];
+    const splitEntries = splitSubcontractorLaborEntries(byCostCodeItemId.labor.get(row.id) ?? []);
     estimateRows.push({
       id: row.id,
       costCode: {
@@ -609,7 +634,8 @@ export async function loadEstimateGraph(admin, estimateIds = []) {
         description: row.cost_codes?.description || row.description || "",
       },
       description: row.description || "",
-      laborEntries: byCostCodeItemId.labor.get(row.id) ?? [],
+      laborEntries: splitEntries.laborEntries,
+      subcontractorEntries: splitEntries.subcontractorEntries,
       materialEntries: byCostCodeItemId.material.get(row.id) ?? [],
       equipmentEntries: byCostCodeItemId.equipment.get(row.id) ?? [],
       overheadEntries: byCostCodeItemId.overhead.get(row.id) ?? [],
@@ -639,7 +665,7 @@ export async function loadEstimateGraph(admin, estimateIds = []) {
 
 export function composeEstimateRecord(estimate, costCodes = []) {
   const summaryBase =
-    costCodes.length || !estimate.summary || !Object.keys(estimate.summary).length
+    !estimate.summary || !Object.keys(estimate.summary).length
       ? buildEstimateComputation({
           projectId: estimate.project_id,
           overheadPercent: estimate.overhead_percent,

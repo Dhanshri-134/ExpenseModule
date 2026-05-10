@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getRequestContext } from "@/lib/server/authz";
+import { canAccessModule, getRequestContext } from "@/lib/server/authz";
 import { createFollowUp } from "@/lib/server/followups";
 import { sendError, sendOk } from "@/lib/server/responses";
 
@@ -24,6 +24,7 @@ const DeleteClientSchema = z.object({
 export default async function handler(req, res) {
   const ctx = await getRequestContext(req, res);
   if (!ctx.ok) return sendError(res, ctx.status, ctx.error);
+  if (!canAccessModule(ctx, "clients")) return sendError(res, 403, "forbidden");
 
   if (req.method === "GET") {
     const { data: clients, error } = await ctx.admin

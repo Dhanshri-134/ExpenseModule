@@ -18,6 +18,7 @@ import {
 } from "@/components/dashboard/icons";
 import { pooledGetJson, sendJson } from "@/lib/client/apiClient";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
+import { MODULE_ACCESS_KEYS, MODULE_ACCESS_LABELS, normalizeModuleAccess } from "@/lib/moduleAccess";
 import { ChevronDown, ChevronRight, Pencil, Plus, Search, Sparkles, Trash2 } from "lucide-react";
 
 function cardClass(extra = "") {
@@ -68,6 +69,11 @@ function formatCompactNumber(value) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(numericValue);
 }
 
+function moduleAccessSummary(moduleAccess) {
+  const enabled = MODULE_ACCESS_KEYS.filter((key) => moduleAccess?.[key]).map((key) => MODULE_ACCESS_LABELS[key]);
+  return enabled.length ? enabled.join(", ") : "No extra modules";
+}
+
 function buildSearchText(...values) {
   return values
     .flatMap((value) => {
@@ -100,7 +106,7 @@ function SearchField({ value, onChange, placeholder = "Search..." }) {
     <label className="relative block min-w-[220px] flex-1">
       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[color:var(--acm-muted-fg)]" />
       <input
-        className={`${fieldClass()} pl-10`}
+        className={`${fieldClass()} h-10 pl-10`}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
@@ -839,32 +845,28 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
 
   return (
     <>
-      <SectionHeader
-        title={filteredClient ? `${filteredClient.name} Projects` : null}
-        action={
-          <div className="flex flex-wrap items-center gap-2">
-            {filteredClient ? (
-              <button
-                type="button"
-                onClick={() => router.push(`/${roleBase}/clients`)}
-                className="acm-btn acm-btn-secondary h-10 px-4"
-              >
-                Back to Clients
-              </button>
-            ) : null}
-            {canCreateProject ? (
-              <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
-                Create Project
-              </button>
-            ) : null}
-          </div>
-        }
-      />
+      <SectionHeader title={filteredClient ? `${filteredClient.name} Projects` : null} />
 
       <InlineMessage error={projects.error || error} message={message} />
 
-      <div className="mt-4">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <SearchField value={searchQuery} onChange={setSearchQuery} placeholder="Search projects by name, job number, client, or location" />
+        <div className="flex flex-wrap items-center gap-2">
+          {filteredClient ? (
+            <button
+              type="button"
+              onClick={() => router.push(`/${roleBase}/clients`)}
+              className="acm-btn acm-btn-secondary h-10 px-4"
+            >
+              Back to Clients
+            </button>
+          ) : null}
+          {canCreateProject ? (
+            <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
+              Create Project
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -1275,30 +1277,22 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
 
   return (
     <>
-      <SectionHeader
-        action={
-          canCreateLead ? (
-            <div className="mb-4">
-        <button type="button" onClick={() => router.push(`/${roleBase}/followups`)} className="acm-btn acm-btn-secondary h-10 px-4 mr-2">
-          Open Follow-up List
-        </button>
-            <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
-              Create Lead
-            </button>
-      </div>
-          ) : <div className="mb-4">
-        <button type="button" onClick={() => router.push(`/${roleBase}/followups`)} className="acm-btn acm-btn-secondary h-10 px-4">
-          Open Follow-up List
-        </button>
-      </div>
-          
-        }
-      />
+      <SectionHeader />
 
       <InlineMessage error={leads.error || error} message={message} />
 
-      <div className="mt-4">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <SearchField value={searchQuery} onChange={setSearchQuery} placeholder="Search leads by name, contact, email, or follow-up date" />
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => router.push(`/${roleBase}/followups`)} className="acm-btn acm-btn-secondary h-10 px-4">
+            Open Follow-up List
+          </button>
+          {canCreateLead ? (
+            <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
+              Create Lead
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -1648,16 +1642,7 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
 
   return (
     <>
-      <SectionHeader
-        // title="Clients"
-        action={
-          canCreateClient ? (
-            <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
-              Create Client
-            </button>
-          ) : null
-        }
-      />
+      <SectionHeader />
 
       <InlineMessage error={clients.error || error} message={message} onDismiss={() => { setError(""); setMessage(""); }} />
 
@@ -1667,8 +1652,15 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
         </button>
       </div> */}
 
-      <div className="mt-4">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <SearchField value={searchQuery} onChange={setSearchQuery} placeholder="Search clients by name, contact, email, address, or project count" />
+        {canCreateClient ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
+              Create Client
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -2234,6 +2226,7 @@ export function StaffManagerPage({
     mobile: "",
     hourlyRate: "",
     craft: "",
+    moduleAccess: normalizeModuleAccess({}, "employee"),
   });
   const staffData = useMemo(() => staff.data?.staff ?? { managers: [], employees: [], subcontractors: [] }, [staff.data]);
   const staffPreview = useApiQuery(
@@ -2281,6 +2274,7 @@ export function StaffManagerPage({
       mobile: "",
       hourlyRate: "",
       craft: "",
+      moduleAccess: normalizeModuleAccess({}, allowManagerCreation ? "manager" : "employee"),
     });
     setOpen(true);
   }
@@ -2301,6 +2295,7 @@ export function StaffManagerPage({
         projectId: fixedProjectId || null,
         userName: form.userName?.trim() || null,
         password: generatedPassword,
+        moduleAccess: form.moduleAccess,
         },
       });
 
@@ -2335,6 +2330,7 @@ export function StaffManagerPage({
         hourlyRate: Number(editingStaff.hourly_rate || 0),
         craft: editingStaff.craft || "",
         password: editingStaff.password || "",
+        moduleAccess: editingStaff.module_access || normalizeModuleAccess({}, editingStaff.role),
         },
       });
       setMessage("Staff updated");
@@ -2387,7 +2383,7 @@ export function StaffManagerPage({
   }
 
   function openEditStaff(item) {
-    setEditingStaff({ ...item });
+    setEditingStaff({ ...item, module_access: normalizeModuleAccess(item.module_access, item.role) });
     setEditOpen(true);
   }
 
@@ -2407,35 +2403,28 @@ export function StaffManagerPage({
 
   return (
     <>
-      <SectionHeader
-        // title="Staff"
-        action={
-          readOnly ? null : (
-            <div className="flex gap-2">
-              <button type="button" onClick={openCreateStaffModal} className="acm-btn acm-btn-primary h-10 px-4">
-                Create
-              </button>
-            </div>
-          )
-        }
-      />
-
-      <div className="mb-4 flex gap-2">
-        <button type="button" onClick={() => setTab("managers")} className={`acm-btn ${tab === "managers" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>
-          Managers
-        </button>
-        <button type="button" onClick={() => setTab("employees")} className={`acm-btn ${tab === "employees" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>
-          Employees
-        </button>
-        <button type="button" onClick={() => setTab("subcontractors")} className={`acm-btn ${tab === "subcontractors" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>
-          Subcontractors
-        </button>
-      </div>
+      <SectionHeader />
 
       <InlineMessage error={staff.error || error} message={message} />
 
-      <div className="mt-4">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <SearchField value={searchQuery} onChange={setSearchQuery} placeholder="Search staff by name, ID, email, craft, role, or project" />
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => setTab("managers")} className={`acm-btn ${tab === "managers" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>
+            Managers
+          </button>
+          <button type="button" onClick={() => setTab("employees")} className={`acm-btn ${tab === "employees" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>
+            Employees
+          </button>
+          <button type="button" onClick={() => setTab("subcontractors")} className={`acm-btn ${tab === "subcontractors" ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}>
+            Subcontractors
+          </button>
+          {readOnly ? null : (
+            <button type="button" onClick={openCreateStaffModal} className="acm-btn acm-btn-primary h-10 px-4">
+              Create
+            </button>
+          )}
+        </div>
       </div>
 
       <section className="mt-4 space-y-3">
@@ -2490,6 +2479,7 @@ export function StaffManagerPage({
                 { label: "Mobile", value: selectedProfile.mobile },
                 { label: "Role", value: roleName(selectedProfile.role) },
                 { label: "Hourly Rate", value: selectedProfile.hourly_rate || "0" },
+                { label: "Access Controls", value: moduleAccessSummary(selectedProfile.module_access) },
                 ...(selectedProfile.role === "subcontractor" ? [{ label: "Craft", value: selectedProfile.craft || "-" }] : []),
                 { label: "Project", value: getProjectAssignmentSummary(selectedProfile, fixedProjectId) },
                 {
@@ -2588,6 +2578,28 @@ export function StaffManagerPage({
               </div>
             ) : null}
           </FieldGroup>
+          <FieldGroup title="Access Controls">
+            <div className="grid gap-3 md:grid-cols-2">
+              {MODULE_ACCESS_KEYS.map((key) => (
+                <label key={key} className="flex items-center gap-3 rounded-[16px] border border-[color:var(--acm-border)] px-4 py-3 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form.moduleAccess?.[key])}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        moduleAccess: {
+                          ...(prev.moduleAccess || normalizeModuleAccess({}, prev.role)),
+                          [key]: e.target.checked,
+                        },
+                      }))
+                    }
+                  />
+                  <span>{MODULE_ACCESS_LABELS[key]}</span>
+                </label>
+              ))}
+            </div>
+          </FieldGroup>
           <FieldGroup title="Credentials">
             <LabeledField label="User Name">
               <input className={fieldClass()} value={form.userName} onChange={(e) => setForm((prev) => ({ ...prev, userName: e.target.value }))} />
@@ -2628,6 +2640,28 @@ export function StaffManagerPage({
                 <input className={fieldClass()} value={editingStaff?.craft || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, craft: e.target.value }))} />
               </LabeledField>
             ) : null}
+          </FieldGroup>
+          <FieldGroup title="Access Controls">
+            <div className="grid gap-3 md:grid-cols-2">
+              {MODULE_ACCESS_KEYS.map((key) => (
+                <label key={key} className="flex items-center gap-3 rounded-[16px] border border-[color:var(--acm-border)] px-4 py-3 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(editingStaff?.module_access?.[key])}
+                    onChange={(e) =>
+                      setEditingStaff((prev) => ({
+                        ...prev,
+                        module_access: {
+                          ...(prev?.module_access || normalizeModuleAccess({}, prev?.role || "employee")),
+                          [key]: e.target.checked,
+                        },
+                      }))
+                    }
+                  />
+                  <span>{MODULE_ACCESS_LABELS[key]}</span>
+                </label>
+              ))}
+            </div>
           </FieldGroup>
           <FieldGroup title="Credentials">
             <LabeledField label="User Name">

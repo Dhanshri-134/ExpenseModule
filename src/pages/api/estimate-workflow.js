@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getRequestContext } from "@/lib/server/authz";
+import { canAccessModule, getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
 
 const WorkflowSchema = z.object({
@@ -13,6 +13,7 @@ const WorkflowSchema = z.object({
 export default async function handler(req, res) {
   const ctx = await getRequestContext(req, res);
   if (!ctx.ok) return sendError(res, ctx.status, ctx.error);
+  if (!canAccessModule(ctx, "invoices")) return sendError(res, 403, "forbidden");
   if (req.method !== "POST") return sendError(res, 405, "method_not_allowed");
 
   const parsed = WorkflowSchema.safeParse(req.body);

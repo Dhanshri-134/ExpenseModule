@@ -639,21 +639,23 @@ export function TasksManagerPage({
 
       <div className={cardClass()}>
         <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap gap-2">
-            {tabs.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => setTab(item.key)}
-                className={`acm-btn ${tab === item.key ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}
-              >
-                {item.label}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <input className={`${fieldClass()} min-w-[220px] flex-1 md:max-w-md`} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search tasks, assignees, or projects" />
+            <div className="flex flex-wrap items-center gap-2">
+              {tabs.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => setTab(item.key)}
+                  className={`acm-btn ${tab === item.key ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className={`grid gap-3 ${roleBase === "owner" ? "md:grid-cols-4" : "md:grid-cols-3 xl:grid-cols-4"}`}>
-            <input className={fieldClass()} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search tasks, assignees, or projects" />
             <select className={fieldClass()} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
               <option value="latest">Latest Created</option>
               <option value="deadline">Deadline</option>

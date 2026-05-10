@@ -2,6 +2,25 @@ import { createSupabasePagesServerClient } from "@/lib/pages/supabaseServerClien
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { buildDashboardViewer } from "@/lib/dashboard";
 import { extractCompanyAssetMetadata } from "@/lib/server/companyAssets";
+import { buildDefaultModuleAccess, canUseModule, normalizeModuleAccess } from "@/lib/moduleAccess";
+
+async function loadModuleAccess(admin, companyId, userId, role) {
+  if (role === "owner") return buildDefaultModuleAccess(role);
+
+  const { data, error } = await admin
+    .from("company_user_module_access")
+    .select("module_key, granted")
+    .eq("company_id", companyId)
+    .eq("user_id", userId);
+
+  if (error) return buildDefaultModuleAccess(role);
+
+  const mapped = {};
+  (data ?? []).forEach((item) => {
+    mapped[item.module_key] = Boolean(item.granted);
+  });
+  return normalizeModuleAccess(mapped, role);
+}
 
 export async function getRequestContext(req, res) {
   const supabase = createSupabasePagesServerClient(req, res);
@@ -51,6 +70,7 @@ export async function getRequestContext(req, res) {
   }
 
   const role = membership.role;
+  const moduleAccess = await loadModuleAccess(admin, membership.company_id, user.id, role);
   const projectIds = [
     ...new Set(
       [
@@ -68,6 +88,7 @@ export async function getRequestContext(req, res) {
     membership,
     company,
     role,
+    moduleAccess,
     projectAssignments: projectAssignments ?? [],
     projectIds,
     viewer: buildDashboardViewer({
@@ -77,6 +98,7 @@ export async function getRequestContext(req, res) {
       userName: membership.user_name || user.user_metadata?.user_name || membership.user_code,
       userCode: membership.user_code || "",
       role,
+      moduleAccess,
       avatarUrl: user.user_metadata?.avatar_url ?? null,
       companyName: company.name,
       companyLogoUrl: companyMetadata.logoUrl || "",
@@ -91,6 +113,11 @@ export function hasRole(ctx, allowedRoles) {
 export function canAccessProject(ctx, projectId) {
   if (ctx.role === "owner") return true;
   return ctx.projectIds.includes(projectId);
+}
+
+export function canAccessModule(ctx, moduleKey) {
+  if (ctx.role === "owner") return true;
+  return canUseModule(ctx.moduleAccess, moduleKey);
 }
 
 export function canAssignTask(ctx, targetRole, projectId) {
@@ -132,6 +159,7 @@ export async function requirePageRole(ctx, allowedRoles) {
       authContext: {
         role: reqCtx.role,
         company: reqCtx.company,
+        moduleAccess: reqCtx.moduleAccess,
         viewer: reqCtx.viewer,
       },
     },

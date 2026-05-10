@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { canAccessProject, getRequestContext } from "@/lib/server/authz";
+import { canAccessModule, canAccessProject, getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
 
 const CreateProjectSchema = z.object({
@@ -77,6 +77,7 @@ async function upsertClient(ctx, payload) {
 export default async function handler(req, res) {
   const ctx = await getRequestContext(req, res);
   if (!ctx.ok) return sendError(res, ctx.status, ctx.error);
+  if (!canAccessModule(ctx, "projects")) return sendError(res, 403, "forbidden");
 
   if (req.method === "GET") {
     const { data: projects, error } = await ctx.admin

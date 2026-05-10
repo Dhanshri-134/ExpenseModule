@@ -6,7 +6,7 @@ import { BusyButton, CompactListRow } from "@/components/dashboard/DashboardUi";
 import { ChevronRightIcon } from "@/components/dashboard/icons";
 import Modal from "@/components/dashboard/Modal";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
-import {Trash} from "lucide-react";
+import { Check, ChevronDown, Trash } from "lucide-react";
 
 const BRAND_PALETTES = {
   accentColor: ["#1e3a8a", "#0f766e", "#b45309", "#7c2d12", "#334155", "#0f766e"],
@@ -25,6 +25,10 @@ function inputClass(extra = "") {
 
 function sheetInputClass(extra = "") {
   return `w-full border-0 border-b border-[color:var(--acm-border)] bg-white px-1 py-2 text-sm text-[color:var(--acm-fg)] outline-none focus:border-[color:var(--acm-accent)] focus:ring-0 ${extra}`.trim();
+}
+
+function sheetSelectClass(extra = "") {
+  return `w-full appearance-none rounded-[18px] border border-[color:var(--acm-border)] bg-[linear-gradient(180deg,#ffffff,rgba(248,250,252,0.94))] px-4 py-3 pr-11 text-sm font-medium text-[color:var(--acm-fg)] shadow-[0_10px_26px_rgba(15,23,42,0.05)] outline-none transition focus:border-[color:var(--acm-accent)] focus:ring-2 focus:ring-[color:var(--acm-accent-soft)] ${extra}`.trim();
 }
 
 function statusTone(status) {
@@ -102,6 +106,10 @@ function parseApiResponseText(text) {
 function isValidEmail(value) {
   if (!value) return false;
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim());
+}
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
 }
 
 function matchesSearchQuery(query, ...values) {
@@ -216,6 +224,7 @@ function createOverheadEntry() {
 function createCostLine(index = 1) {
   return {
     id: createId("cost-line"),
+    costCodeId: "",
     code: `SEC-${String(index).padStart(3, "0")}`,
     description: "",
     laborEntries: [createLaborEntry()],
@@ -451,19 +460,21 @@ function calculateEquipment(entry) {
 }
 
 function flattenEstimateCostLines(costCodes = []) {
-  const merged = createCostLine(1);
-  merged.code = "ESTIMATE";
-  merged.description = "Estimate";
-  merged.laborEntries = [];
-  merged.subcontractorEntries = [];
-  merged.materialEntries = [];
-  merged.equipmentEntries = [];
-  merged.overheadEntries = [];
+  return (costCodes ?? []).map((line, index) => {
+    const costLine = createCostLine(index + 1);
+    costLine.id = line.id || createId("cost-line");
+    costLine.costCodeId = line.costCode?.id || "";
+    costLine.code = line.costCode?.code || `SEC-${String(index + 1).padStart(3, "0")}`;
+    costLine.description = line.description || line.costCode?.description || "";
+    costLine.laborEntries = [];
+    costLine.subcontractorEntries = [];
+    costLine.materialEntries = [];
+    costLine.equipmentEntries = [];
+    costLine.overheadEntries = [];
 
-  (costCodes ?? []).forEach((line) => {
     (line.laborEntries ?? []).forEach((entry) => {
       if (entry.metadata?.kind === "subcontractor") {
-        merged.subcontractorEntries.push({
+        costLine.subcontractorEntries.push({
           id: entry.id || createId("subcontractor"),
           code: entry.metadata?.code || line.costCode?.code || "",
           description: entry.description || entry.metadata?.description || "",
@@ -476,7 +487,7 @@ function flattenEstimateCostLines(costCodes = []) {
         return;
       }
 
-      merged.laborEntries.push({
+      costLine.laborEntries.push({
         id: entry.id || createId("labor"),
         code: entry.metadata?.code || line.costCode?.code || "",
         description: entry.metadata?.description || entry.metadata?.title || entry.description || "",
@@ -493,8 +504,21 @@ function flattenEstimateCostLines(costCodes = []) {
       });
     });
 
+    (line.subcontractorEntries ?? []).forEach((entry) => {
+      costLine.subcontractorEntries.push({
+        id: entry.id || createId("subcontractor"),
+        code: entry.metadata?.code || line.costCode?.code || "",
+        description: entry.description || entry.metadata?.description || "",
+        cost: entry.metadata?.cost ?? entry.cost ?? "",
+        workersCompPercent: entry.metadata?.workersCompPercent ?? entry.workersCompPercent ?? "",
+        liabilityPercent: entry.metadata?.liabilityPercent ?? entry.liabilityPercent ?? "",
+        overheadPercent: entry.metadata?.overheadPercent ?? entry.overheadPercent ?? "",
+        profitPercent: entry.metadata?.profitPercent ?? entry.profitPercent ?? "",
+      });
+    });
+
     (line.materialEntries ?? []).forEach((entry) => {
-      merged.materialEntries.push({
+      costLine.materialEntries.push({
         id: entry.id || createId("material"),
         code: entry.metadata?.code || line.costCode?.code || "",
         description: entry.description || "",
@@ -510,7 +534,7 @@ function flattenEstimateCostLines(costCodes = []) {
     });
 
     (line.equipmentEntries ?? []).forEach((entry) => {
-      merged.equipmentEntries.push({
+      costLine.equipmentEntries.push({
         id: entry.id || createId("equipment"),
         code: entry.metadata?.code || line.costCode?.code || "",
         description: entry.description || "",
@@ -524,14 +548,27 @@ function flattenEstimateCostLines(costCodes = []) {
         profitPercent: entry.metadata?.profitPercent ?? "",
       });
     });
-  });
 
-  if (!merged.laborEntries.length) merged.laborEntries = [createLaborEntry()];
-  if (!merged.subcontractorEntries.length) merged.subcontractorEntries = [createSubcontractorEntry()];
-  if (!merged.materialEntries.length) merged.materialEntries = [createMaterialEntry()];
-  if (!merged.equipmentEntries.length) merged.equipmentEntries = [createEquipmentEntry()];
-  merged.overheadEntries = [];
-  return [merged];
+    (line.overheadEntries ?? []).forEach((entry) => {
+      costLine.overheadEntries.push({
+        id: entry.id || createId("overhead"),
+        code: entry.metadata?.code || line.costCode?.code || "",
+        description: entry.description || "",
+        quantity: entry.qty ?? "",
+        uom: entry.metadata?.uom || "",
+        unitRate: entry.rate ?? "",
+        days: entry.days ?? "",
+        taxPercent: toNumber(entry.taxPercent) * 100,
+      });
+    });
+
+    if (!costLine.laborEntries.length) costLine.laborEntries = [createLaborEntry()];
+    if (!costLine.subcontractorEntries.length) costLine.subcontractorEntries = [createSubcontractorEntry()];
+    if (!costLine.materialEntries.length) costLine.materialEntries = [createMaterialEntry()];
+    if (!costLine.equipmentEntries.length) costLine.equipmentEntries = [createEquipmentEntry()];
+    if (!costLine.overheadEntries.length) costLine.overheadEntries = [createOverheadEntry()];
+    return costLine;
+  });
 }
 
 function calculateOverhead(entry) {
@@ -672,8 +709,6 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
       : form.estimateNumber
         ? `Estimate #${form.estimateNumber}`
         : `Estimate ${form.estimateDate || new Date().toISOString().slice(0, 10)}`;
-  const primaryLine = form.costLines?.[0] || createCostLine(1);
-
   return {
     id: form.id || undefined,
     estimateNumber: form.estimateNumber,
@@ -721,11 +756,13 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
       additionalCharges: form.additionalCharges,
       totals,
     },
-    costCodes: [{
-      code: "ESTIMATE",
-      name: "Estimate",
-      description: "Estimate",
-      laborEntries: primaryLine.laborEntries.map((entry) => {
+    costCodes: (form.costLines?.length ? form.costLines : [createCostLine(1)]).map((line, index) => ({
+      id: isUuid(line.id) ? line.id : undefined,
+      costCodeId: line.costCodeId || undefined,
+      code: String(line.code || "").trim() || `SEC-${String(index + 1).padStart(3, "0")}`,
+      name: String(line.code || "").trim() || `Section ${index + 1}`,
+      description: String(line.description || line.code || `Section ${index + 1}`).trim(),
+      laborEntries: (line.laborEntries ?? []).map((entry) => {
         const derived = calculateLabor(entry);
         const markup = applyRowMarkup(derived.total, entry);
         return {
@@ -754,7 +791,7 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
           },
         };
       }).concat(
-        primaryLine.subcontractorEntries.map((entry) => {
+        (line.subcontractorEntries ?? []).map((entry) => {
           const derived = calculateSubcontractor(entry);
           const markup = applyRowMarkup(derived.total, entry);
           return {
@@ -781,59 +818,80 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
           };
         })
       ),
-      materialEntries: primaryLine.materialEntries.map((entry) => {
-        const derived = calculateMaterial(entry);
-        const markup = applyRowMarkup(derived.total, entry);
-        return ({
-        description: entry.description,
-        quantity: entry.quantity,
-        wastePercent: entry.wastePercent,
-        unitRate: entry.unitRate,
-        freight: entry.freight,
-        taxPercent: entry.taxPercent,
-        metadata: {
-          code: entry.code?.trim() || undefined,
-          uom: entry.uom,
-          wasteQty: derived.wasteQty,
-          cost: derived.cost,
-          costWithFreight: derived.costWithFreight,
-          taxAmount: derived.taxAmount,
-          total: derived.total,
-          overheadPercent: toNumber(entry.overheadPercent),
-          profitPercent: toNumber(entry.profitPercent),
-          overheadAmount: markup.overheadAmount,
-          profitAmount: markup.profitAmount,
-          finalTotal: markup.finalTotal,
-        },
-      })}),
-      equipmentEntries: primaryLine.equipmentEntries.map((entry) => {
-        const derived = calculateEquipment(entry);
-        const markup = applyRowMarkup(derived.total, entry);
-        return ({
-        description: entry.description,
-        qty: entry.quantity,
-        days: entry.rentalDays,
-        rate: entry.unitRate,
-        freight: entry.freight,
-        fuel: derived.fuel,
-        taxPercent: entry.taxPercent,
-        metadata: {
-          code: entry.code?.trim() || undefined,
-          fuelPercent: toNumber(entry.fuelPercent),
-          cost: derived.cost,
-          costWithFreight: derived.costWithFreight,
-          costWithFuel: derived.costWithFuel,
-          taxAmount: derived.taxAmount,
-          total: derived.total,
-          overheadPercent: toNumber(entry.overheadPercent),
-          profitPercent: toNumber(entry.profitPercent),
-          overheadAmount: markup.overheadAmount,
-          profitAmount: markup.profitAmount,
-          finalTotal: markup.finalTotal,
-        },
-      })}),
-      overheadEntries: [],
-    }],
+      materialEntries: (line.materialEntries ?? []).map((entry) => {
+  const derived = calculateMaterial(entry);
+  const markup = applyRowMarkup(derived.total, entry);
+
+  return {
+    description: entry.description,
+    quantity: entry.quantity,
+    wastePercent: entry.wastePercent,
+    unitRate: entry.unitRate,
+    freight: entry.freight,
+    taxPercent: entry.taxPercent,
+    metadata: {
+      code: entry.code?.trim() || undefined,
+      uom: entry.uom,
+      wasteQty: derived.wasteQty,
+      cost: derived.cost,
+      costWithFreight: derived.costWithFreight,
+      taxAmount: derived.taxAmount,
+      total: derived.total,
+      overheadPercent: toNumber(entry.overheadPercent),
+      profitPercent: toNumber(entry.profitPercent),
+      overheadAmount: markup.overheadAmount,
+      profitAmount: markup.profitAmount,
+      finalTotal: markup.finalTotal,
+    },
+  };
+}),
+
+equipmentEntries: (line.equipmentEntries ?? []).map((entry) => {
+  const derived = calculateEquipment(entry);
+  const markup = applyRowMarkup(derived.total, entry);
+
+  return {
+    description: entry.description,
+    qty: entry.quantity,
+    days: entry.rentalDays,
+    rate: entry.unitRate,
+    freight: entry.freight,
+    fuel: derived.fuel,
+    taxPercent: entry.taxPercent,
+    metadata: {
+      code: entry.code?.trim() || undefined,
+      fuelPercent: toNumber(entry.fuelPercent),
+      cost: derived.cost,
+      costWithFreight: derived.costWithFreight,
+      costWithFuel: derived.costWithFuel,
+      taxAmount: derived.taxAmount,
+      total: derived.total,
+      overheadPercent: toNumber(entry.overheadPercent),
+      profitPercent: toNumber(entry.profitPercent),
+      overheadAmount: markup.overheadAmount,
+      profitAmount: markup.profitAmount,
+      finalTotal: markup.finalTotal,
+    },
+  };
+}),
+      overheadEntries: (line.overheadEntries ?? []).map((entry) => {
+        const derived = calculateOverhead(entry);
+        return {
+          description: entry.description,
+          qty: entry.quantity,
+          days: entry.days,
+          rate: entry.unitRate,
+          taxPercent: entry.taxPercent,
+          metadata: {
+            code: entry.code?.trim() || undefined,
+            uom: entry.uom,
+            cost: derived.cost,
+            taxAmount: derived.taxAmount,
+            total: derived.total,
+          },
+        };
+      }),
+    })),
   };
 }
 
@@ -888,6 +946,17 @@ function LabeledInput({ label, children }) {
       <span className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">{label}</span>
       {children}
     </label>
+  );
+}
+
+function StyledSelect({ className = "", children, ...props }) {
+  return (
+    <div className="relative">
+      <select {...props} className={sheetSelectClass(className)}>
+        {children}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[color:var(--acm-muted-fg)]" />
+    </div>
   );
 }
 
@@ -1064,6 +1133,36 @@ function StatusButton({ active, children, onClick }) {
   );
 }
 
+function StatusOptionButton({ active, label, note, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`group rounded-[20px] border px-4 py-4 text-left transition ${
+        active
+          ? "border-[color:var(--acm-accent)] bg-[color:var(--acm-accent-soft)] shadow-[0_14px_34px_rgba(30,58,138,0.16)]"
+          : "border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] hover:border-[color:var(--acm-accent-border)] hover:bg-[color:var(--acm-surface-2)]"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className={`text-sm font-semibold ${active ? "text-[color:var(--acm-accent-strong)]" : "text-[color:var(--acm-fg)]"}`}>{label}</div>
+          <div className="mt-1 text-xs text-[color:var(--acm-muted-fg)]">{note}</div>
+        </div>
+        <span
+          className={`mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full border transition ${
+            active
+              ? "border-[color:var(--acm-accent)] bg-[color:var(--acm-accent)] text-white"
+              : "border-[color:var(--acm-border)] bg-white text-transparent group-hover:text-[color:var(--acm-muted-fg)]"
+          }`}
+        >
+          <Check className="h-3.5 w-3.5" />
+        </span>
+      </div>
+    </button>
+  );
+}
+
 function TableCellInput({ value, onChange, onKeyDown, list, placeholder = "", type = "text" }) {
   if (type === "textarea") {
     return (
@@ -1071,11 +1170,15 @@ function TableCellInput({ value, onChange, onKeyDown, list, placeholder = "", ty
         list={list}
         value={value}
         onChange={onChange}
+        onInput={(event) => {
+          event.currentTarget.style.height = "auto";
+          event.currentTarget.style.height = `${event.currentTarget.scrollHeight}px`;
+        }}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
-        rows={3}
+        rows={1}
         data-grid-input="true"
-        className={sheetInputClass("min-w-[180px] resize-y text-[0.7rem]")}
+        className={sheetInputClass("min-h-[42px] min-w-[180px] resize-none overflow-hidden text-[0.7rem] leading-6")}
       />
     );
   }
@@ -1300,7 +1403,6 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const templatesQuery = useApiQuery("/api/estimate-templates");
   const estimateListQuery = useApiQuery(standalone ? null : "/api/estimates?compact=1");
   const estimateDetailQuery = useApiQuery(initialEstimateId ? `/api/estimates?id=${initialEstimateId}` : null);
-  const costCodesQuery = useApiQuery("/api/cost-codes");
 
   const [editorOpen, setEditorOpen] = useState(Boolean(initialEstimateId || standalone));
   const [activeAction, setActiveAction] = useState("");
@@ -1363,10 +1465,6 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     [estimateList, searchQuery]
   );
   const detailedEstimate = useMemo(() => estimateDetailQuery.data?.estimates?.[0] || null, [estimateDetailQuery.data?.estimates]);
-  const costCodeSuggestions = useMemo(
-    () => (costCodesQuery.data?.costCodes ?? []).map((item) => ({ label: item.code, description: item.description || item.name || "" })),
-    [costCodesQuery.data?.costCodes]
-  );
   const refreshEstimateQueries = useCallback(async () => {
     await Promise.all([
       standalone ? Promise.resolve(null) : estimateListQuery.refresh().catch(() => null),
@@ -2128,8 +2226,14 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
 
     const saved = json?.estimate;
     if (saved) {
+      const previousSelectedLineCode = form.costLines.find((line) => line.id === selectedCostLineId)?.code || "";
       setForm(mapEstimateToForm(saved, templates));
       setActiveEstimateId(saved.id);
+      setSelectedCostLineId(
+        saved.cost_codes?.find((line) => line.costCode?.code === previousSelectedLineCode)?.id ||
+          saved.cost_codes?.[0]?.id ||
+          ""
+      );
       setDirty(false);
       invalidateApiQuery("/api/estimates?compact=1");
       invalidateApiQuery("/api/estimates");
@@ -2138,7 +2242,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       return saved;
     }
     return false;
-  }, [payload, templates, validateEstimate, estimateListQuery, standalone]);
+  }, [payload, templates, validateEstimate, estimateListQuery, standalone, form.costLines, form.id, selectedCostLineId]);
 
   const laborColumns = [
     { key: "description", label: "Scope of work", placeholder: "Scope of work", type: "textarea" },
@@ -2219,7 +2323,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
             <div className="text-sm text-[color:var(--acm-muted-fg)]">Loading estimate workspace...</div>
           ) : null}
           <div>
-            <input className={sheetInputClass()} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search estimates by title, number, client, status, or value" />
+            <input className={sheetInputClass("h-10")} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search estimates by title, number, client, status, or value" />
           </div>
           <div className="grid gap-3 lg:grid-cols-3">
             {filteredEstimateList.map((estimate) => (
@@ -2306,12 +2410,12 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                   <input type="date" className={sheetInputClass()} value={form.validUntil} onChange={(event) => updateEstimate("validUntil", event.target.value)} />
                 </LabeledInput>
                 <LabeledInput label="Customer">
-                  <select className={sheetInputClass()} value={form.clientId} onChange={(event) => updateEstimate("clientId", event.target.value)}>
+                  <StyledSelect value={form.clientId} onChange={(event) => updateEstimate("clientId", event.target.value)}>
                     <option value="">Select customer</option>
                     {clients.map((client) => (
                       <option key={client.id} value={client.id}>{client.name || client.email || "Customer"}</option>
                     ))}
-                  </select>
+                  </StyledSelect>
                 </LabeledInput>
               </div>
 
@@ -2323,7 +2427,6 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                         <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Cost Code</div>
                         <input
                           className={sheetInputClass()}
-                          list="estimate-cost-code-options"
                           placeholder={`Cost code ${index + 1}`}
                           value={line.code}
                           onChange={(event) => updateLine(line.id, "code", event.target.value)}
@@ -2425,9 +2528,6 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                 </div>
               </div>
 
-              <datalist id="estimate-cost-code-options">
-                {costCodeSuggestions.map((option) => <option key={option.label} value={option.label}>{option.description}</option>)}
-              </datalist>
               <datalist id="labor-classification-options">
                 {laborClassificationOptions.map((option) => <option key={option} value={option} />)}
               </datalist>
@@ -2473,8 +2573,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
               <input className={sheetInputClass()} value={projectForm.name} onChange={(event) => setProjectForm((current) => ({ ...current, name: event.target.value }))} />
             </LabeledInput>
             <LabeledInput label="Client Source">
-              <select
-                className={sheetInputClass()}
+              <StyledSelect
                 value={projectForm.clientMode}
                 onChange={(event) => {
                   const nextMode = event.target.value;
@@ -2491,18 +2590,18 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
               >
                 <option value="existing">Use Existing Client</option>
                 <option value="new">Create New Client</option>
-              </select>
+              </StyledSelect>
             </LabeledInput>
           </div>
 
           {projectForm.clientMode === "existing" ? (
             <LabeledInput label="Client">
-              <select className={sheetInputClass()} value={projectForm.clientId} onChange={(event) => setProjectForm((current) => ({ ...current, clientId: event.target.value }))}>
+              <StyledSelect value={projectForm.clientId} onChange={(event) => setProjectForm((current) => ({ ...current, clientId: event.target.value }))}>
                 <option value="">Select client</option>
                 {clients.map((client) => (
                   <option key={client.id} value={client.id}>{client.name}</option>
                 ))}
-              </select>
+              </StyledSelect>
             </LabeledInput>
           ) : (
             <div className="grid gap-4 md:grid-cols-2">
@@ -2542,25 +2641,20 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
             <StatusPill status={form.status} />
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid gap-3 sm:grid-cols-2">
             {[
-              ["draft", "Draft"],
-              ["sent", "Send"],
-              ["rejected", "Reject"],
-              ["approved", "Approve"],
-            ].map(([value, label]) => (
-              <button
+              ["draft", "Draft", "Keep this estimate editable and internal."],
+              ["sent", "Send", "Share the estimate with the client."],
+              ["rejected", "Reject", "Mark this estimate as not moving forward."],
+              ["approved", "Approve", "Confirm the estimate is accepted and ready."],
+            ].map(([value, label, note]) => (
+              <StatusOptionButton
                 key={value}
-                type="button"
+                active={statusDraft === value}
+                label={label}
+                note={note}
                 onClick={() => setStatusDraft(value)}
-                className={`h-11 rounded-lg border px-3 text-sm font-semibold transition ${
-                  statusDraft === value
-                    ? "border-[color:var(--acm-accent)] bg-[color:var(--acm-accent-soft)] text-[color:var(--acm-accent-strong)]"
-                    : "border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] text-[color:var(--acm-fg)]"
-                }`}
-              >
-                {label}
-              </button>
+              />
             ))}
           </div>
 

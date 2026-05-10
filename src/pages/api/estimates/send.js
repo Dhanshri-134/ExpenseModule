@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getRequestContext } from "@/lib/server/authz";
+import { canAccessModule, getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
 import { estimateToPdfBuffer } from "@/lib/projectModules";
 import { sendEstimateEmail } from "@/lib/server/mailer";
@@ -40,6 +40,7 @@ function buildEstimateEmailHtml({ estimate, customerName, companyName }) {
 export default async function handler(req, res) {
   const ctx = await getRequestContext(req, res);
   if (!ctx.ok) return sendError(res, ctx.status, ctx.error);
+  if (!canAccessModule(ctx, "estimates")) return sendError(res, 403, "forbidden");
   if (req.method !== "POST") return sendError(res, 405, "method_not_allowed");
 
   const parsed = SendEstimateSchema.safeParse(req.body);

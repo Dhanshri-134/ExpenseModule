@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getRequestContext } from "@/lib/server/authz";
+import { canAccessModule, getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
 import { estimateToCsv } from "@/lib/projectModules";
 import { loadUserDirectory } from "@/lib/server/taskWorkflow";
@@ -404,6 +404,7 @@ async function syncEstimateSnapshot(admin, estimate) {
 export default async function handler(req, res) {
   const ctx = await getRequestContext(req, res);
   if (!ctx.ok) return sendError(res, ctx.status, ctx.error);
+  if (!canAccessModule(ctx, "estimates")) return sendError(res, 403, "forbidden");
 
   if (req.method === "GET") {
     const parsed = QuerySchema.safeParse(req.query);

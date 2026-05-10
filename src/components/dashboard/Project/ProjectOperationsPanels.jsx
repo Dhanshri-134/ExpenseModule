@@ -365,26 +365,21 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
 
   return (
     <>
-      <SectionHeader
-        // title="Field Operations And Daily Inspection Reports"
-        action={
-          canCreateReports ? (
-            <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
-              New Report
-            </button>
-          ) : null
-        }
-      />
+      <SectionHeader />
 
       <InlineMessage error={reportsQuery.error || error} message={message} onDismiss={() => { setError(""); setMessage(""); }} />
 
       <div className={cardClass()}>
-        <div className="mb-4">
-          <div className="text-lg font-bold text-[color:var(--acm-fg)]">Daily Inspection Archive</div>
-        </div>
-
-        <div className="mb-4">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <input className={fieldClass()} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search reports by location, weather, date, creator, or notes" />
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-lg font-bold text-[color:var(--acm-fg)]">Daily Inspection Archive</div>
+            {canCreateReports ? (
+              <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
+                New Report
+              </button>
+            ) : null}
+          </div>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">

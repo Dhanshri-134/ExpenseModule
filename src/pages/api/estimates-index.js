@@ -1,4 +1,4 @@
-import { getRequestContext } from "@/lib/server/authz";
+import { canAccessModule, getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
 import { composeEstimateRecord, loadEstimateGraph } from "@/lib/server/estimating/estimateEngine";
 import { loadUserDirectory } from "@/lib/server/taskWorkflow";
@@ -6,6 +6,7 @@ import { loadUserDirectory } from "@/lib/server/taskWorkflow";
 export default async function handler(req, res) {
   const ctx = await getRequestContext(req, res);
   if (!ctx.ok) return sendError(res, ctx.status, ctx.error);
+  if (!canAccessModule(ctx, "estimates")) return sendError(res, 403, "forbidden");
   if (req.method !== "GET") return sendError(res, 405, "method_not_allowed");
 
   const [{ data: estimates, error: estimatesError }, { data: projects }, { data: clients }] = await Promise.all([

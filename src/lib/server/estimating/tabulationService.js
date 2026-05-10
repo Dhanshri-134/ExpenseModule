@@ -35,6 +35,7 @@ function aggregateCostCodeRow({
   const futureCost = CalculationService.computeEscalation(totalPrice, normalizedInflationRate, normalizedEscalationYears);
 
   return {
+    id: costCode?.id || null,
     costCode,
     laborEntries,
     materialEntries,

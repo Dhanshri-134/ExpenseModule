@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createFollowUp, deleteFollowUp, listFollowUps, updateFollowUp } from "@/lib/server/followups";
-import { getRequestContext } from "@/lib/server/authz";
+import { canAccessModule, getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
 
 const QuerySchema = z.object({
@@ -28,6 +28,7 @@ const DeleteFollowUpSchema = z.object({
 export default async function handler(req, res) {
   const ctx = await getRequestContext(req, res);
   if (!ctx.ok) return sendError(res, ctx.status, ctx.error);
+  if (!canAccessModule(ctx, "leads")) return sendError(res, 403, "forbidden");
 
   if (req.method === "GET") {
     const parsed = QuerySchema.safeParse(req.query);

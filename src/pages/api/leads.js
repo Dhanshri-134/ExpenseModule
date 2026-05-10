@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getRequestContext } from "@/lib/server/authz";
+import { canAccessModule, getRequestContext } from "@/lib/server/authz";
 import { createFollowUp } from "@/lib/server/followups";
 import { sendError, sendOk } from "@/lib/server/responses";
 
@@ -25,6 +25,7 @@ const UpdateLeadSchema = LeadSchema.pick({
 export default async function handler(req, res) {
   const ctx = await getRequestContext(req, res);
   if (!ctx.ok) return sendError(res, ctx.status, ctx.error);
+  if (!canAccessModule(ctx, "leads")) return sendError(res, 403, "forbidden");
 
   if (req.method === "GET") {
     const { data: leads, error } = await ctx.admin

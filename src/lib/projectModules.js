@@ -271,43 +271,17 @@ function flattenEstimateRows(estimate) {
   const rows = [];
 
   (estimate?.cost_codes ?? []).forEach((costCode, index) => {
-    const groupLabel = costCode.costCode?.name || costCode.costCode?.code || `Cost Line ${index + 1}`;
-    const groupCode = costCode.costCode?.code || "";
-    const manHours = sumValues(costCode.laborEntries ?? [], (entry) => normalizeNumber(entry.stHours) + normalizeNumber(entry.otHours));
-    const subcontractorCost = sumValues(
-      costCode.subcontractorEntries ?? [],
-      (entry) => normalizeNumber(entry.metadata?.finalTotal ?? entry.totalCost ?? entry.cost)
-    );
-    const overheadCosts = normalizeNumber(costCode.directOverhead);
-    const laborCost = normalizeNumber(costCode.laborCost);
-    const materialCost = normalizeNumber(costCode.materialCost);
-    const equipmentCost = normalizeNumber(costCode.equipmentCost);
-    const totalCost = normalizeNumber(costCode.totalCost);
-    const overheadPercent = normalizePercent(costCode.overheadPercent) * 100;
-    const profitPercent = normalizePercent(costCode.profitPercent) * 100;
-    const commissionPercent = normalizePercent(costCode.commissionPercent) * 100;
-    const overhead = normalizeNumber(costCode.overhead);
-    const profit = normalizeNumber(costCode.profit);
-    const commission = normalizeNumber(costCode.commission);
-    const totalPrice = normalizeNumber(costCode.totalPrice);
+    const groupLabel =
+      costCode.costCode?.name ||
+      costCode.costCode?.code ||
+      costCode.description ||
+      `Cost Line ${index + 1}`;
+    const totalPrice = normalizeNumber(costCode.totalPrice || costCode.totalCost);
     rows.push({
-      code: groupCode || `CL-${index + 1}`,
-      category: groupCode || `CL-${index + 1}`,
-      costCode: costCode.description || groupLabel,
-      laborCost,
-      subcontractorCost,
-      materialCost,
-      equipmentCost,
-      overheadCosts,
-      totalCost,
+      code: costCode.costCode?.code || `CL-${index + 1}`,
+      label: groupLabel,
+      description: costCode.description || costCode.costCode?.description || "",
       totalPrice,
-      manHours,
-      overheadPercent,
-      profitPercent,
-      overhead,
-      profit,
-      commissionPercent,
-      commission,
     });
   });
 
@@ -496,263 +470,92 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
     ...(meta.branding || {}),
   };
   const accent = hexToRgb(branding.accentColor, [26, 71, 145]);
-  const accentSoft = accent.map((value) => Math.min(255, Math.round(value + (255 - value) * 0.86)));
   const ink = [15, 23, 42];
   const muted = [100, 116, 139];
-  const white = [255, 255, 255];
   const line = [222, 229, 239];
   const page = { width: 595, height: 842, margin: 42 };
-  const headerHeight = 92;
   const customer = meta.customer || {};
   const company = meta.company || {};
   const totals = meta.totals || {};
-  const invoice = meta.invoice || {};
   const rows = flattenEstimateRows(estimate);
-  const detailSections = buildCostLineDetailSections(estimate);
   const summary = estimate?.summary || {};
-  const notes = meta.notes || estimate?.notes || "";
-  const terms = meta.terms || "This estimate is valid for the period shown above and is subject to final site conditions.";
-  const signatureLabel = meta.signatureLabel || "Accepted By";
-  const signatureName = company.signatureName || "";
-  const stampLabel = company.stampLabel || company.name || "";
   const validUntil = meta.validUntil || "";
+  const totalValue = totals.grandTotal ?? summary.finalBid ?? summary.totalPrice ?? 0;
   const pages = [];
   let commands = [];
   let y = page.height - page.margin;
-  let pageIndex = 0;
-  const documentHeading = documentType === "invoice" ? "Invoice" : ("Estimate");
-  const documentNumberLabel = documentType === "invoice" ? "Invoice No" : "Estimate No";
-  const documentNumberValue =
-    documentType === "invoice"
-      ? invoice.invoiceReference || estimate?.invoice_reference || `INV-${estimate?.estimate_number || "Draft"}`
-      : `#${estimate?.estimate_number || "Draft"}`;
 
-  const financialRows = [
-    ["Labor Total", summary.laborCost ?? 0],
-    ["Subcontractor Total", rows.reduce((sum, row) => sum + normalizeNumber(row.subcontractorCost), 0)],
-    ["Material Total", summary.materialCost ?? 0],
-    ["Equipment Total", summary.equipmentCost ?? 0],
-    ["Direct Overhead", summary.directOverheadCost ?? 0],
-    ...(normalizeNumber(summary.futureCost) ? [["Future Cost", summary.futureCost]] : []),
-    ["Final Total", totals.grandTotal ?? summary.finalBid ?? summary.totalPrice ?? 0],
-  ];
-  const summaryRowHeight = 18;
-  const summaryBoxHeight = 30 + financialRows.length * summaryRowHeight + 22;
-  const invoiceScopeLines = documentType === "invoice" ? wrapPdfLine(invoice.scopeOfWork || "Scope of work pending.", 47) : [];
-  const invoiceCodeLines = documentType === "invoice" ? wrapPdfLine(invoice.totalCode || "-", 47) : [];
+  const customerName = customer.name || estimate?.client?.name || "Client";
+  const customerAddress = customer.address || estimate?.client?.address || "";
+  const customerContact = customer.contact || estimate?.client?.contact || "";
+  const customerEmail = customer.email || estimate?.client?.email || "";
+  const companyLines = [
+    company.name || branding.companyName || "Your Company",
+    company.address || "",
+    [company.contactPhone, company.contactEmail].filter(Boolean).join("  "),
+  ].filter(Boolean);
 
-  function drawDetailSectionHeader(section) {
-    const labelY = y - 6;
-    const fieldX = page.margin + 84;
-    const fieldWidth = page.width - page.margin * 2 - 84;
-    const fieldValue = [section.code, section.label].filter(Boolean).join(" - ") || section.label || "-";
-    drawText(commands, "Cost Code", page.margin, labelY, 12);
-    // drawRect(commands, fieldX, y - 18, fieldWidth, 22, [255, 255, 255], accent, 1);
-    drawWrappedText(commands, fieldValue, fieldX + 8, y - 7, fieldWidth - 16, 10, 12);
-    y -= 34;
+  const companyX = page.width - page.margin - 210;
+  companyLines.forEach((lineText, index) => {
+    drawText(commands, lineText, companyX, page.height - 58 - index * 14, index === 0 ? 10.5 : 8.8, ink);
+  });
+  const detailStartY = page.height - 58 - companyLines.length * 14;
+  drawText(commands, formatPdfDate(estimate?.estimate_date), page.width - page.margin - 90, detailStartY - 18, 12, ink);
+  if (validUntil) {
+    drawText(commands, `Valid Until: ${formatPdfDate(validUntil)}`, companyX, detailStartY - 18, 8.8, muted);
   }
+  commands.push(`${pdfColor(accent)} RG`);
+  commands.push("1 w");
+  commands.push(`${page.margin} ${page.height - 125} m ${page.width - page.margin} ${page.height - 125} l S`);
 
-  function drawDetailGroupHeader(group, widths, fontSize) {
-    drawRect(commands, page.margin, y - 20, page.width - page.margin * 2, 20, accent, null);
-    drawText(commands, group.title, page.margin + 10, y - 13, 9, white);
-    y -= 24;
-    drawRect(commands, page.margin, y - 18, page.width - page.margin * 2, 18, accentSoft, line);
-    let headerX = page.margin + 8;
-    group.columns.forEach((column, index) => {
-      drawText(commands, fitPdfCellText(column, widths[index] - 4, fontSize), headerX, y - 12, fontSize);
-      headerX += widths[index];
-    });
-    y -= 22;
+  y = page.height - 152;
+  drawText(commands, "Customer Details", page.margin, y, 11, accent);
+  const customerBlockTop = y - 10;
+  const customerBlockHeight = 58;
+  drawRect(commands, page.margin, customerBlockTop - customerBlockHeight, page.width - page.margin * 2, customerBlockHeight, null, line, 0.8);
+  drawText(commands, "Customer", page.margin + 12, customerBlockTop - 16, 8.5, muted);
+  drawText(commands, customerName, page.margin + 12, customerBlockTop - 31, 10, ink);
+  if (customerAddress) {
+    drawWrappedText(commands, customerAddress, page.margin + 12, customerBlockTop - 45, 220, 8.5, 10, muted);
   }
+  drawText(commands, "Contact", page.margin + 265, customerBlockTop - 16, 8.5, muted);
+  drawText(commands, customerContact || "-", page.margin + 265, customerBlockTop - 31, 9.2, ink);
+  drawText(commands, "Email", page.margin + 265, customerBlockTop - 45, 8.5, muted);
+  drawText(commands, customerEmail || "-", page.margin + 300, customerBlockTop - 45, 9.2, ink);
+  y = customerBlockTop - customerBlockHeight - 26;
 
-  function startPage(mode = "summary") {
-    commands = [];
-    y = page.height - page.margin;
-    pageIndex += 1;
+  const tableWidth = 470;
+  const labelWidth = 340;
+  const totalWidth = tableWidth - labelWidth;
+  const tableX = (page.width - tableWidth) / 2;
+  const headerHeight = 24;
 
-    const logoBoxWidth = 72;
-    const logoBoxHeight = 52;
-    const logoBoxX = page.width - page.margin - logoBoxWidth;
-    const companyBlockWidth = 230;
-    const companyBlockRight = logoBoxX - 14;
-    const companyBlockX = companyBlockRight - companyBlockWidth;
-
-    drawRect(commands, 0, page.height - 112, page.width, 112, accent, null);
-    // drawRect(commands, logoBoxX, page.height - 92, logoBoxWidth, logoBoxHeight, [255, 255, 255], null);
-    // const logoLabel = company.logoText;
-    // drawText(commands, logoLabel, logoBoxX + Math.max(10, (logoBoxWidth - approximatePdfTextWidth(logoLabel, 18)) / 2), page.height - 71, 18, accent);
-    const companyName = company.name || branding.companyName || "Your Company";
-    const companyAddress = company.address || "Company address";
-    const companyContact = [company.contactPhone, company.contactEmail].filter(Boolean).join("  ") || "Phone  Email";
-    drawText(commands, companyName, companyBlockRight - approximatePdfTextWidth(companyName, 5), page.height - 54, 15, white);
-    drawText(commands, companyAddress, Math.max(companyBlockX, companyBlockRight - approximatePdfTextWidth(companyAddress, 3.8)), page.height - 72, 8.5, white);
-    drawText(commands, companyContact, Math.max(companyBlockX, companyBlockRight - approximatePdfTextWidth(companyContact, 4)), page.height - 88, 8.5, white);
-
-    y = page.height - headerHeight - 40;
-    if (mode === "summary") {
-      drawRect(commands, page.margin, y - 118, 278, 118, [255, 255, 255], line);
-      drawRect(commands, page.width - page.margin - 204, y - 118, 204, 118, [255, 255, 255], line);
-      drawText(commands, "Customer Details", page.margin + 14, y - 20, 11);
-      drawText(commands, customer.name || estimate?.client?.name || "Client name", page.margin + 14, y - 36, 12);
-      drawWrappedText(commands, customer.email || estimate?.client?.email || "-", page.margin + 14, y - 50, 122, 8.5, 10);
-      drawWrappedText(commands, customer.phone || estimate?.client?.contact || "-", page.margin + 146, y - 50, 118, 8.5, 10);
-      drawWrappedText(commands, customer.address || estimate?.client?.address || "-", page.margin + 14, y - 68, 250, 9, 12);
-
-      drawText(commands, documentType === "invoice" ? "Invoice Details" : "Estimate Details", page.width - page.margin - 190, y - 20, 11);
-      drawText(commands, `${documentNumberLabel}: ${documentNumberValue}`, page.width - page.margin - 190, y - 40, 10);
-      drawText(commands, `Date: ${formatPdfDate(estimate?.estimate_date)}`, page.width - page.margin - 190, y - 58, 10);
-      drawText(commands, `Valid Until: ${formatPdfDate(validUntil)}`, page.width - page.margin - 190, y - 76, 10);
-      if (documentType === "invoice") {
-        drawText(commands, `Status: ${String(estimate?.invoice_status || "draft").replaceAll("_", " ")}`, page.width - page.margin - 190, y - 94, 10);
-      }
-
-      y -= 142;
-      drawRect(commands, page.margin, y - 18, page.width - page.margin * 2, 18, accent, null);
-      [["Category", page.margin + 8], ["Scope", page.margin + 66], ["Labor", page.margin + 198], ["Sub", page.margin + 246], ["Material", page.margin + 294], ["Equip", page.margin + 352], ["O/H", page.margin + 410], ["Total", page.margin + 470]].forEach(([label, x]) => {
-        drawText(commands, label, x, y - 12, 6, white);
-      });
-      y -= 22;
-    } else {
-      // drawRect(commands, page.margin, y - 34, page.width - page.margin * 2, 34, accentSoft, line);
-      // drawText(commands, "Each Cost Line Details", page.margin + 14, y - 22, 13);
-      // y -= 52;
-    }
-  }
-
-  function closePage() {
-    drawText(commands, `Prepared by ${company.preparedBy || estimate?.prepared_by?.name || "ACM"}`, page.margin, 28, 9);
-    drawText(commands, `Page ${pageIndex}`, page.width - page.margin - 34, 28, 9);
-    pages.push(commands.join("\n"));
-  }
-
-  startPage("summary");
+  drawRect(commands, tableX, y - headerHeight, labelWidth, headerHeight, null, line, 0.8);
+  drawRect(commands, tableX + labelWidth, y - headerHeight, totalWidth, headerHeight, null, line, 0.8);
+  drawText(commands, "Cost Code / Category", tableX + 10, y - 16, 9, ink);
+  drawText(commands, "Total", tableX + labelWidth + 10, y - 16, 9, ink);
+  y -= headerHeight;
 
   rows.forEach((row) => {
-    const scopeLines = wrapPdfLine(row.costCode || row.code || "-", 18);
-    const rowHeight = Math.max(34, scopeLines.length * 10 + 10);
-    if (y - rowHeight - 18 < 180) {
-      closePage();
-      startPage();
-    }
-
-    drawRect(commands, page.margin, y - rowHeight + 4, page.width - page.margin * 2, rowHeight, [255, 255, 255], line, 0.6);
-    drawText(commands, row.category || row.code || "-", page.margin + 8, y - 11, 7);
+    const rowLabel = row.label || row.code || "-";
+    const scopeLines = wrapPdfLine(rowLabel, 42);
+    const rowHeight = Math.max(24, scopeLines.length * 10 + 10);
+    drawRect(commands, tableX, y - rowHeight, labelWidth, rowHeight, null, line, 0.8);
+    drawRect(commands, tableX + labelWidth, y - rowHeight, totalWidth, rowHeight, null, line, 0.8);
     scopeLines.forEach((lineText, index) => {
-      drawText(commands, lineText, page.margin + 68, y - 11 - index * 9, 6.5);
+      drawText(commands, lineText, tableX + 10, y - 15 - index * 9, 8.5, ink);
     });
-    drawText(commands, formatPdfCurrency(row.laborCost || 0), page.margin + 198, y - 11, 5.8);
-    drawText(commands, formatPdfCurrency(row.subcontractorCost || 0), page.margin + 246, y - 11, 5.8);
-    drawText(commands, formatPdfCurrency(row.materialCost || 0), page.margin + 294, y - 11, 5.8);
-    drawText(commands, formatPdfCurrency(row.equipmentCost || 0), page.margin + 352, y - 11, 5.8);
-    drawText(commands, formatPdfCurrency(row.overheadCosts || 0), page.margin + 410, y - 11, 5.8);
-    drawText(commands, formatPdfCurrency(row.totalPrice || row.totalCost || 0), page.margin + 470, y - 11, 5.8);
+    drawText(commands, formatPdfCurrency(row.totalPrice || 0), tableX + labelWidth + 10, y - 15, 8.5, ink);
     y -= rowHeight;
-    y -= 6;
   });
 
-  if (y < 230) {
-    closePage();
-    startPage();
-  }
+  const totalRowHeight = 26;
+  drawRect(commands, tableX, y - totalRowHeight, labelWidth, totalRowHeight, null, line, 1);
+  drawRect(commands, tableX + labelWidth, y - totalRowHeight, totalWidth, totalRowHeight, null, line, 1);
+  drawText(commands, "Final Total", tableX + 10, y - 16, 9, ink);
+  drawText(commands, formatPdfCurrency(totalValue), tableX + labelWidth + 10, y - 16, 9, ink);
 
-  const totalsX = page.width - page.margin - 202;
-  drawRect(commands, totalsX, y - summaryBoxHeight, 202, summaryBoxHeight, accentSoft, line);
-  drawText(commands, "Summary", totalsX + 14, y - 20, 12);
-  financialRows.forEach(([label, value], index) => {
-    const rowY = y - 46 - index * summaryRowHeight;
-    drawText(commands, label, totalsX + 14, rowY, 10);
-    drawText(commands, formatPdfCurrency(value), totalsX + 114, rowY, index === financialRows.length - 1 ? 11 : 10);
-  });
-
-  const invoiceScopeHeight = Math.max(12, invoiceScopeLines.length * 12);
-  const invoiceCodeHeight = Math.max(12, invoiceCodeLines.length * 12);
-  const leftBoxHeight = documentType === "invoice" ? Math.max(126, 62 + invoiceScopeHeight + 24 + invoiceCodeHeight + 14) : 110;
-  drawRect(commands, page.margin, y - leftBoxHeight, 270, leftBoxHeight, [255, 255, 255], line);
-  drawText(commands, documentType === "invoice" ? "Invoice Notes" : "Notes", page.margin + 14, y - 18, 11);
-  if (documentType === "invoice") {
-    drawWrappedText(commands, invoice.scopeOfWork || "Scope of work pending.", page.margin + 14, y - 36, 240, 9, 12);
-    const totalCodeLabelY = y - 36 - invoiceScopeHeight - 12;
-    // drawText(commands, "Total Code", page.margin + 14, totalCodeLabelY, 10);
-    // drawWrappedText(commands, invoice.totalCode || "-", page.margin + 14, totalCodeLabelY - 16, 240, 9, 12);
-  } else {
-    drawWrappedText(commands, notes || "Thank you for the opportunity to provide this estimate.", page.margin + 14, y - 36, 240, 9, 12);
-  }
-
-  y -= leftBoxHeight + 24;
-  drawRect(commands, page.margin, y - 44, page.width - page.margin * 2, 44, [255, 255, 255], line);
-  drawText(commands, "Terms", page.margin + 14, y - 22, 11);
-  drawWrappedText(commands, terms, page.margin + 14, y - 36, page.width - page.margin * 2 - 28, 9, 12);
-
-  y -= 102;
-  
-  // commands.push(`${pdfColor(muted)} RG`);
-  // commands.push("1 w");
-  // commands.push(`${page.margin} ${y - 18} m ${page.margin + 210} ${y - 18} l S`);
-  // if (stampLabel) {
-  //   drawRect(commands, page.width - 150, y - 42, 110, 40, null, accent, 1);
-
-  // drawText(
-  //   commands,
-  //   stampLabel.slice(0, 22),
-  //   page.width - 138,
-  //   y - 24,
-  //   9
-  // );  }
-  // drawText(commands, "Date", page.margin + 290, y, 10);
-  // commands.push(`${page.margin + 290} ${y - 18} m ${page.margin + 430} ${y - 18} l S`);
-
-  closePage();
-
-  if (documentType !== "invoice") {
-    detailSections.forEach((section) => {
-    startPage("detail");
-    drawDetailSectionHeader(section);
-
-    section.groups.forEach((group) => {
-      if (!group.rows.length) return;
-      if (y < 120) {
-        closePage();
-        startPage("detail");
-        drawDetailSectionHeader(section);
-      }
-
-      const widths = group.widths || group.columns.map(() => 100);
-      const fontSize = group.fontSize || 8;
-      drawDetailGroupHeader(group, widths, fontSize);
-
-      group.rows.forEach((row) => {
-        const isStacked = group.rowLayout === "stackedDescription" && row && !Array.isArray(row);
-        const detailText = isStacked ? row.detail || "-" : "";
-        const detailLines = isStacked ? wrapPdfLine(detailText, 70) : [];
-        const rowHeight = isStacked ? Math.max(30, 18 + detailLines.length * 9 + 4) : 18;
-        if (y < rowHeight + 82) {
-          closePage();
-          startPage("detail");
-          drawDetailSectionHeader(section);
-          drawDetailGroupHeader(group, widths, fontSize);
-        }
-        drawRect(commands, page.margin, y - rowHeight, page.width - page.margin * 2, rowHeight, [255, 255, 255], line, 0.5);
-        let cellX = page.margin + 8;
-        const cells = isStacked ? row.cells : row;
-        cells.forEach((cell, index) => {
-          drawText(commands, fitPdfCellText(cell || "-", widths[index] - 4, fontSize), cellX, y - 12, fontSize);
-          cellX += widths[index];
-        });
-        if (isStacked) {
-          drawText(commands, group.detailLabel || "Scope Of Work", page.margin + 8, y - 22, 5.5, muted);
-          detailLines.forEach((lineText, index) => {
-            drawText(commands, lineText, page.margin + 76, y - 22 - index * 9, 5.5);
-          });
-        }
-        y -= rowHeight + 2;
-      });
-
-      y -= group.title === "Labor" ? 12 : 8;
-    });
-
-    closePage();
-    });
-  }
+  pages.push(commands.join("\n"));
   return pages;
 }
 
@@ -900,58 +703,37 @@ export async function estimateToPdfBuffer(estimate, options = {}) {
   const firstPage = pages[0];
   const logoImage = await embedPdfImage(pdfDoc, company.logoDataUrl);
   if (logoImage) {
-  pages.forEach((page) => {
-    page.drawRectangle({
+    const dimensions = logoImage.scaleToFit(145, 80);
+    firstPage.drawImage(logoImage, {
       x: 42,
-      y: 748,
-      width: 48,
-      height: 48,
-      color: rgb(1, 1, 1),
-    });
-
-    const dimensions = logoImage.scaleToFit(42, 42);
-
-    page.drawImage(logoImage, {
-      x: 45,
-      y: 751 + (42 - dimensions.height) / 2,
-      width: dimensions.width,
-      height: dimensions.height,
-    });
-  });
-}
-
-  const signatureImage = await embedPdfImage(pdfDoc, company.signatureDataUrl);
-  if (signatureImage) {
-    firstPage.drawRectangle({
-      x: 48,
-      y: 105,
-      width: 180,
-      height: 28,
-      color: rgb(1, 1, 1),
-    });
-    const dimensions = signatureImage.scaleToFit(160, 44);
-    firstPage.drawImage(signatureImage, {
-      x: 54,
-      y: 106 + (44 - dimensions.height) / 2,
+      y: 742,
       width: dimensions.width,
       height: dimensions.height,
     });
   }
 
-const stampImage = await embedPdfImage(pdfDoc, company.stampDataUrl);
+  const signatureImage = await embedPdfImage(pdfDoc, company.signatureDataUrl);
+  if (signatureImage) {
+    const dimensions = signatureImage.scaleToFit(130, 58);
+    firstPage.drawImage(signatureImage, {
+      x: 420,
+      y: 72,
+      width: dimensions.width,
+      height: dimensions.height,
+    });
+  }
 
-if (stampImage) {
-  const firstPage = pages[0];
-
-  const dimensions = stampImage.scaleToFit(90, 90);
-
-  firstPage.drawImage(stampImage, {
-    x: 470,
-    y: 40,
-    width: dimensions.width,
-    height: dimensions.height,
-  });
-}
+  const stampImage = await embedPdfImage(pdfDoc, company.stampDataUrl);
+  if (stampImage) {
+    const dimensions = stampImage.scaleToFit(84, 84);
+    firstPage.drawImage(stampImage, {
+      x: 332,
+      y: 58,
+      width: dimensions.width,
+      height: dimensions.height,
+      opacity: 0.92,
+    });
+  }
 
   return Buffer.from(await pdfDoc.save());
 }

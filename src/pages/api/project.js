@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { canAccessProject, getRequestContext } from "@/lib/server/authz";
+import { canAccessModule, canAccessProject, getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
 import { getTaskWorkspace, loadUserDirectory } from "@/lib/server/taskWorkflow";
 
@@ -87,6 +87,7 @@ async function resolveClientId(ctx, payload) {
 export default async function handler(req, res) {
   const ctx = await getRequestContext(req, res);
   if (!ctx.ok) return sendError(res, ctx.status, ctx.error);
+  if (!canAccessModule(ctx, "projects")) return sendError(res, 403, "forbidden");
 
   const parsed = QuerySchema.safeParse(req.method === "GET" ? req.query : req.body);
   if (!parsed.success) return sendError(res, 400, "invalid_project_id");

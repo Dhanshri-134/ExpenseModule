@@ -1,5 +1,14 @@
 const COMPANY_ASSET_BUCKET = "company-assets";
 
+function extractAssetPathFromUrl(value = "") {
+  const input = String(value || "").trim();
+  if (!input) return "";
+  const marker = `/${COMPANY_ASSET_BUCKET}/`;
+  const index = input.indexOf(marker);
+  if (index === -1) return "";
+  return input.slice(index + marker.length).split("?")[0];
+}
+
 function normalizeMimeExtension(mimeType = "") {
   const normalized = String(mimeType).toLowerCase();
   if (normalized.includes("png")) return "png";
@@ -53,7 +62,7 @@ export async function persistCompanyAsset(admin, { companyId, assetName, value, 
 
   if (!input.startsWith("data:")) {
     return {
-      path: existingPath || "",
+      path: extractAssetPathFromUrl(input) || existingPath || "",
       url: input,
     };
   }
@@ -85,9 +94,9 @@ export function extractCompanyAssetMetadata(admin, metadata = {}) {
   const signaturePath = safe.signaturePath || "";
   const stampPath = safe.stampPath || "";
 
-  const logoUrl = safe.logoUrl || resolveCompanyAssetUrl(admin, logoPath) || safe.logoDataUrl || "";
-  const signatureUrl = safe.signatureUrl || resolveCompanyAssetUrl(admin, signaturePath) || safe.signatureDataUrl || "";
-  const stampUrl = safe.stampUrl || resolveCompanyAssetUrl(admin, stampPath) || safe.stampDataUrl || "";
+  const logoUrl = resolveCompanyAssetUrl(admin, logoPath) || safe.logoUrl || safe.logoDataUrl || "";
+  const signatureUrl = resolveCompanyAssetUrl(admin, signaturePath) || safe.signatureUrl || safe.signatureDataUrl || "";
+  const stampUrl = resolveCompanyAssetUrl(admin, stampPath) || safe.stampUrl || safe.stampDataUrl || "";
 
   return {
     ...safe,

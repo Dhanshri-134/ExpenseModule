@@ -1,11 +1,11 @@
 import DashboardShell from "@/components/dashboard/DashboardShell";
-import { DASHBOARD_NAVIGATION } from "@/lib/dashboard";
+import { DASHBOARD_NAVIGATION, filterNavigationByAccess } from "@/lib/dashboard";
 
 export default function EmployeeShell({ companyName, viewer, title, children }) {
   return (
     <DashboardShell
       companyName={companyName}
-      navigation={DASHBOARD_NAVIGATION.employee}
+      navigation={filterNavigationByAccess(DASHBOARD_NAVIGATION.employee, viewer?.moduleAccess)}
       viewer={viewer}
       title={title}
     >
@@ -13,4 +13,3 @@ export default function EmployeeShell({ companyName, viewer, title, children }) 
     </DashboardShell>
   );
 }
-

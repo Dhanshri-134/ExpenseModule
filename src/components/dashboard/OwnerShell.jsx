@@ -1,5 +1,5 @@
 import DashboardShell from "@/components/dashboard/DashboardShell";
-import { DASHBOARD_NAVIGATION } from "@/lib/dashboard";
+import { DASHBOARD_NAVIGATION, filterNavigationByAccess } from "@/lib/dashboard";
 
 export default function OwnerShell({
   companyName,
@@ -10,7 +10,7 @@ export default function OwnerShell({
   return (
     <DashboardShell
       companyName={companyName}
-      navigation={DASHBOARD_NAVIGATION.owner}
+      navigation={filterNavigationByAccess(DASHBOARD_NAVIGATION.owner, viewer?.moduleAccess)}
       viewer={viewer}
       title={title}
     >

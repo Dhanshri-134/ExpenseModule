@@ -5,6 +5,17 @@ import { sendError, sendOk } from "@/lib/server/responses";
 import { getAuthUsersMap, invalidateAuthUsersCache } from "@/lib/server/authUsers";
 import { createAuthUser } from "@/lib/server/users";
 import { insertActivityLog } from "@/lib/server/taskWorkflow";
+import { MODULE_ACCESS_KEYS, normalizeModuleAccess } from "@/lib/moduleAccess";
+
+const ModuleAccessSchema = z
+  .object({
+    leads: z.boolean().optional(),
+    clients: z.boolean().optional(),
+    projects: z.boolean().optional(),
+    invoices: z.boolean().optional(),
+    estimates: z.boolean().optional(),
+  })
+  .optional();
 
 const CreateStaffSchema = z.object({
   name: z.string().min(1),
@@ -16,6 +27,7 @@ const CreateStaffSchema = z.object({
   craft: z.string().optional().nullable(),
   projectId: z.string().uuid().optional().nullable(),
   password: z.string().min(8).optional().nullable(),
+  moduleAccess: ModuleAccessSchema,
 });
 
 const UpdateStaffSchema = z.object({
@@ -27,6 +39,7 @@ const UpdateStaffSchema = z.object({
   hourlyRate: z.coerce.number().nonnegative().default(0),
   craft: z.string().optional().nullable(),
   password: z.string().min(8).optional().or(z.literal("")),
+  moduleAccess: ModuleAccessSchema,
 });
 
 const DeleteStaffSchema = z.object({
@@ -88,6 +101,52 @@ async function buildStaffPreview(ctx, role) {
   };
 }
 
+async function loadModuleAccessByUserId(admin, companyId, userIds, roleByUserId = new Map()) {
+  const results = new Map();
+  userIds.forEach((userId) => {
+    results.set(userId, normalizeModuleAccess({}, roleByUserId.get(userId) || "employee"));
+  });
+
+  if (!userIds.length) return results;
+
+  const { data } = await admin
+    .from("company_user_module_access")
+    .select("user_id, module_key, granted")
+    .eq("company_id", companyId)
+    .in("user_id", userIds);
+
+  (data ?? []).forEach((item) => {
+    const current = results.get(item.user_id) || {};
+    current[item.module_key] = Boolean(item.granted);
+    results.set(item.user_id, current);
+  });
+
+  userIds.forEach((userId) => {
+    results.set(userId, normalizeModuleAccess(results.get(userId), roleByUserId.get(userId) || "employee"));
+  });
+
+  return results;
+}
+
+async function saveModuleAccess(admin, companyId, userId, role, moduleAccess, actorUserId = null) {
+  const normalized = normalizeModuleAccess(moduleAccess, role);
+  const rows = MODULE_ACCESS_KEYS.map((moduleKey) => ({
+    company_id: companyId,
+    user_id: userId,
+    module_key: moduleKey,
+    granted: normalized[moduleKey],
+    updated_by_user_id: actorUserId,
+    updated_at: new Date().toISOString(),
+  }));
+
+  const { error } = await admin.from("company_user_module_access").upsert(rows, {
+    onConflict: "company_id,user_id,module_key",
+  });
+
+  if (error) throw new Error(error.message || "module_access_save_failed");
+  return normalized;
+}
+
 export default async function handler(req, res) {
   const ctx = await getRequestContext(req, res);
   if (!ctx.ok) return sendError(res, ctx.status, ctx.error);
@@ -134,8 +193,9 @@ export default async function handler(req, res) {
 
     const personIds = [...new Set(filtered.map((item) => item.person_id).filter(Boolean))];
     const userIds = filtered.map((item) => item.user_id);
+    const roleByUserId = new Map(filtered.map((item) => [item.user_id, item.role]));
 
-    const [{ data: people }, authUsersById] = await Promise.all([
+    const [{ data: people }, authUsersById, moduleAccessByUserId] = await Promise.all([
       personIds.length
         ? ctx.admin
             .from("people")
@@ -143,6 +203,7 @@ export default async function handler(req, res) {
             .in("id", personIds)
         : Promise.resolve({ data: [] }),
       getAuthUsersMap(ctx.admin),
+      loadModuleAccessByUserId(ctx.admin, ctx.company.id, userIds, roleByUserId),
     ]);
 
     const peopleById = new Map((people ?? []).map((person) => [person.id, person]));
@@ -204,6 +265,7 @@ export default async function handler(req, res) {
         address: person?.address || "",
         password: ctx.role === "employee" ? "" : credential?.password || "",
         password_sent_at: credential?.password_sent_at || null,
+        module_access: moduleAccessByUserId.get(item.user_id) || normalizeModuleAccess({}, item.role),
         created_project: item.created_in_project_id ? projectsById[item.created_in_project_id] || null : null,
         project_assignments: (projectAssignmentsByUserId[item.user_id] ?? []).map((assignment) => ({
           ...assignment,
@@ -275,6 +337,15 @@ export default async function handler(req, res) {
       if (assignmentError) return sendError(res, 500, "project_assignment_failed", assignmentError.message);
     }
 
+    const savedModuleAccess = await saveModuleAccess(
+      ctx.admin,
+      ctx.company.id,
+      user.id,
+      payload.role,
+      payload.moduleAccess,
+      ctx.user.id
+    );
+
     const finalUserName = membership.user_name || membership.user_code;
     if (finalUserName !== (payload.userName?.trim() || "")) {
       const { error: usernameError } = await ctx.admin.auth.admin.updateUserById(user.id, {
@@ -300,6 +371,7 @@ export default async function handler(req, res) {
         role: payload.role,
         hourly_rate: payload.hourlyRate,
         project_id: payload.projectId ?? null,
+        module_access: savedModuleAccess,
       },
     });
 
@@ -358,6 +430,22 @@ export default async function handler(req, res) {
 
     if (membershipError) return sendError(res, 500, "staff_update_failed", membershipError.message);
 
+    const { data: targetMembership } = await ctx.admin
+      .from("company_users")
+      .select("role")
+      .eq("company_id", ctx.company.id)
+      .eq("user_id", payload.userId)
+      .maybeSingle();
+
+    const savedModuleAccess = await saveModuleAccess(
+      ctx.admin,
+      ctx.company.id,
+      payload.userId,
+      targetMembership?.role || "employee",
+      payload.moduleAccess,
+      ctx.user.id
+    );
+
     updateDemoCredential(payload.userId, {
       email: payload.email,
       userName: payload.userName.trim(),
@@ -375,6 +463,7 @@ export default async function handler(req, res) {
         hourly_rate: payload.hourlyRate,
         mobile: payload.mobile ?? "",
         craft: payload.craft ?? "",
+        module_access: savedModuleAccess,
       },
     });
 
