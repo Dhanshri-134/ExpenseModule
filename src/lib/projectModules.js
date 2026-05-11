@@ -269,6 +269,17 @@ function pdfColor(rgb) {
 }
 
 function flattenEstimateRows(estimate) {
+  const invoiceEntries = estimate?.summary?.documentMeta?.invoice?.entries;
+  if (Array.isArray(invoiceEntries) && invoiceEntries.length) {
+    return invoiceEntries
+      .map((entry, index) => ({
+        item: `INV-${index + 1}`,
+        label: String(entry?.scope || "").trim() || `Entry ${index + 1}`,
+        totalPrice: normalizeNumber(entry?.total),
+      }))
+      .filter((entry) => entry.label || entry.totalPrice);
+  }
+
   const rows = [];
 
   (estimate?.cost_codes ?? []).forEach((costCode, index) => {
@@ -529,10 +540,10 @@ commands.push(`0 ${lineY} m ${page.width} ${lineY} l S`);
 y = page.height - 168;
 
 const sectionTop = y - 10;
-const gap = 12;
+
 
 const availableWidth = page.width - page.margin * 2;
-const columnWidth = (availableWidth - gap) / 2;
+const columnWidth = (availableWidth - 12) / 2;
 
 const blackBorder = [0, 0, 0];
 
@@ -668,13 +679,19 @@ drawText(
 
 y = sectionTop - boxHeight - 24;
 
-  const tableWidth = 400;
-const labelWidth = 285;
-const totalWidth = tableWidth - labelWidth;
+const gap = 12;
 
-// perfectly centered
-const tableX = (page.width - tableWidth) / 2;
-  const headerHeight = 24;
+
+// match top section width exactly
+const tableWidth = availableWidth;
+
+// align to same left margin
+const tableX = page.margin;
+
+// proportional columns
+const codeWidth = 110;
+const categoryWidth = tableWidth - codeWidth - 120;
+const totalWidth = 120;
 
   drawRect(commands, tableX, y - headerHeight, labelWidth, headerHeight, null, line, 0.8);
   drawRect(commands, tableX + labelWidth, y - headerHeight, totalWidth, headerHeight, null, line, 0.8);

@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { BusyButton, CompactListRow } from "@/components/dashboard/DashboardUi";
 import { sendJson } from "@/lib/client/apiClient";
@@ -11,8 +10,16 @@ function cardClass(extra = "") {
   return `rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.08)] ${extra}`.trim();
 }
 
-function fieldClass() {
-  return "acm-input mt-0 h-10";
+function fieldClass(extra = "") {
+  return `acm-input mt-0 h-9 text-[color:var(--acm-fg)] ${extra}`.trim();
+}
+
+function areaClass(extra = "") {
+  return `acm-input mt-0 min-h-[72px] py-2 text-[color:var(--acm-fg)] ${extra}`.trim();
+}
+
+function sheetFieldClass(extra = "") {
+  return `w-full border-0 border-b border-[color:var(--acm-border)] bg-transparent px-1 py-2 text-sm text-[color:var(--acm-fg)] outline-none focus:border-[color:var(--acm-accent)] focus:ring-0 ${extra}`.trim();
 }
 
 function formatCurrency(value) {
@@ -30,6 +37,11 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString();
+}
+
+function isValidEmail(value) {
+  if (!value) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim());
 }
 
 function getInvoiceAmount(estimate) {
@@ -51,7 +63,8 @@ function getInvoiceLabel(status) {
 function getInvoiceErrorMessage(error) {
   if (!error) return "";
   if (error === "estimate_not_found") return "This estimate could not be found anymore.";
-  if (error === "estimate_workflow_update_failed") return "Unable to update the invoice stage right now.";
+  if (error === "estimate_workflow_update_failed") return "Unable to update the invoice right now.";
+  if (error === "client_create_failed") return "Unable to create the client right now.";
   return error;
 }
 
@@ -70,6 +83,81 @@ function matchesSearchQuery(query, ...values) {
     .includes(normalizedQuery);
 }
 
+function invoiceRowsFromEstimate(estimate) {
+  const storedEntries = estimate?.summary?.documentMeta?.invoice?.entries;
+  if (Array.isArray(storedEntries) && storedEntries.length) {
+    return storedEntries.map((row, index) => ({
+      id: row.id || `row-${index + 1}`,
+      label: row.scope || `Entry ${index + 1}`,
+      amount: Number(row.total || 0),
+    }));
+  }
+
+  const costCodeRows = (estimate?.cost_codes ?? []).map((row, index) => ({
+    id: row.id || `row-${index + 1}`,
+    label: row.costCode?.name || row.costCode?.code || row.description || `Cost Code ${index + 1}`,
+    amount: Number(row.totalPrice || row.totalCost || 0),
+  }));
+
+  if (costCodeRows.length) return costCodeRows;
+
+  const lineRows = (estimate?.line_items ?? []).map((row, index) => ({
+    id: row.id || `row-${index + 1}`,
+    label: row.costCode || row.scope || row.description || `Line ${index + 1}`,
+    amount: Number(row.totalCost || row.amount || row.laborCost || 0),
+  }));
+
+  if (lineRows.length) return lineRows;
+
+  return [
+    {
+      id: "total",
+      label: estimate?.title || "Invoice",
+      amount: getInvoiceAmount(estimate),
+    },
+  ];
+}
+
+function buildInvoiceForm(estimate, company) {
+  const meta = estimate?.summary?.documentMeta || {};
+  const customer = meta.customer || {};
+  const invoiceMeta = meta.invoice || {};
+  const companyMeta = meta.company || {};
+  const today = new Date().toISOString().slice(0, 10);
+
+  return {
+    clientMode: estimate?.client_id ? "existing" : "new",
+    clientId: estimate?.client_id || "",
+    title: estimate?.title || "Invoice",
+    estimateDate: estimate?.estimate_date || today,
+    validUntil: meta.validUntil || estimate?.estimate_date || today,
+    customerName: customer.name || estimate?.client?.name || "",
+    customerAddress: customer.address || estimate?.client?.address || "",
+    customerEmail: customer.email || estimate?.client?.email || "",
+    customerPhone: customer.phone || estimate?.client?.contact || "",
+    companyName: companyMeta.name || company?.name || "",
+    companyAddress: companyMeta.address || company?.address || "",
+    companyEmail: companyMeta.contactEmail || company?.email || "",
+    companyPhone: companyMeta.contactPhone || company?.contact || "",
+    invoiceReference: invoiceMeta.invoiceReference || estimate?.invoice_reference || "",
+    invoiceScopeOfWork: invoiceMeta.scopeOfWork || "",
+    invoiceTotalCode: invoiceMeta.totalCode || "",
+    invoiceEntries: invoiceRowsFromEstimate(estimate).map((entry, index) => ({
+      id: entry.id || `entry-${index + 1}`,
+      scope: entry.label || "",
+      total: String(Number(entry.amount || 0)),
+    })),
+  };
+}
+
+function createInvoiceEntry(index = 1) {
+  return {
+    id: `entry-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+    scope: "",
+    total: "",
+  };
+}
+
 function InlineMessage({ error, message }) {
   if (!error && !message) return null;
   return (
@@ -85,25 +173,42 @@ function downloadInvoicePdf(estimateId) {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
+function LabeledInput({ label, children }) {
+  return (
+    <label className="grid gap-2">
+      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">{label}</span>
+      {children}
+    </label>
+  );
+}
+
 export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "", standalone = false }) {
   const router = useRouter();
-  const estimatesQuery = useApiQuery(standalone && initialEstimateId ? `/api/estimates?id=${initialEstimateId}&compact=1` : "/api/estimates?compact=1");
+  const estimatesQuery = useApiQuery(
+    standalone && initialEstimateId ? `/api/estimates?id=${initialEstimateId}` : "/api/estimates?compact=1"
+  );
   const settingsQuery = useApiQuery("/api/settings");
-  const [activeEstimateId, setActiveEstimateId] = useState(initialEstimateId);
-  const [invoiceDrafts, setInvoiceDrafts] = useState({});
+  const clientsQuery = useApiQuery("/api/clients");
+  const [form, setForm] = useState(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [dirty, setDirty] = useState(false);
+
+  const rows = useMemo(() => estimatesQuery.data?.estimates || [], [estimatesQuery.data?.estimates]);
+  const company = settingsQuery.data?.company || null;
+  const clients = useMemo(() => clientsQuery.data?.clients || [], [clientsQuery.data?.clients]);
 
   const invoiceCandidates = useMemo(() => {
-    const rows = estimatesQuery.data?.estimates || [];
+    if (standalone) return rows;
     return rows.filter((estimate) => {
       const approvalStatus = String(estimate.approval_status || estimate.approvalStatus || "");
       const status = String(estimate.status || "");
       return approvalStatus === "approved" || status === "approved" || estimate.invoice_status === "draft" || estimate.invoice_status === "completed";
     });
-  }, [estimatesQuery.data?.estimates]);
+  }, [rows, standalone]);
+
   const filteredInvoiceCandidates = useMemo(
     () =>
       invoiceCandidates.filter((estimate) =>
@@ -121,29 +226,188 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
     [invoiceCandidates, searchQuery]
   );
 
-  const activeEstimate = useMemo(
-    () => filteredInvoiceCandidates.find((estimate) => estimate.id === activeEstimateId) || filteredInvoiceCandidates[0] || null,
-    [activeEstimateId, filteredInvoiceCandidates]
-  );
-  const invoiceMeta = activeEstimate?.summary?.documentMeta?.invoice || {};
-  const activeDraft = activeEstimate?.id ? invoiceDrafts[activeEstimate.id] || {} : {};
-  const effectiveInvoiceReference = activeDraft.invoiceReference ?? activeEstimate?.invoice_reference ?? invoiceMeta.invoiceReference ?? "";
-  const invoiceScopeOfWork = activeDraft.invoiceScopeOfWork ?? invoiceMeta.scopeOfWork ?? "";
-  const invoiceTotalCode = activeDraft.invoiceTotalCode ?? invoiceMeta.totalCode ?? "";
+  const activeEstimate = useMemo(() => {
+    if (standalone) return rows.find((estimate) => estimate.id === initialEstimateId) || rows[0] || null;
+    return filteredInvoiceCandidates[0] || null;
+  }, [filteredInvoiceCandidates, initialEstimateId, rows, standalone]);
 
-  async function runInvoiceAction(action, body, successMessage) {
+  useEffect(() => {
+    if (!activeEstimate || !company) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setForm(buildInvoiceForm(activeEstimate, company));
+    setDirty(false);
+  }, [activeEstimate, company]);
+
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const handleBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [dirty]);
+
+  function confirmDiscardChanges() {
+    if (!dirty) return true;
+    return window.confirm("You have unsaved invoice changes. Discard them?");
+  }
+
+  function updateForm(key, value) {
+    setForm((current) => ({ ...(current || {}), [key]: value }));
+    setDirty(true);
+  }
+
+  function updateInvoiceEntry(entryId, key, value) {
+    setForm((current) => ({
+      ...(current || {}),
+      invoiceEntries: (current?.invoiceEntries || []).map((entry) => (entry.id === entryId ? { ...entry, [key]: value } : entry)),
+    }));
+    setDirty(true);
+  }
+
+  function addInvoiceEntry() {
+    setForm((current) => ({
+      ...(current || {}),
+      invoiceEntries: [...(current?.invoiceEntries || []), createInvoiceEntry((current?.invoiceEntries || []).length + 1)],
+    }));
+    setDirty(true);
+  }
+
+  function removeInvoiceEntry(entryId) {
+    setForm((current) => ({
+      ...(current || {}),
+      invoiceEntries:
+        (current?.invoiceEntries || []).length > 1
+          ? (current?.invoiceEntries || []).filter((entry) => entry.id !== entryId)
+          : current?.invoiceEntries || [],
+    }));
+    setDirty(true);
+  }
+
+  function handleClientModeChange(nextMode) {
+    setForm((current) => ({
+      ...(current || {}),
+      clientMode: nextMode,
+      clientId: nextMode === "existing" ? current?.clientId || "" : "",
+      ...(nextMode === "new"
+        ? {}
+        : (() => {
+            const client = clients.find((item) => item.id === current?.clientId);
+            return client
+              ? {
+                  customerName: client.name || "",
+                  customerAddress: client.address || "",
+                  customerEmail: client.email || "",
+                  customerPhone: client.contact || "",
+                }
+              : {};
+          })()),
+    }));
+    setDirty(true);
+  }
+
+  function handleClientSelect(clientId) {
+    const client = clients.find((item) => item.id === clientId);
+    setForm((current) => ({
+      ...(current || {}),
+      clientMode: "existing",
+      clientId,
+      customerName: client?.name || "",
+      customerAddress: client?.address || "",
+      customerEmail: client?.email || "",
+      customerPhone: client?.contact || "",
+    }));
+    setDirty(true);
+  }
+
+  function validateInvoice() {
+    if (!activeEstimate) return "Pick an estimate first.";
+    if (!form?.title?.trim()) return "Invoice title is required.";
+    if (!form?.estimateDate) return "Invoice date is required.";
+    if (!form?.validUntil) return "Valid until date is required.";
+    if (!form?.invoiceReference?.trim()) return "Invoice reference is required.";
+    if (form.clientMode === "existing" && !form.clientId) return "Select an existing client.";
+    if (!form?.customerName?.trim()) return "Client name is required.";
+    if (!form?.customerAddress?.trim()) return "Client address is required.";
+    if (!isValidEmail(form?.customerEmail)) return "Enter a valid client email.";
+    if (!form?.customerPhone?.trim()) return "Client phone is required.";
+    if (!form?.companyName?.trim()) return "Company name is required.";
+    if (!form?.companyAddress?.trim()) return "Company address is required.";
+    if (!isValidEmail(form?.companyEmail)) return "Enter a valid company email.";
+    if (!form?.companyPhone?.trim()) return "Company phone is required.";
+    if (!(form?.invoiceEntries || []).some((entry) => String(entry.scope || "").trim() || Number(entry.total || 0))) {
+      return "Add at least one invoice entry.";
+    }
+    return "";
+  }
+
+  async function resolveClientId() {
+    if (!form) return "";
+    if (form.clientMode === "existing") return form.clientId;
+    const created = await sendJson("/api/clients", {
+      method: "POST",
+      body: {
+        name: form.customerName.trim(),
+        address: form.customerAddress.trim(),
+        contact: form.customerPhone.trim(),
+        email: form.customerEmail.trim(),
+      },
+    });
+    invalidateApiQuery("/api/clients");
+    await clientsQuery.refresh().catch(() => null);
+    return created?.client?.id || "";
+  }
+
+  async function runInvoiceAction(action, successMessage) {
+    const validationError = validateInvoice();
+    if (validationError) {
+      setError(validationError);
+      return false;
+    }
+
+    if (!activeEstimate || !form) return false;
+
     setBusyAction(action);
     setError("");
     setMessage("");
     try {
-      await sendJson("/api/estimate-workflow", {
+      const clientId = await resolveClientId();
+      const payload = {
+        estimateId: activeEstimate.id,
+        action,
+        clientId: clientId || null,
+        title: form.title.trim(),
+        estimateDate: form.estimateDate,
+        validUntil: form.validUntil,
+        customerName: form.customerName.trim(),
+        customerAddress: form.customerAddress.trim(),
+        customerEmail: form.customerEmail.trim(),
+        customerPhone: form.customerPhone.trim(),
+        companyName: form.companyName.trim(),
+        companyAddress: form.companyAddress.trim(),
+        companyEmail: form.companyEmail.trim(),
+        companyPhone: form.companyPhone.trim(),
+        invoiceReference: form.invoiceReference.trim(),
+        invoiceEntries: (form.invoiceEntries || []).map((entry) => ({
+          scope: String(entry.scope || "").trim(),
+          total: Number(entry.total || 0),
+        })),
+      };
+
+      const json = await sendJson("/api/estimate-workflow", {
         method: "POST",
-        body,
+        body: payload,
       });
 
       invalidateApiQuery("/api/estimates?compact=1");
       invalidateApiQuery("/api/estimates");
       await estimatesQuery.refresh().catch(() => null);
+      const refreshedEstimate = json?.estimate || null;
+      if (refreshedEstimate) {
+        setForm(buildInvoiceForm(refreshedEstimate, company));
+      }
+      setDirty(false);
       setMessage(successMessage);
       return true;
     } catch (requestError) {
@@ -154,209 +418,263 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
     }
   }
 
-  async function markDraft() {
+  async function deleteInvoice() {
     if (!activeEstimate) return;
-    await runInvoiceAction(
-      "draft",
-      {
-        estimateId: activeEstimate.id,
-        action: "mark_invoice_ready",
-        invoiceReference: effectiveInvoiceReference.trim() || null,
-        scopeOfWork: invoiceScopeOfWork.trim() || null,
-        totalCode: invoiceTotalCode.trim() || null,
-      },
-      "Invoice moved to draft."
-    );
+    if (!window.confirm(`Delete invoice data for "${activeEstimate.title || `Estimate #${activeEstimate.estimate_number}`}"?`)) return;
+
+    setBusyAction("delete");
+    setError("");
+    setMessage("");
+    try {
+      await sendJson("/api/estimate-workflow", {
+        method: "POST",
+        body: {
+          estimateId: activeEstimate.id,
+          action: "delete_invoice",
+        },
+      });
+      invalidateApiQuery("/api/estimates?compact=1");
+      invalidateApiQuery("/api/estimates");
+      await estimatesQuery.refresh().catch(() => null);
+      setMessage("Invoice deleted.");
+      if (!standalone) return;
+      router.push(`/${roleBase}/invoicing`);
+    } catch (requestError) {
+      setError(getInvoiceErrorMessage(requestError.message || "invoice_delete_failed"));
+    } finally {
+      setBusyAction("");
+    }
   }
 
-  const company = settingsQuery.data?.company;
+  const invoiceRows = useMemo(() => invoiceRowsFromEstimate(activeEstimate), [activeEstimate]);
+  const totalAmount = getInvoiceAmount(activeEstimate);
 
   return (
-    <div className="space-y-6">
-      {/* <section className={cardClass()}>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="text-sm font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Invoices</div>
-            <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">{standalone ? "Invoice Details" : "Invoices"}</h1>
-          </div>
-          {standalone ? (
-            <Link href={`/${roleBase}/invoicing`} className="acm-btn acm-btn-secondary h-10 px-4">
-              Back
-            </Link>
-          ) : (
-            <Link href={`/${roleBase}/estimates`} className="acm-btn acm-btn-secondary h-10 px-4">
-              Open Estimates
-            </Link>
-          )}
-        </div>
-      </section> */}
-
-      <InlineMessage error={estimatesQuery.error || settingsQuery.error || error} message={message} />
+    <div className="space-y-4">
+      <InlineMessage error={estimatesQuery.error || settingsQuery.error || clientsQuery.error || error} message={message} />
 
       {!standalone ? (
-        <section className="grid gap-6">
-          {/* <div> */}
-            {/* <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-xl font-bold text-[color:var(--acm-fg)]">Invoice Queue</div>
-                <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">Approved estimates waiting for invoice actions.</div>
-              </div>
-            </div> */}
-
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <input className={fieldClass()} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search invoices by estimate, client, reference, status, or value" />
-              {/* <div className="text-sm font-medium text-[color:var(--acm-muted-fg)]">
-                {filteredInvoiceCandidates.length} invoice{filteredInvoiceCandidates.length === 1 ? "" : "s"}
-              </div> */}
-            </div>
-            <div className="mt-4 space-y-3 grid grid-cols-3 gap-6">
-              {filteredInvoiceCandidates.length ? filteredInvoiceCandidates.map((estimate) => (
-                <CompactListRow
-                  key={estimate.id}
-                  primary={estimate.title || `Estimate #${estimate.estimate_number}`}
-                  secondary={`${estimate.client?.name || "Client"} | ${formatDate(estimate.estimate_date)}`}
-                  tertiary={`${formatCurrency(getInvoiceAmount(estimate))} | Ref: ${estimate.invoice_reference || "Pending"}`}
-                  onClick={() => {
-                    router.push(`/${roleBase}/invoicing/${estimate.id}`);
-                  }}
-                  actions={
+        <section className="grid gap-3">
+          <div className="flex flex-wrap gap-2">
+            <input
+              className={fieldClass("flex-1")}
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search invoices by estimate, client, reference, status, or value"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const target = filteredInvoiceCandidates[0];
+                if (!target) return;
+                router.push(`/${roleBase}/invoicing/${target.id}`);
+              }}
+              className="acm-btn acm-btn-primary h-9 px-4"
+              disabled={!filteredInvoiceCandidates.length}
+            >
+              Create
+            </button>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-3">
+            {filteredInvoiceCandidates.length ? filteredInvoiceCandidates.map((estimate) => (
+              <CompactListRow
+                key={estimate.id}
+                primary={estimate.title || `Estimate #${estimate.estimate_number}`}
+                secondary={`${estimate.client?.name || "Client"} | ${formatDate(estimate.estimate_date)}`}
+                tertiary={`${formatCurrency(getInvoiceAmount(estimate))} | Ref: ${estimate.invoice_reference || "Pending"}`}
+                onClick={() => router.push(`/${roleBase}/invoicing/${estimate.id}`)}
+                actions={
+                  <div className="flex items-center gap-2">
                     <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${getInvoiceTone(estimate.invoice_status)}`}>
                       {getInvoiceLabel(estimate.invoice_status)}
                     </span>
-                  }
-                />
-              )) : (
-                <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-8 text-sm text-[color:var(--acm-muted-fg)]">
-                  No invoices match the current search.
-                </div>
-              )}
-            </div>
-          {/* </div> */}
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        router.push(`/${roleBase}/invoicing/${estimate.id}`);
+                      }}
+                      className="rounded-full border border-[color:var(--acm-border)] px-3 py-1 text-xs font-semibold text-[color:var(--acm-fg)]"
+                    >
+                      Open
+                    </button>
+                  </div>
+                }
+              />
+            )) : (
+              <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-8 text-sm text-[color:var(--acm-muted-fg)] lg:col-span-3">
+                No invoices match the current search.
+              </div>
+            )}
+          </div>
         </section>
       ) : null}
 
       {standalone ? (
-      <section>
-        <div className={cardClass()}>
+        <section className={cardClass("space-y-4 p-4")}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-xl font-bold text-[color:var(--acm-fg)]">Invoice Builder</div>
-              <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">Save the invoice reference against an approved estimate.</div>
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Invoice</div>
+              <div className="mt-1 text-2xl font-bold text-[color:var(--acm-fg)]">{form?.invoiceReference || activeEstimate?.invoice_reference || "Invoice"}</div>
             </div>
-            {activeEstimate ? (
-              <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${getInvoiceTone(activeEstimate.invoice_status)}`}>
-                {getInvoiceLabel(activeEstimate.invoice_status)}
-              </span>
-            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!confirmDiscardChanges()) return;
+                  router.push(`/${roleBase}/invoicing`);
+                }}
+                className="acm-btn acm-btn-secondary h-10 px-4"
+              >
+                Back
+              </button>
+              {activeEstimate ? (
+                <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${getInvoiceTone(activeEstimate.invoice_status)}`}>
+                  {getInvoiceLabel(activeEstimate.invoice_status)}
+                </span>
+              ) : null}
+            </div>
           </div>
 
-          {activeEstimate ? (
-            <div className="mt-5 grid gap-5">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">Bill To</div>
-                  <div className="mt-3 text-lg font-bold text-[color:var(--acm-fg)]">{activeEstimate.client?.name || "Client"}</div>
-                  <div className="mt-2 text-sm text-[color:var(--acm-muted-fg)]">{activeEstimate.client?.contact || activeEstimate.customer_name || "-"}</div>
-                  <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{activeEstimate.client?.email || activeEstimate.customer_email || "-"}</div>
-                  <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{activeEstimate.client?.address || activeEstimate.customer_address || "-"}</div>
-                </div>
-
-                <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">From Company</div>
-                  <div className="mt-3 text-lg font-bold text-[color:var(--acm-fg)]">{company?.name || "Company profile pending"}</div>
-                  <div className="mt-2 text-sm text-[color:var(--acm-muted-fg)]">{company?.contact || "-"}</div>
-                  <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{company?.email || "-"}</div>
-                  <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{company?.address || "-"}</div>
-                </div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">Estimate</div>
-                  <div className="mt-2 text-lg font-bold text-[color:var(--acm-fg)]">#{activeEstimate.estimate_number || "-"}</div>
-                </div>
-                <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">Invoice Value</div>
-                  <div className="mt-2 text-lg font-bold text-[color:var(--acm-fg)]">{formatCurrency(getInvoiceAmount(activeEstimate))}</div>
-                </div>
-                <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">Approved On</div>
-                  <div className="mt-2 text-lg font-bold text-[color:var(--acm-fg)]">{formatDate(activeEstimate.approved_at)}</div>
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-[color:var(--acm-fg)]">Invoice Reference</label>
-                <input
-                  className={fieldClass()}
-                  placeholder="QB-INV-1001"
-                  value={effectiveInvoiceReference}
-                  onChange={(event) =>
-                    setInvoiceDrafts((current) => ({
-                      ...current,
-                      [activeEstimate.id]: {
-                        ...(current[activeEstimate.id] || {}),
-                        invoiceReference: event.target.value,
-                      },
-                    }))
-                  }
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-[color:var(--acm-fg)]">Scope of Work</label>
-                <textarea
-                  className={fieldClass("min-h-[120px]")}
-                  rows={6}
-                  placeholder="Enter scope of work"
-                  value={invoiceScopeOfWork}
-                  onChange={(event) =>
-                    setInvoiceDrafts((current) => ({
-                      ...current,
-                      [activeEstimate.id]: {
-                        ...(current[activeEstimate.id] || {}),
-                        invoiceScopeOfWork: event.target.value,
-                      },
-                    }))
-                  }
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-[color:var(--acm-fg)]">Total Code</label>
-                <textarea
-                  className={fieldClass("min-h-[96px]")}
-                  rows={5}
-                  placeholder="Enter total code"
-                  value={invoiceTotalCode}
-                  onChange={(event) =>
-                    setInvoiceDrafts((current) => ({
-                      ...current,
-                      [activeEstimate.id]: {
-                        ...(current[activeEstimate.id] || {}),
-                        invoiceTotalCode: event.target.value,
-                      },
-                    }))
-                  }
-                />
-              </div>
-
-              <div className="flex flex-wrap gap-3">
-                <BusyButton type="button" busy={busyAction === "draft"} onClick={markDraft} className="acm-btn acm-btn-primary h-10 px-4">
-                  Create Invoice
+          {activeEstimate && form ? (
+            <>
+              <div className="flex flex-wrap gap-2">
+                <BusyButton
+                  type="button"
+                  busy={busyAction === "save_invoice"}
+                  onClick={() => runInvoiceAction("save_invoice", activeEstimate.invoice_status === "not_started" ? "Invoice created." : "Invoice updated.")}
+                  className="acm-btn acm-btn-primary h-10 px-4"
+                >
+                  {activeEstimate.invoice_status === "not_started" ? "Create Invoice" : "Update Invoice"}
                 </BusyButton>
                 <button type="button" onClick={() => downloadInvoicePdf(activeEstimate.id)} className="acm-btn acm-btn-secondary h-10 px-4">
                   Download PDF
                 </button>
+                <BusyButton type="button" busy={busyAction === "delete"} onClick={deleteInvoice} className="acm-btn h-10 border border-rose-200 bg-rose-50 px-4 text-rose-600">
+                  Delete Invoice
+                </BusyButton>
               </div>
-            </div>
+
+              <div className="rounded-[20px] border border-[color:var(--acm-border)] bg-white p-4">
+                <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[color:var(--acm-border)] pb-4">
+                  <div className="w-[220px] flex-1 space-y-2">
+                    <input className={sheetFieldClass("text-xl font-bold")} value={form.companyName} onChange={(event) => updateForm("companyName", event.target.value)} placeholder="Company name" />
+                    <textarea className={sheetFieldClass("min-h-[52px] resize-none")} value={form.companyAddress} onChange={(event) => updateForm("companyAddress", event.target.value)} placeholder="Company address" />
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <input className={sheetFieldClass()} value={form.companyPhone} onChange={(event) => updateForm("companyPhone", event.target.value)} placeholder="Company phone" />
+                      <input className={sheetFieldClass()} value={form.companyEmail} onChange={(event) => updateForm("companyEmail", event.target.value)} placeholder="Company email" />
+                    </div>
+                  </div>
+                  <div className="w-[220px] space-y-2 text-right">
+                    <input className={sheetFieldClass("text-right text-lg font-bold")} value={form.title} onChange={(event) => updateForm("title", event.target.value)} placeholder="Invoice title" />
+                    <div className="grid gap-2">
+                      <div className="grid grid-cols-[96px_1fr] items-center gap-2">
+                        {/* <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">Reference</span> */}
+                        <input className={sheetFieldClass("text-right")} value={form.invoiceReference} onChange={(event) => updateForm("invoiceReference", event.target.value)} placeholder="Invoice reference" />
+                      {/* </div>
+                      <div className="grid grid-cols-[96px_1fr] items-center gap-2"> */}
+                        {/* <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">Estimate No</span> */}
+                        <input className={sheetFieldClass("text-right w-[20px]")} value={`#${activeEstimate.estimate_number || "-"}`} readOnly />
+                      </div>
+                      <div className="grid grid-cols-[96px_1fr] items-center gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">Date</span>
+                        <input type="date" className={sheetFieldClass("text-right")} value={form.estimateDate} onChange={(event) => updateForm("estimateDate", event.target.value)} />
+                      </div>
+                      <div className="grid grid-cols-[96px_1fr] items-center gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">Valid Till</span>
+                        <input type="date" className={sheetFieldClass("text-right")} value={form.validUntil} onChange={(event) => updateForm("validUntil", event.target.value)} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  {/* <div className="space-y-3 rounded-[18px] border border-[color:var(--acm-border)] p-3"> */}
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-lg font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">Client Details</div>
+                        <select className={fieldClass("w-[180px] bg-white text-[color:var(--acm-fg)] py-0")} value={form.clientMode} onChange={(event) => handleClientModeChange(event.target.value)}>
+                          <option value="existing">Existing Client</option>
+                          <option value="new">Create New</option>
+                        </select>
+
+                        {form.clientMode === "existing" ? (
+                          <LabeledInput label="Client">
+                            <select className={fieldClass("bg-white text-[color:var(--acm-fg)] py-0")} value={form.clientId} onChange={(event) => handleClientSelect(event.target.value)}>
+                              <option value="">Select client</option>
+                              {clients.map((client) => (
+                                <option key={client.id} value={client.id}>{client.name || client.email || "Client"}</option>
+                              ))}
+                            </select>
+                          </LabeledInput>
+                        ) : null}
+                    </div>
+
+                    <div className="grid gap-3">
+                      <LabeledInput label="Client Name">
+                        <input className={fieldClass()} value={form.customerName} onChange={(event) => updateForm("customerName", event.target.value)} />
+                      </LabeledInput>
+                      <LabeledInput label="Client Address">
+                        <textarea className={areaClass()} value={form.customerAddress} onChange={(event) => updateForm("customerAddress", event.target.value)} />
+                      </LabeledInput>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <LabeledInput label="Client Phone">
+                          <input className={fieldClass()} value={form.customerPhone} onChange={(event) => updateForm("customerPhone", event.target.value)} />
+                        </LabeledInput>
+                        <LabeledInput label="Client Email">
+                          <input className={fieldClass()} value={form.customerEmail} onChange={(event) => updateForm("customerEmail", event.target.value)} />
+                        </LabeledInput>
+                      </div>
+                    </div>
+                  {/* </div> */}
+                </div>
+
+                <div className="mt-4 overflow-hidden rounded-[18px] border border-[color:var(--acm-border)]">
+                  <div className="grid grid-cols-[1fr_160px] border-b border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
+                    <div>Scope Of Work</div>
+                    <div className="text-right">Total</div>
+                  </div>
+                  {(form.invoiceEntries || []).map((entry) => (
+                    <div key={entry.id} className="grid grid-cols-[1fr_160px_84px] items-center gap-3 border-b border-[color:var(--acm-border)] px-4 py-2 text-sm text-[color:var(--acm-fg)] last:border-b-0">
+                      <input
+                        className={sheetFieldClass()}
+                        value={entry.scope}
+                        onChange={(event) => updateInvoiceEntry(entry.id, "scope", event.target.value)}
+                        placeholder="Scope of work"
+                      />
+                      <input
+                        className={sheetFieldClass("text-right")}
+                        inputMode="decimal"
+                        value={entry.total}
+                        onChange={(event) => updateInvoiceEntry(entry.id, "total", event.target.value)}
+                        placeholder="0.00"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeInvoiceEntry(entry.id)}
+                        className="rounded-full border border-rose-200 px-2 py-1 text-xs font-semibold text-rose-600"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <div className="border-b border-[color:var(--acm-border)] px-4 py-2">
+                    <button type="button" onClick={addInvoiceEntry} className="acm-btn acm-btn-secondary h-9 px-4">
+                      Add Entry
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-[1fr_160px] bg-[color:var(--acm-surface-2)] px-4 py-4 text-sm font-bold text-[color:var(--acm-fg)]">
+                    <div>Grand Total</div>
+                    <div className="text-right">{formatCurrency((form.invoiceEntries || []).reduce((sum, entry) => sum + Number(entry.total || 0), 0) || totalAmount)}</div>
+                  </div>
+                </div>
+              </div>
+            </>
           ) : (
-            <div className="mt-5 rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-10 text-sm text-[color:var(--acm-muted-fg)]">
-              Pick an approved estimate from the queue to build its invoice.
+            <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-10 text-sm text-[color:var(--acm-muted-fg)]">
+              Invoice record not found.
             </div>
           )}
-        </div>
-      </section>
+        </section>
       ) : null}
     </div>
   );

@@ -6,7 +6,7 @@ import { BusyButton, CompactListRow } from "@/components/dashboard/DashboardUi";
 import { ChevronRightIcon } from "@/components/dashboard/icons";
 import Modal from "@/components/dashboard/Modal";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
-import { Check, ChevronDown, Trash } from "lucide-react";
+import { Check, ChevronDown, Trash, Trash2Icon } from "lucide-react";
 
 const BRAND_PALETTES = {
   accentColor: ["#1e3a8a", "#0f766e", "#b45309", "#7c2d12", "#334155", "#0f766e"],
@@ -1632,6 +1632,21 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     });
   }, [detailedEstimate, initialCostLineId, initialEstimateId, templates]);
 
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const handleBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [dirty]);
+
+  function confirmDiscardEstimateChanges() {
+    if (!dirty) return true;
+    return window.confirm("You have unsaved estimate changes. Discard them?");
+  }
+
   function setDirtyState() {
     setDirty(true);
     setPdfReviewed(false);
@@ -2005,6 +2020,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   }
 
   function newEstimate() {
+    if (!confirmDiscardEstimateChanges()) return;
     if (!standalone) {
       router.push(`/${roleBase}/estimates/new`);
       return;
@@ -2027,6 +2043,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   }
 
   function loadEstimate(estimate) {
+    if (!confirmDiscardEstimateChanges()) return;
     if (!standalone) {
       router.push(`/${roleBase}/estimates/${estimate.id}`);
       return;
@@ -2116,6 +2133,47 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     setActiveAction("");
     setPdfReviewed(true);
     setMessage("PDF preview opened.");
+  }
+
+  async function deleteEstimate(estimate) {
+    const target = estimate || detailedEstimate || estimateList.find((item) => item.id === form.id) || null;
+    if (!target?.id) return;
+    if (!window.confirm(`Delete "${target.title || `Estimate #${target.estimate_number || ""}`}"?`)) return;
+
+    setActiveAction("delete");
+    setError("");
+    setMessage("");
+    const res = await fetch("/api/estimates", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: target.id }),
+    });
+    const json = await res.json().catch(() => null);
+    setActiveAction("");
+
+    if (!res.ok) {
+      setError(formatApiError(json, "Unable to delete estimate."));
+      return;
+    }
+
+    invalidateApiQuery("/api/estimates?compact=1");
+    invalidateApiQuery("/api/estimates");
+    await refreshEstimateQueries();
+    setMessage("Estimate deleted.");
+
+    if (standalone) {
+      router.push(`/${roleBase}/estimates`);
+      return;
+    }
+
+    if (form.id === target.id) {
+      setForm(emptyEstimateForm("", defaultTemplate?.id || ""));
+      setActiveEstimateId("");
+      setSelectedCostLineId("");
+      setDirty(false);
+      setPdfReviewed(false);
+      setStatusDraft("draft");
+    }
   }
 
   async function saveTemplate(event) {
@@ -2321,7 +2379,16 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
           ) : null}
           <div className="flex flex-wrap gap-2 justify-end">
             {standalone ? (
-              <button type="button" onClick={() => router.push(`/${roleBase}/estimates`)} className="acm-btn acm-btn-secondary h-10 px-4">Back</button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!confirmDiscardEstimateChanges()) return;
+                  router.push(`/${roleBase}/estimates`);
+                }}
+                className="acm-btn acm-btn-secondary h-10 px-4"
+              >
+                Back
+              </button>
             ) : null}
             <button type="button" onClick={newEstimate} className="acm-btn acm-btn-primary h-10 px-4">New Estimate</button>
           </div>
@@ -2356,7 +2423,21 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                   />
                 }
                 onClick={() => loadEstimate(estimate)}
-                actions={<StatusPill status={estimate.status || "draft"} />}
+                actions={
+                  <div className="flex items-center gap-2">
+                    <StatusPill status={estimate.status || "draft"} />
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        deleteEstimate(estimate);
+                      }}
+                      className="rounded-full border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                    >
+                      <Trash2Icon size={16} />
+                    </button>
+                  </div>
+                }
               />
             ))}
             {!filteredEstimateList.length ? (
@@ -2404,6 +2485,11 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     <button type="button" onClick={() => openProjectDialog()} className="acm-btn acm-btn-secondary h-10 px-4">
                       Open Project
                     </button>
+                  ) : null}
+                  {form.id ? (
+                    <BusyButton type="button" busy={activeAction === "delete"} onClick={() => deleteEstimate()} className="acm-btn h-10 border border-rose-200 bg-rose-50 px-4 text-rose-600">
+                      Delete Estimate
+                    </BusyButton>
                   ) : null}
                 </div>
                 {/* <div className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">{dirty ? "Unsaved changes" : "All changes saved manually"}</div> */}
