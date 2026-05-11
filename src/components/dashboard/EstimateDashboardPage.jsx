@@ -1178,7 +1178,10 @@ function TableCellInput({ value, onChange, onKeyDown, list, placeholder = "", ty
         placeholder={placeholder}
         rows={1}
         data-grid-input="true"
-        className={sheetInputClass("min-h-[42px] min-w-[180px] resize-none overflow-hidden text-[0.7rem] leading-6")}
+        className={sheetInputClass(
+  "w-full min-h-[2.25rem] resize-none overflow-hidden py-2 leading-5 text-[0.7rem]"
+)}
+        // className={sheetInputClass("min-h-[42px] min-w-[180px] resize-none overflow-hidden text-[0.7rem] leading-6")}
       />
     );
   }
@@ -1353,22 +1356,22 @@ function SectionTable({
                       </tr>
                       {stackedDetailColumn ? (
                         <tr className="border-b border-[color:var(--acm-border)]">
-                          <td colSpan={detailColSpan} className="px-2 pb-3 pt-1">
-                            <div className="rounded-2xl border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-3">
-                              <div className="mb-2 text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">
-                                {stackedDetailColumn.label}
-                              </div>
-                              <TableCellInput
-                                value={row[stackedDetailColumn.key]}
-                                list={stackedDetailColumn.listId || (stackedDetailColumn.list ? datalistId : undefined)}
-                                type={stackedDetailColumn.type || "text"}
-                                placeholder={stackedDetailColumn.placeholder}
-                                onChange={(event) => onChange(row.id, stackedDetailColumn.key, event.target.value)}
-                                onKeyDown={onKeyDown}
-                              />
-                            </div>
-                          </td>
-                        </tr>
+  <td colSpan={detailColSpan} className="px-2 py-1">
+    <TableCellInput
+      value={row[stackedDetailColumn.key]}
+      list={
+        stackedDetailColumn.listId ||
+        (stackedDetailColumn.list ? datalistId : undefined)
+      }
+      type={stackedDetailColumn.type || "text"}
+      placeholder={stackedDetailColumn.placeholder}
+      onChange={(event) =>
+        onChange(row.id, stackedDetailColumn.key, event.target.value)
+      }
+      onKeyDown={onKeyDown}
+    />
+  </td>
+</tr>
                       ) : null}
                     </Fragment>
                   );
@@ -2245,7 +2248,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   }, [payload, templates, validateEstimate, estimateListQuery, standalone, form.costLines, form.id, selectedCostLineId]);
 
   const laborColumns = [
-    { key: "description", label: "Scope of work", placeholder: "Scope of work", type: "textarea" },
+    { key: "description", placeholder: "Scope of work", type: "textarea" },
     { key: "classification", label: "Classification", placeholder: "Classification", width: "w-40" },
     { key: "straightTimePersons", label: "ST Persons",  placeholder: "0", width: "w-20" },
     { key: "straightTimeDays", label: "ST Days",  placeholder: "0", width: "w-20" },

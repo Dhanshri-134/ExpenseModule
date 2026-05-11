@@ -1,4 +1,5 @@
 import { PDFDocument, rgb } from "pdf-lib";
+import sharp from "sharp";
 
 function normalizeNumber(value) {
   const parsed = Number(value ?? 0);
@@ -469,16 +470,21 @@ function estimateDocumentMeta(estimate) {
     : {};
 }
 
+
 function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
+  const detailsTitle =
+    documentType === "invoice"
+      ? "Invoice Details"
+      : "Estimate Details";
   const meta = estimateDocumentMeta(estimate);
   const branding = {
     ...(estimate?.template?.configuration?.branding || {}),
     ...(meta.branding || {}),
   };
-  const accent = hexToRgb(branding.accentColor, [26, 71, 145]);
+  const accent =[7, 32, 72];
   const ink = [15, 23, 42];
   const muted = [100, 116, 139];
-  const line = [222, 229, 239];
+  const line = [0, 0, 0];
   const page = { width: 595, height: 842, margin: 42 };
   const customer = meta.customer || {};
   const company = meta.company || {};
@@ -499,40 +505,175 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
   const companyLines = [
     company.name || branding.companyName || "Your Company",
     company.address || "",
-    ownerName ? `Owner: ${ownerName}` : "",
+    ownerName ? ` ${ownerName}` : "",
     [company.contactPhone, company.contactEmail].filter(Boolean).join("  "),
   ].filter(Boolean);
 
   const companyRightX = page.width - page.margin;
   companyLines.forEach((lineText, index) => {
-    drawRightAlignedText(commands, lineText, companyRightX, page.height - 58 - index * 14, index === 0 ? 10.5 : 8.8, ink);
+    drawRightAlignedText(commands, lineText, companyRightX, page.height - 58 - index * 14, index === 0 ? 16 : 9, ink);
   });
   commands.push(`${pdfColor(accent)} RG`);
-  commands.push("1 w");
-  commands.push(`${page.margin} ${page.height - 125} m ${page.width - page.margin} ${page.height - 125} l S`);
+commands.push("4 w");
 
+const lineY = page.height - 125;
+
+// full width line
+commands.push(`0 ${lineY} m ${page.width} ${lineY} l S`);
   const datesY = page.height - 140;
-  drawText(commands, `Created Date: ${formatPdfDate(estimate?.estimate_date)}`, page.margin, datesY, 9, ink);
-  if (validUntil) {
-    drawRightAlignedText(commands, `Validation Date: ${formatPdfDate(validUntil)}`, companyRightX, datesY, 9, ink);
-  }
+  // drawText(commands, `Created Date: ${formatPdfDate(estimate?.estimate_date)}`, page.margin, datesY, 9, ink);
+  // if (validUntil) {
+  //   drawRightAlignedText(commands, `Validation Date: ${formatPdfDate(validUntil)}`, companyRightX, datesY, 9, ink);
+  // }
 
-  y = page.height - 168;
-  drawText(commands, "Customer Details", page.margin, y, 11, accent);
-  const customerBlockTop = y - 10;
-  const customerBlockHeight = 62;
-  drawRect(commands, page.margin, customerBlockTop - customerBlockHeight, page.width - page.margin * 2, customerBlockHeight, null, line, 0.8);
-  drawText(commands, `Customer: ${customerName || "-"}`, page.margin + 12, customerBlockTop - 16, 8.8, ink);
-  drawText(commands, `Contact: ${customerContact || "-"}`, page.margin + 12, customerBlockTop - 30, 8.8, ink);
-  drawText(commands, `Email: ${customerEmail || "-"}`, page.margin + 12, customerBlockTop - 44, 8.8, ink);
-  const customerAddressLine = fitPdfCellText(`Address: ${customerAddress || "-"}`, page.width - page.margin * 2 - 24, 8.8);
-  drawText(commands, customerAddressLine, page.margin + 12, customerBlockTop - 58, 8.8, ink);
-  y = customerBlockTop - customerBlockHeight - 26;
+y = page.height - 168;
 
-  const tableWidth = 470;
-  const labelWidth = 340;
-  const totalWidth = tableWidth - labelWidth;
-  const tableX = (page.width - tableWidth) / 2;
+const sectionTop = y - 10;
+const gap = 12;
+
+const availableWidth = page.width - page.margin * 2;
+const columnWidth = (availableWidth - gap) / 2;
+
+const blackBorder = [0, 0, 0];
+
+// Clean address
+const cleanedAddress = String(customerAddress || "-")
+  .replace(/\r?\n+/g, ", ")
+  .replace(/\s+/g, " ")
+  .trim();
+
+const addressLines = wrapPdfLine(
+  `Address: ${cleanedAddress}`,
+  42
+).slice(0, 2);
+
+// Dynamic equal height
+const baseHeight = 68;
+const addressExtraHeight =
+  Math.max(0, addressLines.length - 1) * 12;
+
+const boxHeight = baseHeight + addressExtraHeight;
+
+drawText(
+  commands,
+  "Customer Details",
+  page.margin,
+  y,
+  11,
+  accent
+);
+
+drawText(
+  commands,
+  detailsTitle,
+  page.margin + columnWidth + gap,
+  y,
+  11,
+  accent
+);
+
+// LEFT COLUMN
+drawRect(
+  commands,
+  page.margin,
+  sectionTop - boxHeight,
+  columnWidth,
+  boxHeight,
+  null,
+  blackBorder,
+  1
+);
+
+// RIGHT COLUMN
+drawRect(
+  commands,
+  page.margin + columnWidth + gap,
+  sectionTop - boxHeight,
+  columnWidth,
+  boxHeight,
+  null,
+  blackBorder,
+  1
+);
+
+const leftX = page.margin + 10;
+const rightX = page.margin + columnWidth + gap + 10;
+
+// LEFT CONTENT
+drawText(
+  commands,
+  `Customer: ${customerName || "-"}`,
+  leftX,
+  sectionTop - 16,
+  8.5,
+  ink
+);
+
+drawText(
+  commands,
+  `Contact: ${customerContact || "-"}`,
+  leftX,
+  sectionTop - 30,
+  8.5,
+  ink
+);
+
+drawText(
+  commands,
+  `Email: ${customerEmail || "-"}`,
+  leftX,
+  sectionTop - 44,
+  8.5,
+  ink
+);
+
+addressLines.forEach((lineText, index) => {
+  drawText(
+    commands,
+    lineText,
+    leftX,
+    sectionTop - 58 - index * 11,
+    8.2,
+    ink
+  );
+});
+
+// RIGHT CONTENT
+drawText(
+  commands,
+  `Prepared By: ${ownerName || "-"}`,
+  rightX,
+  sectionTop - 16,
+  8.5,
+  ink
+);
+
+drawText(
+  commands,
+  `Created Date: ${formatPdfDate(estimate?.estimate_date)}`,
+  rightX,
+  sectionTop - 34,
+  8.5,
+  ink
+);
+
+drawText(
+  commands,
+  `Valid Till: ${formatPdfDate(validUntil)}`,
+  rightX,
+  sectionTop - 52,
+  8.5,
+  ink
+);
+
+y = sectionTop - boxHeight - 24;
+
+  const tableWidth = 400;
+const labelWidth = 285;
+const totalWidth = tableWidth - labelWidth;
+
+// perfectly centered
+const tableX = (page.width - tableWidth) / 2;
   const headerHeight = 24;
 
   drawRect(commands, tableX, y - headerHeight, labelWidth, headerHeight, null, line, 0.8);
@@ -554,11 +695,18 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
     y -= rowHeight;
   });
 
-  const totalRowHeight = 26;
+  const totalRowHeight = 30;
   drawRect(commands, tableX, y - totalRowHeight, labelWidth, totalRowHeight, null, line, 1);
   drawRect(commands, tableX + labelWidth, y - totalRowHeight, totalWidth, totalRowHeight, null, line, 1);
-  drawText(commands, "Final Total", tableX + 10, y - 16, 9, ink);
-  drawText(commands, formatPdfCurrency(totalValue), tableX + labelWidth + 10, y - 16, 9, ink);
+  drawText(commands, "Grand Total", tableX + 10, y - 16, 9, ink);;
+  drawText(
+  commands,
+  formatPdfCurrency(totalValue),
+  tableX + labelWidth + 10,
+  y - 18,
+  10,
+  ink
+);
 
   pages.push(commands.join("\n"));
   return pages;
@@ -663,6 +811,29 @@ async function rasterizeSvgToPng(bytes) {
   return Buffer.from(await sharp(bytes).png().toBuffer());
 }
 
+async function removeLogoBackground(imageBuffer) {
+  const { data, info } = await sharp(imageBuffer)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  // Remove near-white pixels
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+
+    // White/light threshold
+    if (r > 240 && g > 240 && b > 240) {
+      data[i + 3] = 0; // transparent
+    }
+  }
+
+  return await sharp(data, { raw: info })
+    .png()
+    .toBuffer();
+}
+
 async function embedPdfImage(pdfDoc, value) {
   const source = await loadPdfImageSource(value).catch(() => null);
   if (!source?.bytes?.length) return null;
@@ -677,8 +848,9 @@ async function embedPdfImage(pdfDoc, value) {
     }
   }
   if (mime.includes("png") || isPngBytes(source.bytes)) {
-    return await pdfDoc.embedPng(source.bytes);
-  }
+  const cleanedPng = await removeLogoBackground(source.bytes);
+  return await pdfDoc.embedPng(cleanedPng);
+}
   if (mime.includes("jpg") || mime.includes("jpeg") || isJpegBytes(source.bytes)) {
     return await pdfDoc.embedJpg(source.bytes);
   }
@@ -711,15 +883,15 @@ export async function estimateToPdfBuffer(estimate, options = {}) {
     const dimensions = logoImage.scaleToFit(145, 80);
     firstPage.drawImage(logoImage, {
       x: 42,
-      y: 742,
-      width: dimensions.width,
-      height: dimensions.height,
+      y: 700,
+      width: 150,
+      height: 150,
     });
   }
 
   const signatureImage = await embedPdfImage(pdfDoc, company.signatureDataUrl);
   if (signatureImage) {
-    const dimensions = signatureImage.scaleToFit(130, 58);
+    const dimensions = signatureImage.scaleToFit(180, 100);
     firstPage.drawImage(signatureImage, {
       x: 423,
       y: 72,
@@ -730,7 +902,7 @@ export async function estimateToPdfBuffer(estimate, options = {}) {
 
   const stampImage = await embedPdfImage(pdfDoc, company.stampDataUrl);
   if (stampImage) {
-    const dimensions = stampImage.scaleToFit(84, 84);
+    const dimensions = stampImage.scaleToFit(120, 120);
     firstPage.drawImage(stampImage, {
       x: 42,
       y: 58,

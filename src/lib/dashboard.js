@@ -37,7 +37,7 @@ export const DASHBOARD_NAVIGATION = {
     { href: "/owner", label: "Overview", icon: DashboardIcon, match: /^\/owner$/ },
     { href: "/owner/leads", label: "Leads", icon: LeadsIcon, match: /^\/owner\/leads$/, moduleKey: "leads" },
     { href: "/owner/clients", label: "Clients", icon: ClientsIcon, match: /^\/owner\/clients$/, moduleKey: "clients" },
-    { href: "/owner/estimates", label: "Estimates", icon: ExpenseIcon, match: /^\/owner\/estimates$/, moduleKey: "estimates" },
+    { href: "/owner/estimates/", label: "Estimates", icon: ExpenseIcon, match: /^\/owner\/estimates$/, moduleKey: "estimates" },
     { href: "/owner/invoicing", label: "Invoices", icon: ReportIcon, match: /^\/owner\/invoicing$/, moduleKey: "invoices" },
     // { href: "/owner/followups", label: "Follow-ups", icon: CalendarIcon, match: /^\/owner\/followups$/ },
     {
