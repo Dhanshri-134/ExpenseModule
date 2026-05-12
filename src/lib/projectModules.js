@@ -483,16 +483,13 @@ function estimateDocumentMeta(estimate) {
 
 
 function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
-  const detailsTitle =
-    documentType === "invoice"
-      ? "Invoice Details"
-      : "Estimate Details";
+  const detailsTitle = documentType === "invoice" ? "Invoice Details" : "Estimate Details";
   const meta = estimateDocumentMeta(estimate);
   const branding = {
     ...(estimate?.template?.configuration?.branding || {}),
     ...(meta.branding || {}),
   };
-  const accent =[7, 32, 72];
+  const accent = [7, 32, 72];
   const ink = [15, 23, 42];
   const muted = [100, 116, 139];
   const line = [0, 0, 0];
@@ -505,193 +502,107 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
   const validUntil = meta.validUntil || "";
   const totalValue = totals.grandTotal ?? summary.finalBid ?? summary.totalPrice ?? 0;
   const pages = [];
-  let commands = [];
-  let y = page.height - page.margin;
 
   const customerName = customer.name || estimate?.client?.name || "Client";
   const customerAddress = customer.address || estimate?.client?.address || "";
   const customerContact = customer.contact || estimate?.client?.contact || "";
-  const customerEmail = customer.email || customer.phone || estimate?.client?.email || "";
+  const customerEmail = customer.email || estimate?.client?.email || "";
+  const customerPhone = customer.phone || estimate?.client?.phone || "";
   const ownerName = company.signatureName || company.ownerName || "";
+  const titleText = estimate?.title || meta.title || estimate?.estimate_number || "Estimate";
   const companyLines = [
     company.name || branding.companyName || "Your Company",
     company.address || "",
-    ownerName ? ` ${ownerName}` : "",
-    [company.contactPhone, company.contactEmail].filter(Boolean).join("  "),
+    [company.contactPhone, company.contactEmail].filter(Boolean).join("  |  "),
   ].filter(Boolean);
 
-  const companyRightX = page.width - page.margin;
-  companyLines.forEach((lineText, index) => {
-    drawRightAlignedText(commands, lineText, companyRightX, page.height - 58 - index * 14, index === 0 ? 16 : 9, ink);
+  const createPage = () => [];
+  const closePage = (pageCommands) => {
+    if (pageCommands.length) {
+      pages.push(pageCommands.join("\n"));
+    }
+  };
+
+  const drawPageHeader = (pageCommands, rightTitle, subtitle = "") => {
+    const leftX = page.margin;
+    const rightX = page.width - page.margin;
+    const headerTop = page.height - 54;
+
+    drawText(pageCommands, companyLines[0] || "Your Company", leftX, headerTop, 16, ink);
+    companyLines.slice(1).forEach((lineText, index) => {
+      drawText(pageCommands, lineText, leftX, headerTop - 16 - index * 12, 8.5, muted);
+    });
+
+    drawRightAlignedText(pageCommands, rightTitle, rightX, headerTop, 16, accent);
+    if (subtitle) {
+      drawRightAlignedText(pageCommands, subtitle, rightX, headerTop - 16, 9, muted);
+    }
+
+    pageCommands.push(`${pdfColor(accent)} RG`);
+    pageCommands.push("1.4 w");
+    pageCommands.push(`${page.margin} ${page.height - 112} m ${page.width - page.margin} ${page.height - 112} l S`);
+
+    return page.height - 138;
+  };
+
+  let commands = createPage();
+  let y = drawPageHeader(commands, titleText, detailsTitle);
+
+  const gap = 12;
+  const availableWidth = page.width - page.margin * 2;
+  const columnWidth = (availableWidth - gap) / 2;
+  const boxTop = y;
+  const customerAddressLines = wrapPdfLine(
+    `Address: ${String(customerAddress || "-").replace(/\r?\n+/g, ", ").replace(/\s+/g, " ").trim() || "-"}`,
+    42
+  ).slice(0, 3);
+  const customerContacts = [
+    `Contact: ${customerContact || "-"}`,
+    `Phone: ${customerPhone || "-"}`,
+    `Email: ${customerEmail || "-"}`,
+  ];
+  const detailsLines = [
+    `Title: ${titleText || "-"}`,
+    `Estimate No: ${estimate?.estimate_number || "-"}`,
+    `Date: ${formatPdfDate(estimate?.estimate_date)}`,
+    `Valid Till: ${formatPdfDate(validUntil)}`,
+    `Prepared By: ${ownerName || "-"}`,
+  ];
+  const boxLineCount = Math.max(customerContacts.length + customerAddressLines.length + 1, detailsLines.length);
+  const boxHeight = 22 + boxLineCount * 12;
+
+  drawText(commands, "Customer Details", page.margin, boxTop, 11, accent);
+  drawText(commands, detailsTitle, page.margin + columnWidth + gap, boxTop, 11, accent);
+  drawRect(commands, page.margin, boxTop - 14 - boxHeight, columnWidth, boxHeight, null, line, 1);
+  drawRect(commands, page.margin + columnWidth + gap, boxTop - 14 - boxHeight, columnWidth, boxHeight, null, line, 1);
+
+  const customerX = page.margin + 10;
+  const detailsX = page.margin + columnWidth + gap + 10;
+  let customerLineY = boxTop - 30;
+  drawText(commands, `Customer: ${customerName || "-"}`, customerX, customerLineY, 8.5, ink);
+  customerLineY -= 14;
+  customerContacts.forEach((lineText) => {
+    drawText(commands, lineText, customerX, customerLineY, 8.3, ink);
+    customerLineY -= 12;
   });
-  commands.push(`${pdfColor(accent)} RG`);
-commands.push("4 w");
+  customerAddressLines.forEach((lineText) => {
+    drawText(commands, lineText, customerX, customerLineY, 8.1, ink);
+    customerLineY -= 11;
+  });
 
-const lineY = page.height - 125;
+  let detailsLineY = boxTop - 30;
+  detailsLines.forEach((lineText) => {
+    drawText(commands, lineText, detailsX, detailsLineY, 8.3, ink);
+    detailsLineY -= 12;
+  });
 
-// full width line
-commands.push(`0 ${lineY} m ${page.width} ${lineY} l S`);
-  const datesY = page.height - 140;
-  // drawText(commands, `Created Date: ${formatPdfDate(estimate?.estimate_date)}`, page.margin, datesY, 9, ink);
-  // if (validUntil) {
-  //   drawRightAlignedText(commands, `Validation Date: ${formatPdfDate(validUntil)}`, companyRightX, datesY, 9, ink);
-  // }
+  y = boxTop - 24 - boxHeight;
 
-y = page.height - 168;
-
-const sectionTop = y - 10;
-
-
-const availableWidth = page.width - page.margin * 2;
-const columnWidth = (availableWidth - 12) / 2;
-
-const blackBorder = [0, 0, 0];
-
-// Clean address
-const cleanedAddress = String(customerAddress || "-")
-  .replace(/\r?\n+/g, ", ")
-  .replace(/\s+/g, " ")
-  .trim();
-
-const addressLines = wrapPdfLine(
-  `Address: ${cleanedAddress}`,
-  42
-).slice(0, 2);
-
-// Dynamic equal height
-const baseHeight = 68;
-const addressExtraHeight =
-  Math.max(0, addressLines.length - 1) * 12;
-
-const boxHeight = baseHeight + addressExtraHeight;
-
-drawText(
-  commands,
-  "Customer Details",
-  page.margin,
-  y,
-  11,
-  accent
-);
-
-drawText(
-  commands,
-  detailsTitle,
-  page.margin + columnWidth + gap,
-  y,
-  11,
-  accent
-);
-
-// LEFT COLUMN
-drawRect(
-  commands,
-  page.margin,
-  sectionTop - boxHeight,
-  columnWidth,
-  boxHeight,
-  null,
-  blackBorder,
-  1
-);
-
-// RIGHT COLUMN
-drawRect(
-  commands,
-  page.margin + columnWidth + gap,
-  sectionTop - boxHeight,
-  columnWidth,
-  boxHeight,
-  null,
-  blackBorder,
-  1
-);
-
-const leftX = page.margin + 10;
-const rightX = page.margin + columnWidth + gap + 10;
-
-// LEFT CONTENT
-drawText(
-  commands,
-  `Customer: ${customerName || "-"}`,
-  leftX,
-  sectionTop - 16,
-  8.5,
-  ink
-);
-
-drawText(
-  commands,
-  `Contact: ${customerContact || "-"}`,
-  leftX,
-  sectionTop - 30,
-  8.5,
-  ink
-);
-
-drawText(
-  commands,
-  `Email: ${customerEmail || "-"}`,
-  leftX,
-  sectionTop - 44,
-  8.5,
-  ink
-);
-
-addressLines.forEach((lineText, index) => {
-  drawText(
-    commands,
-    lineText,
-    leftX,
-    sectionTop - 58 - index * 11,
-    8.2,
-    ink
-  );
-});
-
-// RIGHT CONTENT
-drawText(
-  commands,
-  `Prepared By: ${ownerName || "-"}`,
-  rightX,
-  sectionTop - 16,
-  8.5,
-  ink
-);
-
-drawText(
-  commands,
-  `Created Date: ${formatPdfDate(estimate?.estimate_date)}`,
-  rightX,
-  sectionTop - 34,
-  8.5,
-  ink
-);
-
-drawText(
-  commands,
-  `Valid Till: ${formatPdfDate(validUntil)}`,
-  rightX,
-  sectionTop - 52,
-  8.5,
-  ink
-);
-
-y = sectionTop - boxHeight - 24;
-
-const gap = 12;
-
-
-// match top section width exactly
-const tableWidth = availableWidth;
-
-// align to same left margin
-const tableX = page.margin;
-
-// proportional columns
-const codeWidth = 110;
-const categoryWidth = tableWidth - codeWidth - 120;
-const totalWidth = 120;
+  const tableX = page.margin;
+  const tableWidth = availableWidth;
+  const labelWidth = tableWidth - 120;
+  const totalWidth = 120;
+  const headerHeight = 24;
 
   drawRect(commands, tableX, y - headerHeight, labelWidth, headerHeight, null, line, 0.8);
   drawRect(commands, tableX + labelWidth, y - headerHeight, totalWidth, headerHeight, null, line, 0.8);
@@ -700,32 +611,26 @@ const totalWidth = 120;
   y -= headerHeight;
 
   rows.forEach((row) => {
-    const rowLabel = row.label || row.code || "-";
-    const scopeLines = wrapPdfLine(rowLabel, 42);
-    const rowHeight = Math.max(24, scopeLines.length * 10 + 10);
+    const rowLabel = [row.code, row.label].filter(Boolean).join(" - ") || row.label || row.code || "-";
+    const scopeLines = wrapPdfLine(rowLabel, 48);
+    const rowHeight = Math.max(26, scopeLines.length * 10 + 10);
     drawRect(commands, tableX, y - rowHeight, labelWidth, rowHeight, null, line, 0.8);
     drawRect(commands, tableX + labelWidth, y - rowHeight, totalWidth, rowHeight, null, line, 0.8);
     scopeLines.forEach((lineText, index) => {
-      drawText(commands, lineText, tableX + 10, y - 15 - index * 9, 8.5, ink);
+      drawText(commands, lineText, tableX + 10, y - 15 - index * 9, 8.3, ink);
     });
-    drawText(commands, formatPdfCurrency(row.totalPrice || 0), tableX + labelWidth + 10, y - 15, 8.5, ink);
+    drawRightAlignedText(commands, formatPdfCurrency(row.totalPrice || 0), tableX + tableWidth - 10, y - 15, 8.5, ink);
     y -= rowHeight;
   });
 
-  const totalRowHeight = 30;
+  const totalRowHeight = 28;
   drawRect(commands, tableX, y - totalRowHeight, labelWidth, totalRowHeight, null, line, 1);
   drawRect(commands, tableX + labelWidth, y - totalRowHeight, totalWidth, totalRowHeight, null, line, 1);
-  drawText(commands, "Grand Total", tableX + 10, y - 16, 9, ink);;
-  drawText(
-  commands,
-  formatPdfCurrency(totalValue),
-  tableX + labelWidth + 10,
-  y - 18,
-  10,
-  ink
-);
+  drawText(commands, "Grand Total", tableX + 10, y - 17, 9, ink);
+  drawRightAlignedText(commands, formatPdfCurrency(totalValue), tableX + tableWidth - 10, y - 17, 10, ink);
 
-  pages.push(commands.join("\n"));
+  closePage(commands);
+
   return pages;
 }
 
@@ -990,4 +895,246 @@ export function normalizeFieldReportPayload(payload = {}) {
     signoffName: String(payload.signoffName || "").trim(),
     signoffRole: String(payload.signoffRole || "").trim(),
   };
+}
+
+export const EXPENSE_CATEGORIES = [
+  "Materials",
+  "Labor",
+  "Equipment",
+  "Travel",
+  "Fuel",
+  "Meals",
+  "Permits",
+  "Subcontractor",
+  "Office Supplies",
+  "Miscellaneous",
+];
+
+function normalizeExpenseRows(expenses = []) {
+  return (expenses ?? []).map((expense, index) => ({
+    id: expense?.id || `expense-${index + 1}`,
+    category: String(expense?.category || "").trim() || "Expense",
+    amount: normalizeNumber(expense?.amount),
+    note: String(expense?.note || "").trim(),
+    expenseDate: String(expense?.expense_date || expense?.expenseDate || "").trim(),
+    vendor: String(expense?.vendor || "").trim(),
+    paymentMethod: String(expense?.payment_method || expense?.paymentMethod || "").trim(),
+    referenceNumber: String(expense?.reference_number || expense?.referenceNumber || "").trim(),
+    createdBy: expense?.created_by?.name || expense?.created_by?.user_name || expense?.created_by?.user_code || "",
+  }));
+}
+
+function buildExpensePdfPages({ project = {}, company = {}, expenses = [], filters = {} }) {
+  const accent = [7, 32, 72];
+  const ink = [15, 23, 42];
+  const muted = [100, 116, 139];
+  const line = [0, 0, 0];
+  const page = { width: 595, height: 842, margin: 42 };
+  const normalizedExpenses = normalizeExpenseRows(expenses);
+  const totalAmount = normalizedExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+  const pages = [];
+  const companyLines = [
+    company.name || "Your Company",
+    company.address || "",
+    company.signatureName || "",
+    [company.contactPhone, company.contactEmail].filter(Boolean).join("  "),
+  ].filter(Boolean);
+
+  let commands = [];
+  let y = page.height - 168;
+  let startedRows = false;
+
+  const drawHeader = () => {
+    companyLines.forEach((lineText, index) => {
+      drawRightAlignedText(commands, lineText, page.width - page.margin, page.height - 58 - index * 14, index === 0 ? 16 : 9, ink);
+    });
+    commands.push(`${pdfColor(accent)} RG`);
+    commands.push("4 w");
+    commands.push(`0 ${page.height - 125} m ${page.width} ${page.height - 125} l S`);
+
+    drawText(commands, "Expense Report", page.margin, page.height - 150, 18, accent);
+    drawText(commands, `Project: ${project.name || "-"}`, page.margin, page.height - 174, 9, ink);
+    drawText(commands, `Job Number: ${project.job_number || "-"}`, page.margin, page.height - 188, 9, ink);
+    drawText(commands, `Location: ${project.location || "-"}`, page.margin, page.height - 202, 9, ink);
+    drawText(commands, `Client: ${project.client?.name || "-"}`, 310, page.height - 174, 9, ink);
+    drawText(commands, `Generated: ${formatPdfDate(new Date().toISOString())}`, 310, page.height - 188, 9, ink);
+
+    const filterSummary = [
+      filters.startDate ? `From ${formatPdfDate(filters.startDate)}` : "",
+      filters.endDate ? `To ${formatPdfDate(filters.endDate)}` : "",
+      filters.category && filters.category !== "all" ? `Category ${filters.category}` : "All categories",
+    ].filter(Boolean).join(" | ");
+    drawText(commands, filterSummary || "All expenses", 310, page.height - 202, 9, muted);
+
+    drawRect(commands, page.margin, page.height - 252, 160, 56, null, line, 1);
+    drawRect(commands, page.margin + 174, page.height - 252, 120, 56, null, line, 1);
+    drawRect(commands, page.margin + 308, page.height - 252, 120, 56, null, line, 1);
+
+    drawText(commands, "Total Expense", page.margin + 12, page.height - 214, 8, muted);
+    drawText(commands, formatPdfCurrency(totalAmount), page.margin + 12, page.height - 234, 16, ink);
+    drawText(commands, "Entries", page.margin + 186, page.height - 214, 8, muted);
+    drawText(commands, String(normalizedExpenses.length), page.margin + 186, page.height - 234, 16, ink);
+    drawText(commands, "Top Category", page.margin + 320, page.height - 214, 8, muted);
+    const topCategory = normalizedExpenses.reduce((map, expense) => {
+      map.set(expense.category, (map.get(expense.category) || 0) + expense.amount);
+      return map;
+    }, new Map());
+    const topCategoryEntry = Array.from(topCategory.entries()).sort((a, b) => b[1] - a[1])[0];
+    drawText(commands, topCategoryEntry?.[0] || "-", page.margin + 320, page.height - 234, 12, ink);
+
+    y = page.height - 286;
+    drawRect(commands, page.margin, y - 22, 85, 22, null, line, 0.8);
+    drawRect(commands, page.margin + 85, y - 22, 100, 22, null, line, 0.8);
+    drawRect(commands, page.margin + 185, y - 22, 90, 22, null, line, 0.8);
+    drawRect(commands, page.margin + 275, y - 22, 120, 22, null, line, 0.8);
+    drawRect(commands, page.margin + 395, y - 22, 72, 22, null, line, 0.8);
+    drawRect(commands, page.margin + 467, y - 22, 86, 22, null, line, 0.8);
+    drawText(commands, "Date", page.margin + 8, y - 14, 8, ink);
+    drawText(commands, "Category", page.margin + 93, y - 14, 8, ink);
+    drawText(commands, "Amount", page.margin + 193, y - 14, 8, ink);
+    drawText(commands, "Note / Vendor", page.margin + 283, y - 14, 8, ink);
+    drawText(commands, "Payment", page.margin + 403, y - 14, 8, ink);
+    drawText(commands, "Entered By", page.margin + 475, y - 14, 8, ink);
+    y -= 22;
+  };
+
+  const pushPage = () => {
+    pages.push(commands.join("\n"));
+    commands = [];
+    drawHeader();
+  };
+
+  drawHeader();
+
+  normalizedExpenses.forEach((expense, index) => {
+    const detail = [expense.note, expense.vendor].filter(Boolean).join(" | ") || "-";
+    const lines = wrapPdfLine(detail, 24).slice(0, 3);
+    const rowHeight = Math.max(24, lines.length * 9 + 8);
+    const footerReserve = 110;
+
+    if (startedRows && y - rowHeight < page.margin + footerReserve) {
+      pushPage();
+    }
+
+    startedRows = true;
+    drawRect(commands, page.margin, y - rowHeight, 85, rowHeight, null, line, 0.8);
+    drawRect(commands, page.margin + 85, y - rowHeight, 100, rowHeight, null, line, 0.8);
+    drawRect(commands, page.margin + 185, y - rowHeight, 90, rowHeight, null, line, 0.8);
+    drawRect(commands, page.margin + 275, y - rowHeight, 120, rowHeight, null, line, 0.8);
+    drawRect(commands, page.margin + 395, y - rowHeight, 72, rowHeight, null, line, 0.8);
+    drawRect(commands, page.margin + 467, y - rowHeight, 86, rowHeight, null, line, 0.8);
+
+    drawText(commands, formatPdfDate(expense.expenseDate), page.margin + 8, y - 14, 7.5, ink);
+    drawText(commands, fitPdfCellText(expense.category, 94, 7.5), page.margin + 93, y - 14, 7.5, ink);
+    drawText(commands, formatPdfCurrency(expense.amount), page.margin + 193, y - 14, 7.5, ink);
+    lines.forEach((lineText, lineIndex) => {
+      drawText(commands, fitPdfCellText(lineText, 114, 7.2), page.margin + 283, y - 14 - lineIndex * 8, 7.2, ink);
+    });
+    drawText(commands, fitPdfCellText(expense.paymentMethod || "-", 66, 7.5), page.margin + 403, y - 14, 7.5, ink);
+    drawText(commands, fitPdfCellText(expense.createdBy || "-", 80, 7.5), page.margin + 475, y - 14, 7.5, ink);
+    y -= rowHeight;
+
+    if (index === normalizedExpenses.length - 1) {
+      const totalHeight = 28;
+      drawRect(commands, page.margin, y - totalHeight, 275, totalHeight, null, line, 1);
+      drawRect(commands, page.margin + 275, y - totalHeight, 120, totalHeight, null, line, 1);
+      drawRect(commands, page.margin + 395, y - totalHeight, 158, totalHeight, null, line, 1);
+      drawText(commands, "Grand Total", page.margin + 8, y - 17, 9, ink);
+      drawText(commands, formatPdfCurrency(totalAmount), page.margin + 283, y - 17, 9, ink);
+      y -= totalHeight + 16;
+    }
+  });
+
+  const footerY = Math.max(page.margin + 26, y - 4);
+  drawText(commands, "Authorized Signature", 398, footerY + 44, 8, muted);
+  drawText(commands, company.signatureName || "", 398, footerY + 10, 8, ink);
+  pages.push(commands.join("\n"));
+  return pages;
+}
+
+function expenseReportToRawPdfBuffer(payload) {
+  const pages = buildExpensePdfPages(payload);
+  const objects = [];
+  const pageIds = [];
+  const fontId = 3 + pages.length * 2;
+  let nextId = 3;
+
+  pages.forEach((content) => {
+    const contentId = nextId;
+    const pageId = nextId + 1;
+    nextId += 2;
+    objects[contentId] = `<< /Length ${content.length} >>\nstream\n${content}\nendstream`;
+    objects[pageId] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${contentId} 0 R >>`;
+    pageIds.push(pageId);
+  });
+
+  objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+  objects[2] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageIds.length} >>`;
+  objects[fontId] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+
+  for (let id = 1; id < objects.length; id += 1) {
+    if (!objects[id]) continue;
+    offsets[id] = pdf.length;
+    pdf += `${id} 0 obj\n${objects[id]}\nendobj\n`;
+  }
+
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length}\n`;
+  pdf += "0000000000 65535 f \n";
+
+  for (let id = 1; id < objects.length; id += 1) {
+    pdf += `${String(offsets[id] ?? 0).padStart(10, "0")} 00000 n \n`;
+  }
+
+  pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return Buffer.from(pdf, "binary");
+}
+
+export async function expenseReportToPdfBuffer(payload = {}) {
+  const baseBuffer = expenseReportToRawPdfBuffer(payload);
+  const pdfDoc = await PDFDocument.load(baseBuffer);
+  const pages = pdfDoc.getPages();
+  const company = payload.company || {};
+
+  const logoImage = await embedPdfImage(pdfDoc, company.logoDataUrl);
+  const signatureImage = await embedPdfImage(pdfDoc, company.signatureDataUrl);
+  const stampImage = await embedPdfImage(pdfDoc, company.stampDataUrl);
+
+  pages.forEach((page) => {
+    if (logoImage) {
+      const dimensions = logoImage.scaleToFit(145, 80);
+      page.drawImage(logoImage, {
+        x: 42,
+        y: 700,
+        width: dimensions.width,
+        height: dimensions.height,
+      });
+    }
+
+    if (signatureImage) {
+      const dimensions = signatureImage.scaleToFit(160, 80);
+      page.drawImage(signatureImage, {
+        x: 392,
+        y: 48,
+        width: dimensions.width,
+        height: dimensions.height,
+      });
+    }
+
+    if (stampImage) {
+      const dimensions = stampImage.scaleToFit(104, 104);
+      page.drawImage(stampImage, {
+        x: 42,
+        y: 42,
+        width: dimensions.width,
+        height: dimensions.height,
+        opacity: 0.92,
+      });
+    }
+  });
+
+  return Buffer.from(await pdfDoc.save());
 }

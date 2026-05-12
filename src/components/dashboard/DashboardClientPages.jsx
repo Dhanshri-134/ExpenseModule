@@ -2104,7 +2104,6 @@ async function saveClientChanges(e) {
 
         {section === "estimates" ? <ProjectEstimatesPage projectId={projectId} canManage={roleBase !== "employee"} /> : null}
         {section === "reports" ? <ProjectFieldReportsPage projectId={projectId} roleBase={roleBase} currentUserId={currentUserId} /> : null}
-        {section === "expenses" ? <div className={cardClass()}>Expenses will be configured here.</div> : null}
       </section>
 
       <ProfileModal

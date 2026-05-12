@@ -163,8 +163,9 @@
   padding: 14px;
   /* box-shadow: 18px 0 50px rgba(0, 0, 0, 0.12); */
   transition: transform 0.28s ease;
-  overflow-y: auto;
+  overflow: hidden;
   scrollbar-width: thin;
+  overscroll-behavior: contain;
 }
 
 .sidebarClosed {
@@ -269,6 +270,12 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
 }
 
 .navItem {
@@ -308,6 +315,7 @@
 
 .footer {
   margin-top: auto;
+  flex-shrink: 0;
   border: 1px solid var(--acm-border);
   border-radius: 18px;
   background: var(--acm-surface);

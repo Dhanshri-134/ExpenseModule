@@ -238,6 +238,7 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
     setDirty(false);
   }, [activeEstimate, company]);
 
+
   useEffect(() => {
     if (!dirty) return undefined;
     const handleBeforeUnload = (event) => {
@@ -465,10 +466,38 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
             <button
               type="button"
               onClick={() => {
-                const target = filteredInvoiceCandidates[0];
-                if (!target) return;
-                router.push(`/${roleBase}/invoicing/${target.id}`);
-              }}
+  setActiveInvoice(null);
+
+  setForm({
+    title: "",
+    invoiceReference: "",
+    estimateDate: "",
+    validUntil: "",
+
+    companyName: "",
+    companyAddress: "",
+    companyPhone: "",
+    companyEmail: "",
+
+    customerName: "",
+    customerAddress: "",
+    customerPhone: "",
+    customerEmail: "",
+
+    clientMode: "existing",
+    clientId: "",
+
+    invoiceEntries: [
+      {
+        id: crypto.randomUUID(),
+        scope: "",
+        total: "",
+      },
+    ],
+  });
+
+  setInvoiceModalOpen(true);
+}}
               className="acm-btn acm-btn-primary h-9 px-4"
               disabled={!filteredInvoiceCandidates.length}
             >
@@ -488,7 +517,7 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
                     <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${getInvoiceTone(estimate.invoice_status)}`}>
                       {getInvoiceLabel(estimate.invoice_status)}
                     </span>
-                    <button
+                    {/* <button
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation();
@@ -497,7 +526,7 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
                       className="rounded-full border border-[color:var(--acm-border)] px-3 py-1 text-xs font-semibold text-[color:var(--acm-fg)]"
                     >
                       Open
-                    </button>
+                    </button> */}
                   </div>
                 }
               />
@@ -556,8 +585,10 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
               </div>
 
               <div className="rounded-[20px] border border-[color:var(--acm-border)] bg-white p-4">
-                <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[color:var(--acm-border)] pb-4">
-                  <div className="w-[220px] flex-1 space-y-2">
+                {/* <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[color:var(--acm-border)] pb-4"> */}
+                <div className="grid grid-cols-[520px_520px] items-start justify-between gap-6 border-b border-[color:var(--acm-border)] pb-4">
+                  {/* <div className="min-w-[260px] flex-1 space-y-2"> */}
+                  <div className="w-[520px] space-y-2">
                     <input className={sheetFieldClass("text-xl font-bold")} value={form.companyName} onChange={(event) => updateForm("companyName", event.target.value)} placeholder="Company name" />
                     <textarea className={sheetFieldClass("min-h-[52px] resize-none")} value={form.companyAddress} onChange={(event) => updateForm("companyAddress", event.target.value)} placeholder="Company address" />
                     <div className="grid gap-2 md:grid-cols-2">
@@ -565,19 +596,20 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
                       <input className={sheetFieldClass()} value={form.companyEmail} onChange={(event) => updateForm("companyEmail", event.target.value)} placeholder="Company email" />
                     </div>
                   </div>
-                  <div className="w-[220px] space-y-2 text-right">
+                  {/* <div className="min-w-[240px] space-y-2 text-right"> */}
+                  <div className="w-[520px] space-y-2 text-right">
                     <input className={sheetFieldClass("text-right text-lg font-bold")} value={form.title} onChange={(event) => updateForm("title", event.target.value)} placeholder="Invoice title" />
                     <div className="grid gap-2">
-                      <div className="grid grid-cols-[96px_1fr] items-center gap-2">
+                      <div className="grid grid-cols-[296px_1fr] items-center gap-2">
                         {/* <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">Reference</span> */}
                         <input className={sheetFieldClass("text-right")} value={form.invoiceReference} onChange={(event) => updateForm("invoiceReference", event.target.value)} placeholder="Invoice reference" />
                       {/* </div>
                       <div className="grid grid-cols-[96px_1fr] items-center gap-2"> */}
                         {/* <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">Estimate No</span> */}
-                        <input className={sheetFieldClass("text-right w-[20px]")} value={`#${activeEstimate.estimate_number || "-"}`} readOnly />
+                        <input className={sheetFieldClass("text-right w-full")} value={`#${activeEstimate.estimate_number || "-"}`} readOnly />
                       </div>
                       <div className="grid grid-cols-[96px_1fr] items-center gap-2">
-                        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">Date</span>
+                        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">Created At</span>
                         <input type="date" className={sheetFieldClass("text-right")} value={form.estimateDate} onChange={(event) => updateForm("estimateDate", event.target.value)} />
                       </div>
                       <div className="grid grid-cols-[96px_1fr] items-center gap-2">
@@ -590,24 +622,64 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
 
                 <div className="mt-4">
                   {/* <div className="space-y-3 rounded-[18px] border border-[color:var(--acm-border)] p-3"> */}
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-lg font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">Client Details</div>
-                        <select className={fieldClass("w-[180px] bg-white text-[color:var(--acm-fg)] py-0")} value={form.clientMode} onChange={(event) => handleClientModeChange(event.target.value)}>
-                          <option value="existing">Existing Client</option>
-                          <option value="new">Create New</option>
-                        </select>
+                    <div className="flex items-center justify-between gap-4">
 
-                        {form.clientMode === "existing" ? (
-                          <LabeledInput label="Client">
-                            <select className={fieldClass("bg-white text-[color:var(--acm-fg)] py-0")} value={form.clientId} onChange={(event) => handleClientSelect(event.target.value)}>
-                              <option value="">Select client</option>
-                              {clients.map((client) => (
-                                <option key={client.id} value={client.id}>{client.name || client.email || "Client"}</option>
-                              ))}
-                            </select>
-                          </LabeledInput>
-                        ) : null}
-                    </div>
+  {/* LEFT */}
+  <div className="text-lg font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
+    Client Details
+  </div>
+
+  {/* RIGHT */}
+  <div className="ml-auto flex items-center gap-3">
+
+    <select
+      className={fieldClass(
+        "w-[180px] bg-white text-[color:var(--acm-fg)] py-0"
+      )}
+      value={form.clientMode}
+      onChange={(event) =>
+        handleClientModeChange(event.target.value)
+      }
+    >
+      <option value="existing">
+        Existing Client
+      </option>
+
+      <option value="new">
+        Create New
+      </option>
+    </select>
+
+    {form.clientMode === "existing" ? (
+      <select
+        className={fieldClass(
+          "w-[220px] bg-white text-[color:var(--acm-fg)] py-0"
+        )}
+        value={form.clientId}
+        onChange={(event) =>
+          handleClientSelect(event.target.value)
+        }
+      >
+        <option value="">
+          Choose Client
+        </option>
+
+        {clients.map((client) => (
+          <option
+            key={client.id}
+            value={client.id}
+          >
+            {client.name ||
+              client.email ||
+              "Client"}
+          </option>
+        ))}
+      </select>
+    ) : null}
+
+  </div>
+
+</div>
 
                     <div className="grid gap-3">
                       <LabeledInput label="Client Name">

@@ -39,6 +39,7 @@ export const DASHBOARD_NAVIGATION = {
     { href: "/owner/clients", label: "Clients", icon: ClientsIcon, match: /^\/owner\/clients$/, moduleKey: "clients" },
     { href: "/owner/estimates/", label: "Estimates", icon: ExpenseIcon, match: /^\/owner\/estimates$/, moduleKey: "estimates" },
     { href: "/owner/invoicing", label: "Invoices", icon: ReportIcon, match: /^\/owner\/invoicing$/, moduleKey: "invoices" },
+    { href: "/owner/expenses", label: "Expenses", icon: ExpenseIcon, match: /^\/owner\/expenses$/ },
     // { href: "/owner/followups", label: "Follow-ups", icon: CalendarIcon, match: /^\/owner\/followups$/ },
     {
       href: "/owner/projects",
@@ -60,6 +61,7 @@ export const DASHBOARD_NAVIGATION = {
     { href: "/manager/projects", label: "Projects", icon: ProjectsIcon, match: /^\/manager\/projects/, moduleKey: "projects" },
     { href: "/manager/estimates", label: "Estimates", icon: ExpenseIcon, match: /^\/manager\/estimates/, moduleKey: "estimates" },
     { href: "/manager/invoicing", label: "Invoices", icon: ReportIcon, match: /^\/manager\/invoicing/, moduleKey: "invoices" },
+    { href: "/manager/expenses", label: "Expenses", icon: ExpenseIcon, match: /^\/manager\/expenses$/ },
     { href: "/manager/tasks", label: "Tasks", icon: InsightsIcon, match: /^\/manager\/tasks$/ },
     { href: "/manager/field-reports", label: "Field Reports", icon: ReportIcon, match: /^\/manager\/field-reports$/ },
     // { href: "/manager/followups", label: "Follow-ups", icon: CalendarIcon, match: /^\/manager\/followups$/ },
@@ -70,6 +72,7 @@ export const DASHBOARD_NAVIGATION = {
     { href: "/employee", label: "Overview", icon: DashboardIcon, match: /^\/employee$/ },
     { href: "/employee/estimates", label: "Estimates", icon: ExpenseIcon, match: /^\/employee\/estimates/, moduleKey: "estimates" },
     { href: "/employee/invoicing", label: "Invoices", icon: ReportIcon, match: /^\/employee\/invoicing/, moduleKey: "invoices" },
+    { href: "/employee/expenses", label: "Expenses", icon: ExpenseIcon, match: /^\/employee\/expenses$/ },
     { href: "/employee/projects", label: "Projects", icon: ProjectsIcon, match: /^\/employee\/projects$/, moduleKey: "projects" },
     { href: "/employee/tasks", label: "Tasks", icon: InsightsIcon, match: /^\/employee\/tasks$/ },
     { href: "/employee/field-reports", label: "Field Reports", icon: ReportIcon, match: /^\/employee\/field-reports$/ },
