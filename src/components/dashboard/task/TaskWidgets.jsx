@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import Image from "next/image";
 import Modal from "@/components/dashboard/Modal";
 import { BusyButton } from "@/components/dashboard/DashboardUi";
@@ -23,7 +24,7 @@ export function StatusBadge({ status }) {
   );
 }
 
-export function AppDialog({
+function AppDialogComponent({
   open,
   title,
   message,
@@ -61,7 +62,7 @@ export function AppDialog({
   );
 }
 
-export function UserSelector({
+function UserSelectorComponent({
   users,
   selectedUserIds,
   onToggle,
@@ -93,7 +94,7 @@ export function UserSelector({
   );
 }
 
-export function TaskCard({
+function TaskCardComponent({
   task,
   canEdit = false,
   canDelete = false,
@@ -251,7 +252,7 @@ function FilePreviewCard({ file, index }) {
   );
 }
 
-export function TaskReviewPanel({
+function TaskReviewPanelComponent({
   task,
   assignment,
   files,
@@ -328,3 +329,8 @@ export function TaskReviewPanel({
     </div>
   );
 }
+
+export const AppDialog = memo(AppDialogComponent);
+export const UserSelector = memo(UserSelectorComponent);
+export const TaskCard = memo(TaskCardComponent);
+export const TaskReviewPanel = memo(TaskReviewPanelComponent);

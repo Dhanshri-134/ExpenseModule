@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { canAccessModule, getRequestContext } from "@/lib/server/authz";
+import { sendError, sendOk, rejectMethod } from "@/lib/server/responses";
 import { createFollowUp } from "@/lib/server/followups";
-import { sendError, sendOk } from "@/lib/server/responses";
+import { buildPaginationMeta, parsePaginationParams } from "@/shared/services/api/pagination";
+import { requireApiContext } from "@/shared/services/security/request";
 
 const LeadSchema = z.object({
   name: z.string().trim().min(1),
@@ -23,16 +24,22 @@ const UpdateLeadSchema = LeadSchema.pick({
 });
 
 export default async function handler(req, res) {
-  const ctx = await getRequestContext(req, res);
-  if (!ctx.ok) return sendError(res, ctx.status, ctx.error);
-  if (!canAccessModule(ctx, "leads")) return sendError(res, 403, "forbidden");
+  const ctx = await requireApiContext(req, res, { moduleKey: "leads" });
+  if (!ctx) return;
 
   if (req.method === "GET") {
-    const { data: leads, error } = await ctx.admin
+    const pagination = parsePaginationParams(req.query, { pageSize: 20, maxPageSize: 100 });
+    let leadsQuery = ctx.admin
       .from("leads")
-      .select("*")
+      .select("*", pagination.enabled ? { count: "exact" } : {})
       .eq("company_id", ctx.company.id)
       .order("created_at", { ascending: false });
+
+    if (pagination.enabled) {
+      leadsQuery = leadsQuery.range(pagination.from, pagination.to);
+    }
+
+    const { data: leads, error, count } = await leadsQuery;
 
     if (error) return sendError(res, 500, "leads_fetch_failed", error.message);
 
@@ -72,6 +79,7 @@ export default async function handler(req, res) {
         latestFollowUpAt: followUpMetaByLeadId.get(lead.id)?.latestFollowUpAt ?? "",
         nextFollowUpDate: followUpMetaByLeadId.get(lead.id)?.nextFollowUpDate ?? "",
       })),
+      ...(pagination.enabled ? { pagination: buildPaginationMeta(count ?? 0, pagination) } : {}),
     });
   }
 
@@ -142,5 +150,5 @@ export default async function handler(req, res) {
     return sendOk(res, { lead });
   }
 
-  return sendError(res, 405, "method_not_allowed");
+  return rejectMethod(res, ["GET", "POST", "PUT"]);
 }

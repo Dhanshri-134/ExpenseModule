@@ -1,6 +1,11 @@
+import dynamic from "next/dynamic";
 import ManagerShell from "@/components/dashboard/ManagerShell";
-import FollowUpsPage from "@/components/dashboard/FollowUpsPage";
 import { requireRolePage } from "@/lib/pages/requireRolePage";
+import { WorkspaceLoadingCard } from "@/shared/ui/feedback/WorkspaceLoadingCard";
+
+const FollowUpsPage = dynamic(() => import("@/components/dashboard/FollowUpsPage"), {
+  loading: () => <WorkspaceLoadingCard label="Loading follow-ups..." />,
+});
 
 export default function ManagerFollowUpsRoute({ authContext }) {
   return (

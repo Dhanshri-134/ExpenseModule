@@ -1,6 +1,12 @@
+import dynamic from "next/dynamic";
 import OwnerShell from "@/components/dashboard/OwnerShell";
-import { FieldReportsWorkspacePage } from "@/components/dashboard/Project/ProjectOperationsPanels";
 import { requireOwner } from "@/lib/pages/requireOwner";
+import { WorkspaceLoadingCard } from "@/shared/ui/feedback/WorkspaceLoadingCard";
+
+const FieldReportsWorkspacePage = dynamic(
+  () => import("@/components/dashboard/Project/ProjectOperationsPanels").then((mod) => mod.FieldReportsWorkspacePage),
+  { loading: () => <WorkspaceLoadingCard label="Loading field reports workspace..." /> }
+);
 
 export default function OwnerFieldReportsPage({ companyName, viewer }) {
   return (

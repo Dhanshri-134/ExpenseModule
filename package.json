@@ -5,13 +5,19 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:ci": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "eslint src scripts eslint.config.mjs next.config.mjs postcss.config.mjs --cache --cache-location .eslintcache",
+    "lint:fix": "eslint src scripts eslint.config.mjs next.config.mjs postcss.config.mjs --cache --cache-location .eslintcache --fix",
+    "check": "npm run lint && npm run build",
+    "perf:baseline": "node scripts/perf-baseline.mjs",
     "seed:demo": "node scripts/seed-demo.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.104.1",
+    "@tanstack/react-query": "^5.100.10",
+    "@tanstack/react-virtual": "^3.13.24",
     "clsx": "^2.1.1",
     "lucide-react": "^1.14.0",
     "next": "16.2.4",

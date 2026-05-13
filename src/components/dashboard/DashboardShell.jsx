@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import DashboardSidebar from "@/components/dashboard/DashboardSidebar";
+import { useDashboardRoutePrefetch } from "@/features/dashboard/hooks/useDashboardPrefetch";
 import { useApiQuery } from "@/lib/client/apiQuery";
 import styles from "@/styles/DashboardShell.module.css";
 
@@ -22,6 +23,7 @@ export default function DashboardShell({
   children,
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  useDashboardRoutePrefetch();
   const settingsQuery = useApiQuery("/api/settings");
   const liveLogoUrl = settingsQuery.data?.company?.logoDataUrl || "";
   const resolvedViewer = useMemo(() => {

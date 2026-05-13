@@ -2,15 +2,19 @@
 
 import Link from "next/link";
 import { useRouter } from "next/router";
+import { getPrefetchUrlsForHref } from "@/features/dashboard/prefetch/config";
+import { prefetchApiQueries } from "@/shared/query/api";
 import styles from "@/styles/DashboardShell.module.css";
 
-function NavItem({ item, active }) {
+function NavItem({ item, active, onPrefetch }) {
   const Icon = item.icon;
 
   return (
     <Link
       href={item.href}
       className={[styles.navItem, active ? styles.navItemActive : ""].join(" ")}
+      onMouseEnter={onPrefetch}
+      onFocus={onPrefetch}
     >
       <span className={styles.navIcon}>
         <Icon className="h-[18px] w-[18px]" />
@@ -64,6 +68,13 @@ export default function DashboardSidebar({
   const currentPath = router.asPath.split("?")[0];
   const sidebarLogo = viewer?.companyLogoUrl || "/assets/logo.png";
 
+  async function prefetchNavigationTarget(item) {
+    router.prefetch(item.href).catch(() => {});
+    const urls = getPrefetchUrlsForHref(item.href);
+    if (!urls.length) return;
+    await prefetchApiQueries(urls);
+  }
+
   return (
     <>
       <div
@@ -112,7 +123,16 @@ export default function DashboardSidebar({
         <nav className={styles.nav}>
           {navigation.map((item) => {
             const active = item.match ? item.match.test(currentPath) : currentPath === item.href;
-            return <NavItem key={item.href} item={item} active={active} />;
+            return (
+              <NavItem
+                key={item.href}
+                item={item}
+                active={active}
+                onPrefetch={() => {
+                  prefetchNavigationTarget(item).catch(() => {});
+                }}
+              />
+            );
           })}
         </nav>
 

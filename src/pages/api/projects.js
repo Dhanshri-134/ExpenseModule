@@ -1,6 +1,8 @@
 import { z } from "zod";
-import { canAccessModule, canAccessProject, getRequestContext } from "@/lib/server/authz";
-import { sendError, sendOk } from "@/lib/server/responses";
+import { canAccessProject } from "@/lib/server/authz";
+import { sendError, sendOk, rejectMethod } from "@/lib/server/responses";
+import { parsePaginationParams, buildPaginationMeta } from "@/shared/services/api/pagination";
+import { requireApiContext } from "@/shared/services/security/request";
 
 const CreateProjectSchema = z.object({
   name: z.string().min(1),
@@ -75,16 +77,34 @@ async function upsertClient(ctx, payload) {
 }
 
 export default async function handler(req, res) {
-  const ctx = await getRequestContext(req, res);
-  if (!ctx.ok) return sendError(res, ctx.status, ctx.error);
-  if (!canAccessModule(ctx, "projects")) return sendError(res, 403, "forbidden");
+  const ctx = await requireApiContext(req, res, { moduleKey: "projects" });
+  if (!ctx) return;
 
   if (req.method === "GET") {
-    const { data: projects, error } = await ctx.admin
+    const pagination = parsePaginationParams(req.query, { pageSize: 20, maxPageSize: 100 });
+    let query = ctx.admin
       .from("projects")
-      .select("*")
+      .select("*", pagination.enabled ? { count: "exact" } : {})
       .eq("company_id", ctx.company.id)
       .order("created_at", { ascending: false });
+
+    if (ctx.role !== "owner") {
+      if (!ctx.projectIds.length) {
+        return sendOk(res, {
+          projects: [],
+          ...(pagination.enabled
+            ? { pagination: buildPaginationMeta(0, pagination) }
+            : {}),
+        });
+      }
+      query = query.in("id", ctx.projectIds);
+    }
+
+    if (pagination.enabled) {
+      query = query.range(pagination.from, pagination.to);
+    }
+
+    const { data: projects, error, count } = await query;
 
     if (error) return sendError(res, 500, "projects_fetch_failed");
 
@@ -99,7 +119,10 @@ export default async function handler(req, res) {
       client: (clients ?? []).find((client) => client.id === project.client_id) || null,
     }));
 
-    return sendOk(res, { projects: enriched });
+    return sendOk(res, {
+      projects: enriched,
+      ...(pagination.enabled ? { pagination: buildPaginationMeta(count ?? enriched.length, pagination) } : {}),
+    });
   }
 
   if (req.method === "POST") {
@@ -135,5 +158,5 @@ export default async function handler(req, res) {
     }
   }
 
-  return sendError(res, 405, "method_not_allowed");
+  return rejectMethod(res, ["GET", "POST"]);
 }

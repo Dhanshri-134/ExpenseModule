@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { canAccessModule, getRequestContext } from "@/lib/server/authz";
-import { sendError, sendOk } from "@/lib/server/responses";
+import { sendError, sendOk, rejectMethod } from "@/lib/server/responses";
 import { estimateToCsv } from "@/lib/projectModules";
 import { loadUserDirectory } from "@/lib/server/taskWorkflow";
 import { extractCompanyAssetMetadata } from "@/lib/server/companyAssets";
+import { paginateCollection, parsePaginationParams, buildPaginationMeta } from "@/shared/services/api/pagination";
 import {
   buildEstimateComputation,
   composeEstimateRecord,
@@ -412,13 +413,20 @@ export default async function handler(req, res) {
 
     const { projectId, clientId, id, export: exportType, document = "estimate", disposition, compact } = parsed.data;
     const useCompactResponse = compact === "1" || compact === "true";
+    const pagination = parsePaginationParams(req.query, { pageSize: useCompactResponse ? 25 : 15, maxPageSize: 100 });
 
-    let query = ctx.admin.from("project_estimates").select("*").eq("company_id", ctx.company.id);
+    let query = ctx.admin
+      .from("project_estimates")
+      .select("*", !id && ctx.role === "owner" && pagination.enabled ? { count: "exact" } : {})
+      .eq("company_id", ctx.company.id);
     if (id) query = query.eq("id", id);
     if (projectId) query = query.eq("project_id", projectId);
     if (clientId) query = query.eq("client_id", clientId);
+    if (!id && ctx.role === "owner" && pagination.enabled) {
+      query = query.range(pagination.from, pagination.to);
+    }
 
-    const { data, error } = await query.order("estimate_number", { ascending: false });
+    const { data, error, count } = await query.order("estimate_number", { ascending: false });
     if (error) return sendError(res, 500, "estimates_fetch_failed", error.message);
 
     const visible = (data ?? []).filter((estimate) => canReadEstimateScope(ctx, estimate));
@@ -478,10 +486,27 @@ export default async function handler(req, res) {
       return;
     }
 
-    const estimatesWithGraph = useCompactResponse ? visible : await attachEstimateGraphs(ctx.admin, visible);
+    // Compatibility note: non-owner estimate visibility is filtered after fetch to preserve current access rules.
+    const visiblePage =
+      !id && ctx.role !== "owner" && pagination.enabled
+        ? paginateCollection(visible, pagination).items
+        : visible;
+
+    const estimatesWithGraph = useCompactResponse ? visiblePage : await attachEstimateGraphs(ctx.admin, visiblePage);
     const estimatesWithRelations = await attachEstimateRelations(ctx, estimatesWithGraph);
     const estimates = await enrichEstimates(ctx.admin, ctx.company.id, estimatesWithRelations);
-    return sendOk(res, { estimates });
+    const paginationMeta =
+      id
+        ? undefined
+        : ctx.role === "owner" && pagination.enabled
+          ? buildPaginationMeta(count ?? 0, pagination)
+          : ctx.role !== "owner" && pagination.enabled
+            ? paginateCollection(visible, pagination).pagination
+            : undefined;
+    return sendOk(res, {
+      estimates,
+      ...(paginationMeta ? { pagination: paginationMeta } : {}),
+    });
   }
 
   if (req.method === "POST") {
@@ -547,5 +572,5 @@ export default async function handler(req, res) {
     return sendOk(res, { deleted: true });
   }
 
-  return sendError(res, 405, "method_not_allowed");
+  return rejectMethod(res, ["GET", "POST", "PUT", "DELETE"]);
 }

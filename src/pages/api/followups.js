@@ -9,7 +9,8 @@ import {
   updateFollowUp,
 } from "@/lib/server/followups";
 import { getRequestContext } from "@/lib/server/authz";
-import { sendError, sendOk } from "@/lib/server/responses";
+import { sendError, sendOk, rejectMethod } from "@/lib/server/responses";
+import { paginateCollection, parsePaginationParams } from "@/shared/services/api/pagination";
 
 const FollowUpQuerySchema = z.object({
   refId: z.string().uuid().optional(),
@@ -44,8 +45,13 @@ export default async function handler(req, res) {
         filter: parsed.data.filter && parsed.data.filter !== "all" ? parsed.data.filter : null,
         status: parsed.data.status ?? null,
       });
+      const pagination = parsePaginationParams(req.query, { pageSize: 25, maxPageSize: 100 });
+      const paged = paginateCollection(followUps, pagination);
 
-      return sendOk(res, { followUps });
+      return sendOk(res, {
+        followUps: paged.items,
+        ...(pagination.enabled ? { pagination: paged.pagination } : {}),
+      });
     } catch (error) {
       return sendError(res, 500, "followups_fetch_failed", error.message);
     }
@@ -90,5 +96,5 @@ export default async function handler(req, res) {
     }
   }
 
-  return sendError(res, 405, "method_not_allowed");
+  return rejectMethod(res, ["GET", "POST", "PUT", "DELETE"]);
 }

@@ -1,15 +1,18 @@
-import ProjectSectionPage from "@/components/dashboard/Project/ProjectSectionPage";
+import ProjectShell from "@/components/dashboard/Project/ProjectShell";
+import { ProjectExpensesPage } from "@/components/dashboard/Project/ProjectExpensesPage";
 import { requireRolePage } from "@/lib/pages/requireRolePage";
 
 export default function ManagerProjectExpensesPage({ companyName, viewer, id }) {
   return (
-    <ProjectSectionPage
+    <ProjectShell
       companyName={companyName}
       viewer={viewer}
+      title="Project Expenses"
       roleBase="manager"
       projectId={id}
-      section="expenses"
-    />
+    >
+      <ProjectExpensesPage projectId={id} roleBase="manager" currentUserId={viewer.id} />
+    </ProjectShell>
   );
 }
 

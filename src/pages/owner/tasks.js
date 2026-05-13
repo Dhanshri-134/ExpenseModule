@@ -1,6 +1,12 @@
+import dynamic from "next/dynamic";
 import OwnerShell from "@/components/dashboard/OwnerShell";
-import { TasksManagerPage } from "@/components/dashboard/DashboardClientPages";
 import { requireOwner } from "@/lib/pages/requireOwner";
+import { WorkspaceLoadingCard } from "@/shared/ui/feedback/WorkspaceLoadingCard";
+
+const TasksManagerPage = dynamic(
+  () => import("@/components/dashboard/task/TasksManagerPage").then((mod) => mod.TasksManagerPage),
+  { loading: () => <WorkspaceLoadingCard label="Loading tasks workspace..." /> }
+);
 
 export default function OwnerTasksPage({ companyName, viewer }) {
   return (

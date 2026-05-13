@@ -1,6 +1,11 @@
+import dynamic from "next/dynamic";
 import OwnerShell from "@/components/dashboard/OwnerShell";
-import { EstimateDashboardPage } from "@/components/dashboard/EstimateDashboardPage";
 import { requireOwner } from "@/lib/pages/requireOwner";
+import { WorkspaceLoadingCard } from "@/shared/ui/feedback/WorkspaceLoadingCard";
+
+const EstimateDashboardPage = dynamic(() => import("@/components/dashboard/EstimateDashboardPage"), {
+  loading: () => <WorkspaceLoadingCard label="Loading estimates workspace..." />,
+});
 
 export default function OwnerEstimatesPage({ companyName, viewer }) {
   return (

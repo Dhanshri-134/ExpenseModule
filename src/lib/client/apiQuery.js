@@ -1,103 +1,37 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { pooledGetJson } from "@/lib/client/apiClient";
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { getApiQueryOptions } from "@/shared/query/client";
+import { invalidateApiQueryKey, invalidateApiQueryPrefix as invalidateApiQueryPrefixKey, prefetchApiQuery, setApiQueryCacheData } from "@/shared/query/api";
 
-const DEFAULT_TTL_MS = 30_000;
-const queryStore = new Map();
-
-function createEntry() {
-  return {
-    data: null,
-    error: "",
-    updatedAt: 0,
-    promise: null,
-    listeners: new Set(),
-  };
+export function invalidateApiQuery(key, options = {}) {
+  return invalidateApiQueryKey(key, options);
 }
 
-function getEntry(key) {
-  if (!queryStore.has(key)) {
-    queryStore.set(key, createEntry());
-  }
-  return queryStore.get(key);
-}
-
-function notify(entry) {
-  entry.listeners.forEach((listener) => listener());
-}
-
-function getSnapshot(key) {
-  const entry = getEntry(key);
-  return {
-    data: entry.data,
-    error: entry.error,
-    loading: Boolean(entry.promise) && entry.updatedAt === 0,
-    refreshing: Boolean(entry.promise) && entry.updatedAt > 0,
-    updatedAt: entry.updatedAt,
-  };
-}
-
-async function runQuery(key, options = {}) {
-  const { force = false, ttlMs = DEFAULT_TTL_MS, signal } = options;
-  const entry = getEntry(key);
-  const isFresh = entry.updatedAt && Date.now() - entry.updatedAt < ttlMs;
-
-  if (!force) {
-    if (entry.promise) return entry.promise;
-    if (isFresh) return entry.data;
-  }
-
-  entry.promise = (async () => {
-    try {
-      const json = await pooledGetJson(key, { signal });
-      entry.data = json;
-      entry.error = "";
-      entry.updatedAt = Date.now();
-      notify(entry);
-      return json;
-    } catch (error) {
-      if (error?.name === "AbortError") {
-        throw error;
-      }
-      entry.error = error?.message || "request_failed";
-      notify(entry);
-      throw error;
-    } finally {
-      entry.promise = null;
-      notify(entry);
-    }
-  })();
-
-  notify(entry);
-  return entry.promise;
-}
-
-export function invalidateApiQuery(key) {
-  if (!key) {
-    queryStore.forEach((entry) => {
-      entry.updatedAt = 0;
-      notify(entry);
-    });
-    return;
-  }
-
-  const entry = queryStore.get(key);
-  if (!entry) return;
-  entry.updatedAt = 0;
-  notify(entry);
+export function invalidateApiQueryPrefix(prefix, options = {}) {
+  return invalidateApiQueryPrefixKey(prefix, options);
 }
 
 export function setApiQueryData(key, nextValue) {
-  const entry = getEntry(key);
-  entry.data = typeof nextValue === "function" ? nextValue(entry.data) : nextValue;
-  entry.error = "";
-  entry.updatedAt = Date.now();
-  notify(entry);
+  if (!key) return;
+  setApiQueryCacheData(key, nextValue);
+}
+
+export async function prefetchApiData(key, options = {}) {
+  return prefetchApiQuery(key, options);
 }
 
 export function useApiQuery(key, options = {}) {
-  const { enabled = Boolean(key), ttlMs = DEFAULT_TTL_MS } = options;
+  const {
+    enabled = Boolean(key),
+    ttlMs,
+    gcTime,
+    refetchOnWindowFocus,
+    refetchOnReconnect,
+    refetchOnMount,
+  } = options;
+  const queryClient = useQueryClient();
   const emptySnapshot = {
     data: null,
     error: "",
@@ -105,46 +39,49 @@ export function useApiQuery(key, options = {}) {
     refreshing: false,
     updatedAt: 0,
   };
-  const [snapshot, setSnapshot] = useState(() => (key ? getSnapshot(key) : {
-    ...emptySnapshot,
-  }));
 
-  useEffect(() => {
-    if (!key) return undefined;
-
-    const entry = getEntry(key);
-    const sync = () => setSnapshot(getSnapshot(key));
-    entry.listeners.add(sync);
-    sync();
-
-    const controller = new AbortController();
-    if (enabled) {
-      runQuery(key, { ttlMs, signal: controller.signal }).catch((error) => {
-        if (error?.name !== "AbortError") {
-          sync();
-        }
-      });
-    }
-
-    return () => {
-      controller.abort();
-      entry.listeners.delete(sync);
-    };
-  }, [enabled, key, ttlMs]);
+  const query = useQuery({
+    ...getApiQueryOptions(key || "", {
+      staleTime: ttlMs,
+      gcTime,
+      refetchOnWindowFocus,
+      refetchOnReconnect,
+      refetchOnMount,
+    }),
+    enabled: Boolean(key) && enabled,
+  });
 
   const refresh = useCallback(async () => {
     if (!key) return null;
-    return runQuery(key, { force: true, ttlMs });
-  }, [key, ttlMs]);
+    return queryClient.fetchQuery(getApiQueryOptions(key, {
+      staleTime: ttlMs,
+      gcTime,
+      refetchOnWindowFocus,
+      refetchOnReconnect,
+      refetchOnMount,
+    }));
+  }, [gcTime, key, queryClient, refetchOnMount, refetchOnReconnect, refetchOnWindowFocus, ttlMs]);
 
   const setData = useCallback((nextValue) => {
     if (!key) return;
-    setApiQueryData(key, nextValue);
+    setApiQueryCacheData(key, nextValue);
   }, [key]);
 
+  if (!key) {
+    return {
+      ...emptySnapshot,
+      refresh,
+      setData,
+    };
+  }
+
   return {
-    ...(key ? snapshot : emptySnapshot),
-    setData,
+    data: query.data ?? null,
+    error: query.error?.message || "",
+    loading: query.isLoading,
+    refreshing: query.isFetching && !query.isLoading,
+    updatedAt: query.dataUpdatedAt || 0,
     refresh,
+    setData,
   };
 }

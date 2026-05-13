@@ -29,20 +29,28 @@ function getRefLabel(refType) {
 function fieldClass(error = false) {
   return `acm-input mt-0 ${error ? "border-rose-400 focus:border-rose-500 focus:ring-rose-200" : ""}`.trim();
 }
- function openLeadEdit() {
-    if (!selectedLead) return;
-    setLeadEditForm({
-      name: selectedLead.name || "",
-      address: selectedLead.address || "",
-      contact: selectedLead.contact || "",
-      email: selectedLead.email || "",
-    });
-    setLeadEditOpen(true);
-    setFollowUpFormOpen(false);
-    setFollowUpMessage("");
-    setFollowUpError("");
-  }
-  function InlineMessage({ error, message }) {
+
+function LabeledField({ label, children }) {
+  return (
+    <label className="relative block pt-3">
+      <span className="acm-field-label">
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function FieldGroup({ title, children }) {
+  return (
+    <fieldset className="rounded-[20px] border border-[color:var(--acm-border)] p-4">
+      <legend className="acm-fieldset-legend">{title}</legend>
+      <div className="grid gap-3">{children}</div>
+    </fieldset>
+  );
+}
+
+function InlineMessage({ error, message }) {
   if (error) {
     return (
       <div className="acm-message-error">

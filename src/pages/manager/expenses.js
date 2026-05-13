@@ -1,6 +1,12 @@
+import dynamic from "next/dynamic";
 import ManagerShell from "@/components/dashboard/ManagerShell";
-import { ExpensesWorkspacePage } from "@/components/dashboard/Project/ProjectExpensesPage";
 import { requireRolePage } from "@/lib/pages/requireRolePage";
+import { WorkspaceLoadingCard } from "@/shared/ui/feedback/WorkspaceLoadingCard";
+
+const ExpensesWorkspacePage = dynamic(
+  () => import("@/components/dashboard/Project/ProjectExpensesPage").then((mod) => mod.ExpensesWorkspacePage),
+  { loading: () => <WorkspaceLoadingCard label="Loading expenses workspace..." /> }
+);
 
 export default function ManagerExpensesPage({ authContext }) {
   return (

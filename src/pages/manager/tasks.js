@@ -1,6 +1,12 @@
+import dynamic from "next/dynamic";
 import ManagerShell from "@/components/dashboard/ManagerShell";
-import { TasksManagerPage } from "@/components/dashboard/DashboardClientPages";
 import { requireRolePage } from "@/lib/pages/requireRolePage";
+import { WorkspaceLoadingCard } from "@/shared/ui/feedback/WorkspaceLoadingCard";
+
+const TasksManagerPage = dynamic(
+  () => import("@/components/dashboard/task/TasksManagerPage").then((mod) => mod.TasksManagerPage),
+  { loading: () => <WorkspaceLoadingCard label="Loading tasks workspace..." /> }
+);
 
 export default function ManagerTasksPage({ authContext }) {
   return (

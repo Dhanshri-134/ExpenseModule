@@ -2,13 +2,18 @@
 
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import Modal from "@/components/dashboard/Modal";
 import { BusyButton, CompactListRow, DrilldownModal, StatusMetricButton } from "@/components/dashboard/DashboardUi";
+import { useDashboardOverviewAnalytics } from "@/features/dashboard/hooks/useDashboardOverviewAnalytics";
+import { useProjectExpenses } from "@/features/expenses/hooks/useProjectExpenses";
 import { ProjectEstimatesPage, ProjectFieldReportsPage } from "@/components/dashboard/Project/ProjectOperationsPanels";
 import { TasksManagerPage as TaskModulePage } from "@/components/dashboard/task/TasksManagerPage";
+import { VirtualizedActivityFeed } from "@/shared/ui/lists/VirtualizedActivityFeed";
 import PasswordInput from "@/components/shared/PasswordInput";
+import { useRenderMetric } from "@/shared/performance/useMeasuredMemo";
 import {
+  CalendarIcon,
   ExpenseIcon,
   InsightsIcon,
   PulseIcon,
@@ -46,6 +51,29 @@ function formatDateTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+function formatCurrency(value) {
+  const numericValue = Number(value || 0);
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(numericValue) ? numericValue : 0);
+}
+
+function formatPercent(value, digits = 1) {
+  const numericValue = Number(value || 0);
+  if (!Number.isFinite(numericValue)) return "0%";
+  return `${numericValue.toFixed(digits)}%`;
+}
+
+function formatExpenseType(value) {
+  return String(value || "")
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function formatCompactNumber(value) {
@@ -452,83 +480,218 @@ function UpdatesCard({ logs }) {
   return (
     <div className={cardClass()}>
       <SectionHeader title="Recent Updates" />
-      <div className="space-y-3">
-        {(logs ?? []).length ? (
-          logs.map((log) => (
-            <div key={log.id} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
-              <div className="font-semibold">{log.message}</div>
-              <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">
-                {log.actor?.name || log.actor?.user_code || "System"} | {formatDate(log.created_at)}
-              </div>
+      <VirtualizedActivityFeed
+        items={logs ?? []}
+        emptyMessage="No updates yet."
+        metricName="dashboard.project-updates"
+        renderItem={(log) => (
+          <div className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
+            <div className="font-semibold">{log.message}</div>
+            <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">
+              {log.actor?.name || log.actor?.user_code || "System"} | {formatDate(log.created_at)}
             </div>
-          ))
-        ) : (
-          <div className="text-sm text-[color:var(--acm-muted-fg)]">No updates yet.</div>
+          </div>
         )}
+      />
+    </div>
+  );
+}
+
+function OverviewMiniMetric({ label, value, hint, icon: Icon, onClick }) {
+  const content = (
+    <div className="rounded-[20px] border border-white/10 bg-slate-950/30 px-4 py-4 text-left backdrop-blur">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300/80">{label}</div>
+        {Icon ? <Icon className="h-4 w-4 text-cyan-200" /> : null}
+      </div>
+      <div className="mt-3 text-2xl font-black tracking-[-0.04em] text-white">{value}</div>
+      <div className="mt-1 text-xs text-slate-300/75">{hint}</div>
+    </div>
+  );
+
+  if (!onClick) return content;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="transition hover:-translate-y-0.5 hover:opacity-95"
+    >
+      {content}
+    </button>
+  );
+}
+
+function ExpenseTypePieChart({ items = [], total = 0 }) {
+  if (!items.length) {
+    return (
+      <div className="rounded-[20px] border border-dashed border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-8 text-center text-sm text-[color:var(--acm-muted-fg)]">
+        No expense type data yet.
+      </div>
+    );
+  }
+
+  const radius = 58;
+  const circumference = 2 * Math.PI * radius;
+  const palette = [
+    "#072048",
+    "color-mix(in srgb, #072048 82%, white 18%)",
+    "color-mix(in srgb, #072048 68%, white 32%)",
+    "color-mix(in srgb, #072048 54%, white 46%)",
+    "color-mix(in srgb, #072048 40%, white 60%)",
+  ];
+  const segments = items.map((item, index) => {
+    const ratio = total ? item.value / total : 0;
+    const dash = circumference * ratio;
+    const previousDashTotal = items
+      .slice(0, index)
+      .reduce((sum, entry) => sum + circumference * (total ? entry.value / total : 0), 0);
+
+    return {
+      ...item,
+      stroke: palette[index % palette.length],
+      dashArray: `${dash} ${circumference - dash}`,
+      dashOffset: -previousDashTotal,
+      percent: ratio * 100,
+    };
+  });
+
+  return (
+    <div className="grid gap-5 lg:grid-cols-[220px_1fr] lg:items-center">
+      <div className="mx-auto">
+        <svg width="180" height="180" viewBox="0 0 180 180" className="overflow-visible">
+          <circle cx="90" cy="90" r={radius} fill="none" stroke="color-mix(in srgb, var(--acm-fg) 12%, transparent)" strokeWidth="22" />
+          {segments.map((segment) => (
+            <circle
+              key={segment.label}
+              cx="90"
+              cy="90"
+              r={radius}
+              fill="none"
+              stroke={segment.stroke}
+              strokeWidth="22"
+              strokeDasharray={segment.dashArray}
+              strokeDashoffset={segment.dashOffset}
+              strokeLinecap="butt"
+              transform="rotate(-90 90 90)"
+            />
+          ))}
+          <text x="90" y="82" textAnchor="middle" className="fill-[color:var(--acm-muted-fg)] text-[10px] font-semibold">
+            TOTAL SPEND
+          </text>
+          <text x="90" y="102" textAnchor="middle" className="fill-[color:var(--acm-fg)] text-[13px] font-black">
+            {formatCurrency(total)}
+          </text>
+        </svg>
+      </div>
+
+      <div className="space-y-3">
+        {segments.map((segment, index) => (
+          <div key={segment.label} className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span
+                  className="h-3 w-3 rounded-full border border-black/10"
+                  style={{ backgroundColor: palette[index % palette.length] }}
+                />
+                <div>
+                  <div className="text-sm font-semibold text-[color:var(--acm-fg)]">{formatExpenseType(segment.label)}</div>
+                  <div className="text-xs text-[color:var(--acm-muted-fg)]">{formatPercent(segment.percent)} of total expense</div>
+                </div>
+              </div>
+              <div className="text-sm font-bold text-[color:var(--acm-fg)]">{formatCurrency(segment.value)}</div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-export function DashboardOverview({ roleBase }) {
-  const router = useRouter();
-  const dashboard = useApi("/api/dashboard");
-  const estimates = useApi("/api/estimates?compact=1");
-  const [drilldown, setDrilldown] = useState({ open: false, title: "", items: [] });
-  const [selectedEstimate, setSelectedEstimate] = useState(null);
-
-  const projectSummary = dashboard.data?.summary?.projects ?? { total: 0, live: 0, complete: 0, onhold: 0 };
-  const taskSummary = dashboard.data?.summary?.tasks ?? {};
-  const estimateList = estimates.data?.estimates ?? [];
-  const draftEstimates = estimateList.filter((item) => (item.status || "draft") === "draft");
-  const sentEstimates = estimateList.filter((item) => item.status === "sent");
-  const approvedEstimates = estimateList.filter((item) => {
-    const approvalStatus = String(item.approval_status || item.approvalStatus || item.status || "").toLowerCase();
-    return approvalStatus === "approved";
-  });
-  const readyInvoices = approvedEstimates.filter((item) => !item.invoice_status);
-  const draftInvoices = approvedEstimates.filter((item) => item.invoice_status === "draft");
-  const completedInvoices = approvedEstimates.filter((item) => item.invoice_status === "completed");
-
-  function openDrilldown(title, items) {
-    setDrilldown({ open: true, title, items });
+function ExpenseCategoryPanel({ items = [], total = 0 }) {
+  if (!items.length) {
+    return (
+      <div className="rounded-[20px] border border-dashed border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-8 text-center text-sm text-[color:var(--acm-muted-fg)]">
+        No expense categories available yet.
+      </div>
+    );
   }
+
+  return (
+    <div className="space-y-4">
+      {items.map((item, index) => {
+        const share = total ? (item.value / total) * 100 : 0;
+        return (
+          <div key={item.label} className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-[color:var(--acm-fg)]">{formatExpenseType(item.label)}</div>
+                <div className="text-xs text-[color:var(--acm-muted-fg)]">{formatPercent(share)} of project spend</div>
+              </div>
+              <div className="text-sm font-bold text-[color:var(--acm-fg)]">{formatCurrency(item.value)}</div>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-[color:var(--acm-border)]">
+              <div
+                className="h-full rounded-full bg-[linear-gradient(90deg,color-mix(in_srgb,#072048_72%,white_28%)_0%,#072048_100%)]"
+                style={{ width: `${Math.max(share, 6)}%` }}
+              />
+            </div>
+            <div className="text-[11px] uppercase tracking-[0.12em] text-[color:var(--acm-muted-fg)]">
+              Rank {index + 1}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const DashboardOverviewCards = memo(function DashboardOverviewCards({
+  roleBase,
+  analytics,
+  onOpenProjects,
+  onOpenTasks,
+  onOpenEstimates,
+  onOpenInvoicing,
+  onOpenDrilldown,
+}) {
+  useRenderMetric("dashboard.overview.cards", { roleBase });
 
   if (roleBase !== "owner") {
     return (
       <section className="grid gap-3 xl:grid-cols-2">
         <OverviewCard
           title="Projects"
-          value={formatCompactNumber(projectSummary.total)}
+          value={formatCompactNumber(analytics.projectSummary.total)}
           icon={ProjectsIcon}
           accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 18%, transparent), transparent 72%)"
-          onOpen={() => router.push(`/${roleBase}/projects`)}
+          onOpen={onOpenProjects}
           openLabel="Open Projects"
           stats={[
-            { key: "live-projects", label: "Live", value: formatCompactNumber(projectSummary.live) },
-            { key: "complete-projects", label: "Complete", value: formatCompactNumber(projectSummary.complete), tone: "success" },
-            { key: "onhold-projects", label: "Planned", value: formatCompactNumber(projectSummary.onhold), tone: "warning" },
+            { key: "live-projects", label: "Live", value: formatCompactNumber(analytics.projectSummary.live) },
+            { key: "complete-projects", label: "Complete", value: formatCompactNumber(analytics.projectSummary.complete), tone: "success" },
+            { key: "onhold-projects", label: "Planned", value: formatCompactNumber(analytics.projectSummary.onhold), tone: "warning" },
           ]}
         />
 
         <OverviewCard
           title="Tasks"
-          value={formatCompactNumber(roleBase === "manager" ? taskSummary.assignedTasks?.assigned ?? 0 : taskSummary.myTasks?.total ?? 0)}
+          value={formatCompactNumber(analytics.taskHeadlineValue)}
           icon={InsightsIcon}
           accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 16%, transparent), transparent 74%)"
-          onOpen={() => router.push(`/${roleBase}/tasks`)}
+          onOpen={onOpenTasks}
           openLabel="Open Tasks"
           stats={
             roleBase === "manager"
               ? [
-                  { key: "manager-assigned", label: "Assigned", value: formatCompactNumber(taskSummary.assignedTasks?.assigned ?? 0) },
-                  { key: "manager-approved", label: "Completed", value: formatCompactNumber(taskSummary.assignedTasks?.completed ?? 0), tone: "success" },
-                  { key: "manager-review", label: "To Review", value: formatCompactNumber(taskSummary.approvingTasks?.toBeApproved ?? 0), tone: "warning" },
+                  { key: "manager-assigned", label: "Assigned", value: formatCompactNumber(analytics.taskSummary.assignedTasks?.assigned ?? 0) },
+                  { key: "manager-approved", label: "Completed", value: formatCompactNumber(analytics.taskSummary.assignedTasks?.completed ?? 0), tone: "success" },
+                  { key: "manager-review", label: "To Review", value: formatCompactNumber(analytics.taskSummary.approvingTasks?.toBeApproved ?? 0), tone: "warning" },
                 ]
               : [
-                  { key: "employee-total", label: "My Tasks", value: formatCompactNumber(taskSummary.myTasks?.total ?? 0) },
-                  { key: "employee-complete", label: "Completed", value: formatCompactNumber(taskSummary.myTasks?.completed ?? 0), tone: "success" },
-                  { key: "employee-review", label: "Approvals", value: formatCompactNumber(taskSummary.approvingTasks?.toBeApproved ?? 0), tone: "warning" },
+                  { key: "employee-total", label: "My Tasks", value: formatCompactNumber(analytics.taskSummary.myTasks?.total ?? 0) },
+                  { key: "employee-complete", label: "Completed", value: formatCompactNumber(analytics.taskSummary.myTasks?.completed ?? 0), tone: "success" },
+                  { key: "employee-review", label: "Approvals", value: formatCompactNumber(analytics.taskSummary.approvingTasks?.toBeApproved ?? 0), tone: "warning" },
                 ]
           }
         />
@@ -537,104 +700,362 @@ export function DashboardOverview({ roleBase }) {
   }
 
   return (
+    <section className="grid gap-3 xl:grid-cols-4">
+      <OverviewCard
+        title="Projects"
+        value={formatCompactNumber(analytics.projectSummary.total)}
+        icon={ProjectsIcon}
+        accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 18%, transparent), transparent 72%)"
+        onOpen={onOpenProjects}
+        openLabel="Open Projects"
+        stats={[
+          { key: "live-projects", label: "Live", value: formatCompactNumber(analytics.projectSummary.live) },
+          { key: "complete-projects", label: "Complete", value: formatCompactNumber(analytics.projectSummary.complete), tone: "success" },
+          { key: "onhold-projects", label: "Planned", value: formatCompactNumber(analytics.projectSummary.onhold), tone: "warning" },
+        ]}
+      />
+
+      <OverviewCard
+        title="Estimates"
+        value={formatCompactNumber(analytics.estimateList.length)}
+        icon={ExpenseIcon}
+        accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 22%, transparent), transparent 70%)"
+        onOpen={onOpenEstimates}
+        openLabel="Open Estimates"
+        stats={[
+          {
+            key: "draft-estimates",
+            label: "Draft",
+            value: formatCompactNumber(analytics.draftEstimates.length),
+            onClick: () => onOpenDrilldown("Draft Estimates", analytics.draftEstimates),
+          },
+          {
+            key: "sent-estimates",
+            label: "Sent",
+            value: formatCompactNumber(analytics.sentEstimates.length),
+            onClick: () => onOpenDrilldown("Sent Estimates", analytics.sentEstimates),
+          },
+          {
+            key: "approved-estimates",
+            label: "Approved",
+            value: formatCompactNumber(analytics.approvedEstimates.length),
+            onClick: () => onOpenDrilldown("Approved Estimates", analytics.approvedEstimates),
+            tone: "success",
+          },
+        ]}
+      />
+
+      <OverviewCard
+        title="Invoicing"
+        value={formatCompactNumber(analytics.approvedEstimates.length)}
+        icon={ReportIcon}
+        accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 16%, transparent), transparent 72%)"
+        onOpen={onOpenInvoicing}
+        openLabel="Open Invoices"
+        stats={[
+          {
+            key: "invoice-ready",
+            label: "Ready",
+            value: formatCompactNumber(analytics.readyInvoices.length),
+            onClick: () => onOpenDrilldown("Ready For Invoicing", analytics.readyInvoices),
+          },
+          {
+            key: "invoice-draft",
+            label: "Draft",
+            value: formatCompactNumber(analytics.draftInvoices.length),
+            onClick: () => onOpenDrilldown("Draft Invoices", analytics.draftInvoices),
+            tone: "warning",
+          },
+          {
+            key: "invoice-complete",
+            label: "Completed",
+            value: formatCompactNumber(analytics.completedInvoices.length),
+            onClick: () => onOpenDrilldown("Completed Invoices", analytics.completedInvoices),
+            tone: "success",
+          },
+        ]}
+      />
+
+      <OverviewCard
+        title="Tasks"
+        value={formatCompactNumber(analytics.taskSummary.todayAssigned ?? 0)}
+        icon={InsightsIcon}
+        accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 16%, transparent), transparent 74%)"
+        onOpen={onOpenTasks}
+        openLabel="Open Tasks"
+        stats={[
+          { key: "tasks-today", label: "Assigned Today", value: formatCompactNumber(analytics.taskSummary.todayAssigned ?? 0) },
+          { key: "tasks-complete", label: "Completed", value: formatCompactNumber(analytics.taskSummary.completed ?? 0), tone: "success" },
+          { key: "invoice-pipeline", label: "Invoice Pipeline", value: formatCompactNumber(analytics.approvedEstimates.length), tone: "warning" },
+        ]}
+      />
+    </section>
+  );
+});
+
+const DashboardExpenseOverviewSection = memo(function DashboardExpenseOverviewSection({
+  roleBase,
+  expenseOverview,
+  onOpenExpenses,
+}) {
+  const totals = expenseOverview.totals;
+  const topProjects = totals.projectSummaries.slice(0, 3);
+
+  return (
+    <section className="grid gap-4">
+      <div className="relative overflow-hidden rounded-[26px] border border-[color:var(--acm-border)] bg-[linear-gradient(135deg,color-mix(in_srgb,var(--acm-accent)_16%,var(--acm-surface)),var(--acm-surface))] p-5 shadow-[0_22px_50px_rgba(15,23,42,0.10)]">
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-1/3 bg-[radial-gradient(circle_at_center,color-mix(in_srgb,var(--acm-accent)_18%,transparent),transparent_70%)] opacity-70" />
+        <div className="relative flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+          <div className="max-w-2xl">
+            <div className="text-[1.5rem] font-semibold text-[color:var(--acm-fg)]">Expense Overview</div>
+            {/* <div className="mt-2 text-3xl font-black tracking-[-0.05em] text-[color:var(--acm-fg)]">Live spending visibility across your workspace</div>
+            <div className="mt-2 text-sm text-[color:var(--acm-muted-fg)]">
+              Review budget usage, recent spend patterns, and the categories driving cost without leaving the main dashboard.
+            </div> */}
+          </div>
+          <button type="button" onClick={onOpenExpenses} className="acm-btn acm-btn-primary h-10 px-4">
+            Open Expenses
+          </button>
+        </div>
+
+        <div className="relative mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)]/88 px-4 py-4 backdrop-blur">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">Total Spent</div>
+            <div className="mt-2 text-2xl font-black tracking-[-0.04em] text-[color:var(--acm-fg)]">{formatCurrency(totals.totalAmount)}</div>
+            <div className="mt-1 text-xs text-[color:var(--acm-muted-fg)]">{formatCompactNumber(totals.totalEntries)} expense entries</div>
+          </div>
+          <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)]/88 px-4 py-4 backdrop-blur">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">Budget Used</div>
+            <div className="mt-2 text-2xl font-black tracking-[-0.04em] text-[color:var(--acm-fg)]">{formatPercent(totals.budgetUsedPercent)}</div>
+            <div className="mt-1 text-xs text-[color:var(--acm-muted-fg)]">Of {formatCurrency(totals.totalBudget || 0)} visible budget</div>
+          </div>
+          <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)]/88 px-4 py-4 backdrop-blur">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">Remaining Budget</div>
+            <div className="mt-2 text-2xl font-black tracking-[-0.04em] text-[color:var(--acm-fg)]">{formatCurrency(totals.remainingBudget)}</div>
+            <div className="mt-1 text-xs text-[color:var(--acm-muted-fg)]">Average entry {formatCurrency(totals.averageAmount)}</div>
+          </div>
+          <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)]/88 px-4 py-4 backdrop-blur">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">Top Category</div>
+            <div className="mt-2 text-2xl font-black tracking-[-0.04em] text-[color:var(--acm-fg)]">
+              {/* {totals.topCategories[0]  ? formatExpenseType(totals.topCategories[0].label).charAt(0).toUpperCase() +  formatExpenseType(totals.topCategories[0].label).slice(1) : "-"} */}
+              {totals.topCategories[0] ? formatExpenseType(totals.topCategories[0].label) : "-"}
+            </div>
+            <div className="mt-1 text-xs text-[color:var(--acm-muted-fg)]">
+              {totals.topCategories[0] ? formatCurrency(totals.topCategories[0].value) : "No category data yet"}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+        <div className={cardClass("shadow-[0_18px_40px_rgba(15,23,42,0.08)]")}>
+          <SectionHeader title="Expense Type Split" />
+          <ExpenseTypePieChart items={totals.topCategories} total={totals.totalAmount} />
+        </div>
+
+        <div className={cardClass("shadow-[0_18px_40px_rgba(15,23,42,0.08)]")}>
+          <SectionHeader title="Category Split" />
+          <ExpenseCategoryPanel items={totals.topCategories} total={totals.totalAmount} />
+        </div>
+      </div>
+
+      {roleBase === "owner" ? (
+        <div className={cardClass("shadow-[0_18px_40px_rgba(15,23,42,0.08)]")}>
+          <SectionHeader title="Top Spending Projects" />
+          <div className="grid gap-3 md:grid-cols-3">
+            {topProjects.length ? topProjects.map((project) => (
+              <button
+                key={project.id || project.name}
+                type="button"
+                onClick={() => onOpenExpenses()}
+                className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-4 text-left transition hover:border-[color:var(--acm-accent-border)] hover:bg-[color:var(--acm-surface)]"
+              >
+                <div className="text-sm font-bold text-[color:var(--acm-fg)]">{project.name}</div>
+                <div className="mt-3 space-y-2 text-sm text-[color:var(--acm-muted-fg)]">
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Spent</span>
+                    <span className="font-semibold text-[color:var(--acm-fg)]">{formatCurrency(project.spent)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Budget</span>
+                    <span className="font-semibold text-[color:var(--acm-fg)]">{formatCurrency(project.budget)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Remaining</span>
+                    <span className="font-semibold text-[color:var(--acm-fg)]">{formatCurrency(project.remaining)}</span>
+                  </div>
+                </div>
+              </button>
+            )) : (
+              <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-8 text-center text-sm text-[color:var(--acm-muted-fg)] md:col-span-3">
+                No project expense records yet.
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+});
+
+function DashboardSummaryHero({
+  roleBase,
+  analytics,
+  expenseOverview,
+  onOpenProjects,
+  onOpenTasks,
+  onOpenExpenses,
+  onOpenEstimates,
+}) {
+  const totals = expenseOverview.totals;
+  const headlineValue =
+    roleBase === "owner"
+      ? formatCompactNumber(analytics.projectSummary.live)
+      : formatCompactNumber(analytics.taskHeadlineValue);
+  const headlineLabel = roleBase === "owner" ? "Live Projects" : roleBase === "manager" ? "Assigned Tasks" : "My Tasks";
+  const secondaryValue =
+    roleBase === "owner"
+      ? formatCompactNumber(analytics.approvedEstimates.length)
+      : formatCompactNumber(analytics.projectSummary.total);
+  const secondaryLabel = roleBase === "owner" ? "Approved Estimates" : "Project Access";
+
+  return (
+    <section className="relative overflow-hidden rounded-[28px] border border-[color:var(--acm-border)] bg-[linear-gradient(135deg,color-mix(in_srgb,var(--acm-accent-strong)_92%,black_8%)_0%,color-mix(in_srgb,var(--acm-accent)_82%,black_18%)_48%,color-mix(in_srgb,var(--acm-accent)_68%,black_32%)_100%)] p-6 text-white shadow-[0_28px_80px_color-mix(in_srgb,var(--acm-accent)_24%,transparent)]">
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-1/3 bg-[radial-gradient(circle_at_center,color-mix(in_srgb,var(--acm-accent)_28%,white_12%),transparent_70%)]" />
+      <div className="relative flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+        <div className="max-w-3xl">
+          <div className="inline-flex items-center rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/90">
+            Summary Overview
+          </div>
+          {/* <div className="mt-4 text-3xl font-black tracking-[-0.05em] text-white sm:text-4xl">
+            {roleBase === "owner"
+              ? "A sharper snapshot of operations, pipeline, and spend"
+              : roleBase === "manager"
+                ? "Workload, delivery, and spending in one dashboard"
+                : "Your work queue and team spend at a glance"}
+          </div> */}
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-[18px] border border-white/10 bg-black/18 px-4 py-4 backdrop-blur">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">{headlineLabel}</div>
+              <div className="mt-2 text-3xl font-black tracking-[-0.05em] text-white">{headlineValue}</div>
+            </div>
+            <div className="rounded-[18px] border border-white/10 bg-black/18 px-4 py-4 backdrop-blur">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">{secondaryLabel}</div>
+              <div className="mt-2 text-3xl font-black tracking-[-0.05em] text-white">{secondaryValue}</div>
+            </div>
+            <div className="rounded-[18px] border border-white/10 bg-black/18 px-4 py-4 backdrop-blur">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">Expense Spend</div>
+              <div className="mt-2 text-3xl font-black tracking-[-0.05em] text-white">{formatCurrency(totals.totalAmount)}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="w-full max-w-md rounded-[24px] border border-white/10 bg-white/10 p-5 backdrop-blur">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">Budget Pulse</div>
+              <div className="mt-2 text-2xl font-black tracking-[-0.04em] text-white">{formatPercent(totals.budgetUsedPercent)}</div>
+            </div>
+            <div className="text-right text-sm text-white/72">
+              <div>Spent {formatCurrency(totals.totalAmount)}</div>
+              <div>Remaining {formatCurrency(totals.remainingBudget)}</div>
+            </div>
+          </div>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-[linear-gradient(90deg,color-mix(in_srgb,var(--acm-accent)_76%,white_24%)_0%,var(--acm-accent)_100%)]"
+              style={{ width: `${Math.min(Math.max(totals.budgetUsedPercent, 0), 100)}%` }}
+            />
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button type="button" onClick={onOpenProjects} className="inline-flex rounded-full border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white transition hover:bg-white/15">
+              Projects
+            </button>
+            <button type="button" onClick={onOpenTasks} className="inline-flex rounded-full border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white transition hover:bg-white/15">
+              Tasks
+            </button>
+            <button type="button" onClick={onOpenExpenses} className="inline-flex rounded-full border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white transition hover:bg-white/15">
+              Expenses
+            </button>
+            {roleBase === "owner" ? (
+              <button type="button" onClick={onOpenEstimates} className="inline-flex rounded-full border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white transition hover:bg-white/15">
+                Estimates
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function DashboardOverview({ roleBase }) {
+  const router = useRouter();
+  const dashboard = useApi("/api/dashboard");
+  const estimates = useApi("/api/estimates?compact=1");
+  const expenseOverview = useProjectExpenses();
+  const [drilldown, setDrilldown] = useState({ open: false, title: "", items: [] });
+  const [selectedEstimate, setSelectedEstimate] = useState(null);
+  const analytics = useDashboardOverviewAnalytics({
+    dashboardData: dashboard.data,
+    estimatesData: estimates.data,
+    roleBase,
+  });
+
+  const openProjects = useCallback(() => router.push(`/${roleBase}/projects`), [roleBase, router]);
+  const openTasks = useCallback(() => router.push(`/${roleBase}/tasks`), [roleBase, router]);
+  const openEstimates = useCallback(() => router.push(`/${roleBase}/estimates`), [roleBase, router]);
+  const openInvoicing = useCallback(() => router.push(`/${roleBase}/invoicing`), [roleBase, router]);
+  const openExpenses = useCallback(() => router.push(`/${roleBase}/expenses`), [roleBase, router]);
+  const openDrilldown = useCallback((title, items) => {
+    setDrilldown({ open: true, title, items });
+  }, []);
+  const closeDrilldown = useCallback(() => {
+    setDrilldown({ open: false, title: "", items: [] });
+  }, []);
+  const closeSelectedEstimate = useCallback(() => {
+    setSelectedEstimate(null);
+  }, []);
+  const openSelectedEstimate = useCallback(() => {
+    if (!selectedEstimate?.id) return;
+    setSelectedEstimate(null);
+    router.push(`/${roleBase}/estimates/${selectedEstimate.id}`);
+  }, [roleBase, router, selectedEstimate]);
+
+  return (
     <>
-      <section className="grid gap-3 xl:grid-cols-2">
-        <OverviewCard
-          title="Projects"
-          value={formatCompactNumber(projectSummary.total)}
-          icon={ProjectsIcon}
-          accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 18%, transparent), transparent 72%)"
-          onOpen={() => router.push(`/${roleBase}/projects`)}
-          openLabel="Open Projects"
-          stats={[
-            { key: "live-projects", label: "Live", value: formatCompactNumber(projectSummary.live) },
-            { key: "complete-projects", label: "Complete", value: formatCompactNumber(projectSummary.complete), tone: "success" },
-            { key: "onhold-projects", label: "Planned", value: formatCompactNumber(projectSummary.onhold), tone: "warning" },
-          ]}
-        />
+      {/* <DashboardSummaryHero
+        roleBase={roleBase}
+        analytics={analytics}
+        expenseOverview={expenseOverview}
+        onOpenProjects={openProjects}
+        onOpenTasks={openTasks}
+        onOpenExpenses={openExpenses}
+        onOpenEstimates={openEstimates}
+      /> */}
 
-        <OverviewCard
-          title="Estimates"
-          value={formatCompactNumber(estimateList.length)}
-          icon={ExpenseIcon}
-          accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 22%, transparent), transparent 70%)"
-          onOpen={() => router.push(`/${roleBase}/estimates`)}
-          openLabel="Open Estimates"
-          stats={[
-            {
-              key: "draft-estimates",
-              label: "Draft",
-              value: formatCompactNumber(draftEstimates.length),
-              onClick: () => openDrilldown("Draft Estimates", draftEstimates),
-            },
-            {
-              key: "sent-estimates",
-              label: "Sent",
-              value: formatCompactNumber(sentEstimates.length),
-              onClick: () => openDrilldown("Sent Estimates", sentEstimates),
-            },
-            {
-              key: "approved-estimates",
-              label: "Approved",
-              value: formatCompactNumber(approvedEstimates.length),
-              onClick: () => openDrilldown("Approved Estimates", approvedEstimates),
-              tone: "success",
-            },
-          ]}
-        />
+      <DashboardOverviewCards
+        roleBase={roleBase}
+        analytics={analytics}
+        onOpenProjects={openProjects}
+        onOpenTasks={openTasks}
+        onOpenEstimates={openEstimates}
+        onOpenInvoicing={openInvoicing}
+        onOpenDrilldown={openDrilldown}
+      />
 
-        <OverviewCard
-          title="Invoicing"
-          value={formatCompactNumber(approvedEstimates.length)}
-          icon={ReportIcon}
-          accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 16%, transparent), transparent 72%)"
-          onOpen={() => router.push(`/${roleBase}/invoicing`)}
-          openLabel="Open Invoices"
-          stats={[
-            {
-              key: "invoice-ready",
-              label: "Ready",
-              value: formatCompactNumber(readyInvoices.length),
-              onClick: () => openDrilldown("Ready For Invoicing", readyInvoices),
-            },
-            {
-              key: "invoice-draft",
-              label: "Draft",
-              value: formatCompactNumber(draftInvoices.length),
-              onClick: () => openDrilldown("Draft Invoices", draftInvoices),
-              tone: "warning",
-            },
-            {
-              key: "invoice-complete",
-              label: "Completed",
-              value: formatCompactNumber(completedInvoices.length),
-              onClick: () => openDrilldown("Completed Invoices", completedInvoices),
-              tone: "success",
-            },
-          ]}
-        />
-
-        <OverviewCard
-          title="Tasks"
-          value={formatCompactNumber(taskSummary.todayAssigned ?? 0)}
-          icon={InsightsIcon}
-          accent="linear-gradient(135deg, color-mix(in srgb, var(--acm-accent) 16%, transparent), transparent 74%)"
-          onOpen={() => router.push(`/${roleBase}/tasks`)}
-          openLabel="Open Tasks"
-          stats={[
-            { key: "tasks-today", label: "Assigned Today", value: formatCompactNumber(taskSummary.todayAssigned ?? 0) },
-            { key: "tasks-complete", label: "Completed", value: formatCompactNumber(taskSummary.completed ?? 0), tone: "success" },
-            { key: "invoice-pipeline", label: "Invoice Pipeline", value: formatCompactNumber(approvedEstimates.length), tone: "warning" },
-          ]}
-        />
-      </section>
+      <DashboardExpenseOverviewSection
+        roleBase={roleBase}
+        expenseOverview={expenseOverview}
+        onOpenExpenses={openExpenses}
+      />
 
       <DrilldownModal
         open={drilldown.open}
         title={drilldown.title}
         items={drilldown.items}
         emptyMessage="No matching records yet."
-        onClose={() => setDrilldown({ open: false, title: "", items: [] })}
+        onClose={closeDrilldown}
         renderItem={(item) => (
           <CompactListRow
             key={item.id}
@@ -642,7 +1063,7 @@ export function DashboardOverview({ roleBase }) {
             secondary={`${item.client?.name || "Client"} | ${formatDate(item.estimate_date)}`}
             tertiary={`${formatCompactNumber(item.summary?.finalBid || item.summary?.totalPrice || 0)} | ${item.invoice_reference || item.invoice_status || item.status || "Draft"}`}
             onClick={() => {
-              setDrilldown({ open: false, title: "", items: [] });
+              closeDrilldown();
               setSelectedEstimate(item);
             }}
           />
@@ -664,15 +1085,12 @@ export function DashboardOverview({ roleBase }) {
               ]
             : []
         }
-        onClose={() => setSelectedEstimate(null)}
+        onClose={closeSelectedEstimate}
         actions={
           selectedEstimate ? (
             <button
               type="button"
-              onClick={() => {
-                setSelectedEstimate(null);
-                router.push(`/${roleBase}/estimates/${selectedEstimate.id}`);
-              }}
+              onClick={openSelectedEstimate}
               className="acm-btn acm-btn-primary h-10 px-4"
             >
               Open Estimate
@@ -1823,97 +2241,127 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
 }
 
 export function ProjectDashboardView({ projectId, roleBase, ownerMode = false, section = "overview", currentUserId = "" }) {
+  const router = useRouter();
   const detail = useApi(`/api/project?id=${projectId}`);
   const updates = useApi(`/api/activity-logs?projectId=${projectId}`);
+  const expenseOverview = useProjectExpenses({
+    projectId,
+    filters: { projectId },
+    enabled: section === "overview",
+  });
   const [selectedItem, setSelectedItem] = useState(null);
   const [selectedType, setSelectedType] = useState("");
   const [selectedStaffGroup, setSelectedStaffGroup] = useState("");
   const [editProjectOpen, setEditProjectOpen] = useState(false);
-const [editClientOpen, setEditClientOpen] = useState(false);
+  const [editClientOpen, setEditClientOpen] = useState(false);
   const [editMessage, setEditMessage] = useState("");
   const [editError, setEditError] = useState("");
   const [projectBusy, setProjectBusy] = useState(false);
   const [clientBusy, setClientBusy] = useState(false);
   const [projectForm, setProjectForm] = useState({
-  id: "",
-  name: "",
-  location: "",
-  startDate: "",
-  endDate: "",
-  contractValue: "",
-});
+    id: "",
+    name: "",
+    location: "",
+    startDate: "",
+    endDate: "",
+    contractValue: "",
+  });
 
-const [clientForm, setClientForm] = useState({
-  id: "",
-  clientName: "",
-  clientContact: "",
-  clientEmail: "",
-  clientAddress: "",
-});
+  const [clientForm, setClientForm] = useState({
+    id: "",
+    clientName: "",
+    clientContact: "",
+    clientEmail: "",
+    clientAddress: "",
+  });
 
   const project = detail.data?.project;
   if (detail.loading) return <div className={cardClass()}>Loading project dashboard...</div>;
   if (detail.error) return <div className={cardClass()}>{getProjectErrorMessage(detail.error)}</div>;
   if (!project) return <div className={cardClass()}>Project not found.</div>;
 
-  function openEditProject() {
-  setProjectForm({
-    id: project.id,
-    name: project.name || "",
-    location: project.location || "",
-    startDate: project.start_date || "",
-    endDate: project.end_date || "",
-    contractValue: project.contract_value || "",
-  });
-  setEditProjectOpen(true);
-}
+  const expenseTotals = expenseOverview.totals;
+  const totalBudget = Number(project.contract_value || 0);
+  const totalSpend = expenseTotals.totalAmount || 0;
+  const remainingBudget = totalBudget - totalSpend;
+  const budgetUsedPercent = totalBudget > 0 ? (totalSpend / totalBudget) * 100 : 0;
+  const latestExpense = expenseOverview.expenses?.[0] ?? null;
+  const trendItems = expenseTotals.monthlySpend.map((item) => ({
+    ...item,
+    label: item.label ? item.label.slice(5).replace("-", "/") : "Current",
+  }));
+  const trendMaxValue = Math.max(...trendItems.map((item) => item.value), 0);
+  const projectStart = project.start_date ? new Date(project.start_date) : null;
+  const projectEnd = project.end_date ? new Date(project.end_date) : null;
+  const hasTimeline = projectStart && projectEnd && !Number.isNaN(projectStart.getTime()) && !Number.isNaN(projectEnd.getTime());
+  const totalTimelineDays =
+    hasTimeline && projectEnd >= projectStart
+      ? Math.max(Math.ceil((projectEnd.getTime() - projectStart.getTime()) / 86400000), 1)
+      : 0;
+  const elapsedTimelineDays =
+    hasTimeline
+      ? Math.min(Math.max(Math.ceil((Date.now() - projectStart.getTime()) / 86400000), 0), totalTimelineDays)
+      : 0;
+  const timelineProgress = totalTimelineDays ? (elapsedTimelineDays / totalTimelineDays) * 100 : 0;
 
-function openEditClient() {
-  setClientForm({
-    id: project.id,
-    clientName: project.client?.name || "",
-    clientContact: project.client?.contact || "",
-    clientEmail: project.client?.email || "",
-    clientAddress: project.client?.address || "",
-  });
-  setEditClientOpen(true);
-}
-  
-async function saveClientChanges(e) {
-  e.preventDefault();
-  if (clientBusy) return;
-  setEditError("");
-  setEditMessage("");
-  setClientBusy(true);
-  const res = await fetch("/api/project", {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
+  function openEditProject() {
+    setProjectForm({
       id: project.id,
       name: project.name || "",
       location: project.location || "",
-      clientName: clientForm.clientName || "",
-      clientContact: clientForm.clientContact || "",
-      clientEmail: clientForm.clientEmail || "",
-      clientAddress: clientForm.clientAddress || "",
       startDate: project.start_date || "",
       endDate: project.end_date || "",
-      contractValue: Number(project.contract_value || 0),
-    }),
-  });
-  const json = await res.json().catch(() => null);
-  // if (!res.ok) {
-  //   setEditError(json?.error || "client_update_failed");
-  //   setClientBusy(false);
-  //   return;
-  // }
-  setEditMessage("Client info updated");
-  setEditClientOpen(false);
-  invalidateApiQuery("/api/projects");
-  invalidateApiQuery("/api/dashboard");
-  await Promise.all([detail.refresh(), updates.refresh()]);
-  setClientBusy(false);
-}
+      contractValue: project.contract_value || "",
+    });
+    setEditProjectOpen(true);
+  }
+
+  function openEditClient() {
+    setClientForm({
+      id: project.id,
+      clientName: project.client?.name || "",
+      clientContact: project.client?.contact || "",
+      clientEmail: project.client?.email || "",
+      clientAddress: project.client?.address || "",
+    });
+    setEditClientOpen(true);
+  }
+  
+  async function saveClientChanges(e) {
+    e.preventDefault();
+    if (clientBusy) return;
+    setEditError("");
+    setEditMessage("");
+    setClientBusy(true);
+    const res = await fetch("/api/project", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: project.id,
+        name: project.name || "",
+        location: project.location || "",
+        clientName: clientForm.clientName || "",
+        clientContact: clientForm.clientContact || "",
+        clientEmail: clientForm.clientEmail || "",
+        clientAddress: clientForm.clientAddress || "",
+        startDate: project.start_date || "",
+        endDate: project.end_date || "",
+        contractValue: Number(project.contract_value || 0),
+      }),
+    });
+    const json = await res.json().catch(() => null);
+    // if (!res.ok) {
+    //   setEditError(json?.error || "client_update_failed");
+    //   setClientBusy(false);
+    //   return;
+    // }
+    setEditMessage("Client info updated");
+    setEditClientOpen(false);
+    invalidateApiQuery("/api/projects");
+    invalidateApiQuery("/api/dashboard");
+    await Promise.all([detail.refresh(), updates.refresh()]);
+    setClientBusy(false);
+  }
 
   async function saveProjectChanges(e) {
     e.preventDefault();
@@ -1986,95 +2434,141 @@ async function saveClientChanges(e) {
     <>
       <InlineMessage error={editError} message={editMessage} />
       <section className="grid gap-4">
-        <div className={cardClass()}>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="relative overflow-hidden rounded-[24px] border border-[color:var(--acm-border)] bg-[linear-gradient(135deg,color-mix(in_srgb,var(--acm-accent)_14%,var(--acm-surface)),var(--acm-surface))] p-5 shadow-[0_20px_50px_rgba(15,23,42,0.12)]">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <div className="text-2xl font-bold">{project.name}</div>
+              <div className="text-2xl font-black tracking-[-0.04em] text-[color:var(--acm-fg)]">{project.name}</div>
               <div className="mt-2 text-sm text-[color:var(--acm-muted-fg)]">{project.job_number}</div>
               <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{project.location || "-"}</div>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <button type="button" onClick={() => setSelectedStaffGroup("managers")} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3 text-left">
+              <button
+                type="button"
+                onClick={() => setSelectedStaffGroup("managers")}
+                className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)]/88 px-4 py-3 text-left transition hover:border-[color:var(--acm-accent-border)]"
+              >
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">Managers</div>
-                <div className="mt-1 flex items-center gap-2 text-xl font-bold"><TeamIcon className="h-4 w-4 text-[color:var(--acm-accent)]" />{project.managers.length}</div>
+                <div className="mt-1 flex items-center gap-2 text-xl font-bold text-[color:var(--acm-fg)]"><TeamIcon className="h-4 w-4 text-[color:var(--acm-accent)]" />{project.managers.length}</div>
               </button>
-              <button type="button" onClick={() => setSelectedStaffGroup("employees")} className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3 text-left">
+              <button
+                type="button"
+                onClick={() => setSelectedStaffGroup("employees")}
+                className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)]/88 px-4 py-3 text-left transition hover:border-[color:var(--acm-accent-border)]"
+              >
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">Employees</div>
-                <div className="mt-1 flex items-center gap-2 text-xl font-bold"><TeamIcon className="h-4 w-4 text-[color:var(--acm-accent)]" />{project.employees.length}</div>
+                <div className="mt-1 flex items-center gap-2 text-xl font-bold text-[color:var(--acm-fg)]"><TeamIcon className="h-4 w-4 text-[color:var(--acm-accent)]" />{project.employees.length}</div>
               </button>
-              <div className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
+              <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)]/88 px-4 py-3">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">Tasks</div>
-                <div className="mt-1 flex items-center gap-2 text-xl font-bold"><PulseIcon className="h-4 w-4 text-[color:var(--acm-accent)]" />{project.tasks.length}</div>
+                <div className="mt-1 flex items-center gap-2 text-xl font-bold text-[color:var(--acm-fg)]"><PulseIcon className="h-4 w-4 text-[color:var(--acm-accent)]" />{project.tasks.length}</div>
               </div>
-              <div className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-3">
+              <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)]/88 px-4 py-3">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">Estimate Budget</div>
-                <div className="mt-1 text-xl font-bold">${project.contract_value}</div>
+                <div className="mt-1 text-xl font-bold text-[color:var(--acm-fg)]">{formatCurrency(project.contract_value)}</div>
               </div>
             </div>
           </div>
         </div>
 
         {section === "overview" ? (
-          <div className="grid gap-4 xl:grid-cols-2">
-            <div className={cardClass()}>
-              <SectionHeader
-                title="Project Info"
-                action={
-                  ownerMode ? (
-                    <button type="button" onClick={openEditProject} className="acm-btn acm-btn-secondary h-10 px-4">
-                      Edit Project Info
+          <div className="grid gap-4 xl:grid-cols-3">
+              <div className={cardClass("shadow-[0_18px_40px_rgba(15,23,42,0.08)]")}>
+                <SectionHeader
+                  title="Project Info"
+                  action={
+                    ownerMode ? (
+                      <button type="button" onClick={openEditProject} className="acm-btn acm-btn-secondary h-10 px-4">
+                        Edit Project Info
+                      </button>
+                    ) : null
+                  }
+                />
+                <div className="space-y-2">
+                  <DetailRow label="Project" value={project.name} />
+                  <DetailRow label="Job Number" value={project.job_number} />
+                  <DetailRow label="Location" value={project.location} />
+                  <DetailRow label="Start Date" value={formatDate(project.start_date)} />
+                  <DetailRow label="End Date" value={formatDate(project.end_date)} />
+                  <DetailRow label="Estimate Budget" value={formatCurrency(project.contract_value)} />
+                </div>
+              </div>
+
+              <div className={cardClass("shadow-[0_18px_40px_rgba(15,23,42,0.08)]")}>
+                <SectionHeader
+                  title="Client Info"
+                  action={
+                    ownerMode ? (
+                      <div className="flex gap-3 items-center">
+                        <button
+                          type="button"
+                          onClick={openEditClient}
+                          className="acm-btn acm-btn-secondary h-10 px-4"
+                        >
+                          Edit Client
+                        </button>
+                      </div>
+                    ) : null
+                  }
+                />
+                <div className="space-y-2">
+                  <DetailRow label="Client" value={project.client?.name} />
+                  <DetailRow label="Contact" value={project.client?.contact} />
+                  <DetailRow label="Email" value={project.client?.email} />
+                  <DetailRow label="Address" value={project.client?.address} />
+                </div>
+              </div>
+
+              <div className={cardClass("shadow-[0_18px_40px_rgba(15,23,42,0.08)]")}>
+                <SectionHeader
+                  title="Expense Stats"
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/${roleBase}/project/${projectId}/expenses`)}
+                      className="acm-btn acm-btn-secondary h-10 px-4"
+                    >
+                      Open Expenses
                     </button>
-                  ) : null
-                }
-              />
-              <div className="space-y-2">
-                <DetailRow label="Project" value={project.name} />
-                <DetailRow label="Job Number" value={project.job_number} />
-                <DetailRow label="Location" value={project.location} />
-                <DetailRow label="Start Date" value={formatDate(project.start_date)} />
-                <DetailRow label="End Date" value={formatDate(project.end_date)} />
-                <DetailRow label="Estimate Budget" value={`$${project.contract_value}`} />
+                  }
+                />
+                {expenseOverview.query.loading ? (
+                  <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-8 text-center text-sm text-[color:var(--acm-muted-fg)]">
+                    Loading expense stats...
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3">
+                        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">Total Spent</div>
+                        <div className="mt-2 text-2xl font-black tracking-[-0.04em] text-[color:var(--acm-fg)]">{formatCurrency(totalSpend)}</div>
+                      </div>
+                      <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3">
+                        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">Remaining</div>
+                        <div className="mt-2 text-2xl font-black tracking-[-0.04em] text-[color:var(--acm-fg)]">{formatCurrency(remainingBudget)}</div>
+                      </div>
+                      <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3">
+                        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">Budget Used</div>
+                        <div className="mt-2 text-2xl font-black tracking-[-0.04em] text-[color:var(--acm-fg)]">{formatPercent(budgetUsedPercent)}</div>
+                      </div>
+                      <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3">
+                        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">Entries</div>
+                        <div className="mt-2 text-2xl font-black tracking-[-0.04em] text-[color:var(--acm-fg)]">{formatCompactNumber(expenseTotals.totalEntries || 0)}</div>
+                      </div>
+                    </div>
+                    <div className="mt-4 rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <div className="text-sm font-bold text-[color:var(--acm-fg)]">Top Expense Categories</div>
+                        <div className="text-xs text-[color:var(--acm-muted-fg)]">
+                          {latestExpense ? `Latest: ${formatDate(latestExpense.expense_date)}` : "No recent expense"}
+                        </div>
+                      </div>
+                      <ExpenseCategoryPanel items={expenseTotals.topCategories.slice(0, 3)} total={totalSpend} />
+                    </div>
+                  </>
+                )}
               </div>
-            </div>
 
-            <div className={cardClass()}>
-              <SectionHeader
-                title="Client Info"
-                action={
-  <div className="flex gap-3 items-center">
-    {/* <button
-      type="button"
-      onClick={() => setSelectedType("client")}
-      className="acm-btn acm-btn-secondary h-10 px-4"
-    >
-      Open Profile
-    </button> */}
-
-    {ownerMode && (
-      <>
-        <button
-          type="button"
-          onClick={openEditClient}
-          className="acm-btn acm-btn-secondary h-10 px-4"
-        >
-          Edit Client
-        </button>
-
-       
-      </>
-    )}
-  </div>
-}
-              />
-              <div className="space-y-2">
-                <DetailRow label="Client" value={project.client?.name} />
-                <DetailRow label="Contact" value={project.client?.contact} />
-                <DetailRow label="Email" value={project.client?.email} />
-                <DetailRow label="Address" value={project.client?.address} />
-              </div>
-            </div>
-
-            <div className="xl:col-span-2">
+            <div className="xl:col-span-3">
               <UpdatesCard logs={(updates.data?.logs ?? []).slice(0, 8)} />
             </div>
           </div>
@@ -2228,6 +2722,12 @@ export function StaffManagerPage({
     moduleAccess: normalizeModuleAccess({}, "employee"),
   });
   const staffData = useMemo(() => staff.data?.staff ?? { managers: [], employees: [], subcontractors: [] }, [staff.data]);
+
+  useEffect(() => {
+    if (!historyOpen && historyItems.length) {
+      setHistoryItems([]);
+    }
+  }, [historyItems.length, historyOpen]);
   const staffPreview = useApiQuery(
     open ? `/api/staff?mode=preview&role=${encodeURIComponent(form.role)}` : "",
     { enabled: open }

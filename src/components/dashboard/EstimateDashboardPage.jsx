@@ -1,9 +1,10 @@
 ﻿"use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { BusyButton, CompactListRow } from "@/components/dashboard/DashboardUi";
 import { ChevronRightIcon } from "@/components/dashboard/icons";
+import { useEstimateDetail, useEstimateList, useEstimateTemplates } from "@/features/estimates/hooks/useEstimateTemplates";
 import Modal from "@/components/dashboard/Modal";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
 import { Check, ChevronDown, Trash, Trash2Icon } from "lucide-react";
@@ -1163,6 +1164,107 @@ function StatusOptionButton({ active, label, note, onClick }) {
   );
 }
 
+const EstimateRecordsPanel = memo(function EstimateRecordsPanel({
+  standalone,
+  loading,
+  filteredEstimateList,
+  searchQuery,
+  onSearchChange,
+  onOpenEstimate,
+  onDeleteEstimate,
+}) {
+  if (standalone) return null;
+
+  return (
+    <section className="space-y-5">
+      {loading ? (
+        <div className="text-sm text-[color:var(--acm-muted-fg)]">Loading estimate workspace...</div>
+      ) : null}
+      {/* <div className="min-w-[260px] md:max-w-md">
+        <input
+          className={sheetInputClass("h-10")}
+          value={searchQuery}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder="Search estimates by title, number, client, status, or value"
+        />
+      </div> */}
+      <div className="grid gap-3 lg:grid-cols-3">
+        {filteredEstimateList.map((estimate) => (
+          <CompactListRow
+            key={estimate.id}
+            primary={estimate.title || `Estimate #${estimate.estimate_number}`}
+            secondary={
+              <DetailStack
+                lines={[
+                  estimate.client?.name || "Client",
+                  formatDate(estimate.estimate_date),
+                ]}
+              />
+            }
+            tertiary={
+              <DetailStack
+                lines={[
+                  formatCurrency(estimate.summary?.finalBid || estimate.summary?.totalPrice),
+                ]}
+              />
+            }
+            onClick={() => onOpenEstimate(estimate)}
+            actions={
+              <div className="flex items-center gap-2">
+                <StatusPill status={estimate.status || "draft"} />
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDeleteEstimate(estimate);
+                  }}
+                  className="rounded-full border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                >
+                  <Trash2Icon size={16} />
+                </button>
+              </div>
+            }
+          />
+        ))}
+        {!filteredEstimateList.length ? (
+          <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-8 text-sm text-[color:var(--acm-muted-fg)] lg:col-span-3">
+            No estimates match the current search.
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+});
+
+const EstimateTotalsTable = memo(function EstimateTotalsTable({ previewSummary }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full">
+        <thead>
+          <tr className="text-left text-xs uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
+            <th className="py-2">Labor</th>
+            <th className="py-2">Material</th>
+            <th className="py-2">Equipment</th>
+            <th className="py-2">Overhead</th>
+            <th className="py-2">Profit</th>
+            <th className="py-2">Total Estimate</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr className="text-sm font-semibold text-[color:var(--acm-fg)]">
+            <td className="py-2">{formatCurrency(previewSummary.laborCost)}</td>
+            <td className="py-2">{formatCurrency(previewSummary.materialCost)}</td>
+            <td className="py-2">{formatCurrency(previewSummary.equipmentCost)}</td>
+            <td className="py-2">{formatCurrency(previewSummary.overheadAmount)}</td>
+            <td className="py-2">{formatCurrency(previewSummary.profitAmount)}</td>
+            <td className="py-2">{formatCurrency(previewSummary.totalPrice)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+});
+
 function TableCellInput({ value, onChange, onKeyDown, list, placeholder = "", type = "text" }) {
   if (type === "textarea") {
     return (
@@ -1228,7 +1330,7 @@ function buildVisibleColumns(columns) {
   return visible;
 }
 
-function SectionTable({
+const SectionTable = memo(function SectionTable({
   title,
   sectionKey,
   rows,
@@ -1245,20 +1347,20 @@ function SectionTable({
   summaryColumns = [],
   context = null,
 }) {
-  const visibleColumns = buildVisibleColumns(columns);
+  const visibleColumns = useMemo(() => buildVisibleColumns(columns), [columns]);
   const stackedDetailColumn = visibleColumns.find((column) => column.type === "textarea");
   const tableColumns = stackedDetailColumn ? visibleColumns.filter((column) => column.key !== stackedDetailColumn.key) : visibleColumns;
-  const derivedRows = rows.map((row) =>
+  const derivedRows = useMemo(() => rows.map((row) =>
     sectionKey === "laborEntries"
       ? calculateLabor(row)
       : sectionKey === "subcontractorEntries"
         ? calculateSubcontractor(row)
-      : sectionKey === "materialEntries"
-        ? calculateMaterial(row)
-        : sectionKey === "equipmentEntries"
-          ? calculateEquipment(row)
-          : calculateOverhead(row)
-  );
+        : sectionKey === "materialEntries"
+          ? calculateMaterial(row)
+          : sectionKey === "equipmentEntries"
+            ? calculateEquipment(row)
+            : calculateOverhead(row)
+  ), [rows, sectionKey]);
   return (
     <div className="space-y-3">
       <button type="button" onClick={onToggle} className="flex w-full items-center justify-between gap-3 py-2 text-left">
@@ -1397,15 +1499,15 @@ function SectionTable({
       ) : null}
     </div>
   );
-}
+});
 
 export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = "", initialCostLineId = "", standalone = false }) {
   const router = useRouter();
   const clientsQuery = useApiQuery("/api/clients");
   const settingsQuery = useApiQuery("/api/settings");
-  const templatesQuery = useApiQuery("/api/estimate-templates");
-  const estimateListQuery = useApiQuery(standalone ? null : "/api/estimates?compact=1");
-  const estimateDetailQuery = useApiQuery(initialEstimateId ? `/api/estimates?id=${initialEstimateId}` : null);
+  const { query: templatesQuery, templates: rawTemplates, defaultTemplate: rawDefaultTemplate } = useEstimateTemplates();
+  const { query: estimateListQuery, estimates: estimateList } = useEstimateList({ standalone });
+  const { query: estimateDetailQuery, estimate: detailedEstimate } = useEstimateDetail(initialEstimateId);
 
   const [editorOpen, setEditorOpen] = useState(Boolean(initialEstimateId || standalone));
   const [activeAction, setActiveAction] = useState("");
@@ -1413,6 +1515,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [form, setForm] = useState(() => emptyEstimateForm());
   const [templateForm, setTemplateForm] = useState(emptyTemplateForm);
   const [activeEstimateId, setActiveEstimateId] = useState("");
@@ -1447,15 +1550,14 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const clients = useMemo(() => clientsQuery.data?.clients ?? [], [clientsQuery.data?.clients]);
   const profile = useMemo(() => settingsQuery.data?.profile ?? null, [settingsQuery.data?.profile]);
   const templates = useMemo(
-    () => (templatesQuery.data?.templates ?? []).map((template) => ({ ...template, configuration: normalizeTemplateConfiguration(template.configuration) })),
-    [templatesQuery.data?.templates]
+    () => rawTemplates.map((template) => ({ ...template, configuration: normalizeTemplateConfiguration(template.configuration) })),
+    [rawTemplates]
   );
-  const estimateList = useMemo(() => estimateListQuery.data?.estimates ?? [], [estimateListQuery.data?.estimates]);
   const filteredEstimateList = useMemo(
     () =>
       estimateList.filter((estimate) =>
         matchesSearchQuery(
-          searchQuery,
+          deferredSearchQuery,
           estimate.title,
           estimate.estimate_number,
           estimate.client?.name,
@@ -1465,9 +1567,8 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
           estimate.summary?.totalPrice
         )
       ),
-    [estimateList, searchQuery]
+    [deferredSearchQuery, estimateList]
   );
-  const detailedEstimate = useMemo(() => estimateDetailQuery.data?.estimates?.[0] || null, [estimateDetailQuery.data?.estimates]);
   const refreshEstimateQueries = useCallback(async () => {
     await Promise.all([
       standalone ? Promise.resolve(null) : estimateListQuery.refresh().catch(() => null),
@@ -1475,7 +1576,10 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     ]);
   }, [estimateDetailQuery, estimateListQuery, initialEstimateId, standalone]);
 
-  const defaultTemplate = useMemo(() => templates.find((item) => item.is_default) || templates[0] || null, [templates]);
+  const defaultTemplate = useMemo(
+    () => templates.find((item) => item.id === rawDefaultTemplate?.id) || rawDefaultTemplate || templates[0] || null,
+    [rawDefaultTemplate, templates]
+  );
   const companyDetails = useMemo(() => {
     const company = settingsQuery.data?.company || null;
     const metadata = company?.metadata && typeof company.metadata === "object" ? company.metadata : {};
@@ -1553,6 +1657,14 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const laborRateDefaultOptions = useMemo(
     () => selectedTemplateConfig.laborLibrary?.rateDefaults || [],
     [selectedTemplateConfig]
+  );
+  const laborSummaryColumns = useMemo(
+    () => [{ key: "targetPay", label: "Target Pay", render: (row, derived) => formatCurrency(derived.targetPay) }],
+    []
+  );
+  const markedUpTotalSummaryColumns = useMemo(
+    () => [{ key: "finalTotal", label: "Total", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).finalTotal) }],
+    []
   );
 
   const suggestionLibrary = useMemo(() => {
@@ -1969,8 +2081,8 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
         setError(formatApiError(json, "Unable to update estimate status."));
         return;
       }
-      invalidateApiQuery("/api/estimates?compact=1");
-      invalidateApiQuery("/api/estimates");
+      invalidateApiQuery("/api/estimates?compact=1", { refetchType: "none" });
+      invalidateApiQuery("/api/estimates", { refetchType: "none" });
       await refreshEstimateQueries();
       setForm((current) => ({ ...current, status: "approved", approvalStatus: "approved" }));
       setMessage("Estimate approved.");
@@ -2011,8 +2123,8 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       return false;
     }
 
-    invalidateApiQuery("/api/estimates?compact=1");
-    invalidateApiQuery("/api/estimates");
+    invalidateApiQuery("/api/estimates?compact=1", { refetchType: "none" });
+    invalidateApiQuery("/api/estimates", { refetchType: "none" });
     await refreshEstimateQueries();
     setForm((current) => ({ ...current, status: "sent" }));
     setMessage("Estimate sent from the configured SMTP account.");
@@ -2110,8 +2222,8 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     }
 
     invalidateApiQuery("/api/projects");
-    invalidateApiQuery("/api/estimates?compact=1");
-    invalidateApiQuery("/api/estimates");
+    invalidateApiQuery("/api/estimates?compact=1", { refetchType: "none" });
+    invalidateApiQuery("/api/estimates", { refetchType: "none" });
     await refreshEstimateQueries();
     setProjectDialogOpen(false);
     setMessage("Project created from estimate.");
@@ -2156,8 +2268,8 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       return;
     }
 
-    invalidateApiQuery("/api/estimates?compact=1");
-    invalidateApiQuery("/api/estimates");
+    invalidateApiQuery("/api/estimates?compact=1", { refetchType: "none" });
+    invalidateApiQuery("/api/estimates", { refetchType: "none" });
     await refreshEstimateQueries();
     setMessage("Estimate deleted.");
 
@@ -2296,8 +2408,8 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
           ""
       );
       setDirty(false);
-      invalidateApiQuery("/api/estimates?compact=1");
-      invalidateApiQuery("/api/estimates");
+      invalidateApiQuery("/api/estimates?compact=1", { refetchType: "none" });
+      invalidateApiQuery("/api/estimates", { refetchType: "none" });
       if (!standalone) estimateListQuery.refresh().catch(() => null);
       if (!silent) setMessage(status === "sent" ? "Estimate marked as sent." : "Estimate saved.");
       return saved;
@@ -2397,57 +2509,15 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
 
       <InlineMessage error={error} message={message} onDismiss={() => { setError(""); setMessage(""); }} />
 
-      {!standalone ? (
-        <section className="space-y-5">
-          {(clientsQuery.loading || templatesQuery.loading || estimateListQuery.loading || settingsQuery.loading) ? (
-            <div className="text-sm text-[color:var(--acm-muted-fg)]">Loading estimate workspace...</div>
-          ) : null}
-          <div className="grid gap-3 lg:grid-cols-3">
-            {filteredEstimateList.map((estimate) => (
-              <CompactListRow
-                key={estimate.id}
-                primary={estimate.title || `Estimate #${estimate.estimate_number}`}
-                secondary={
-                  <DetailStack
-                    lines={[
-                      estimate.client?.name || "Client",
-                      formatDate(estimate.estimate_date),
-                    ]}
-                  />
-                }
-                tertiary={
-                  <DetailStack
-                    lines={[
-                      formatCurrency(estimate.summary?.finalBid || estimate.summary?.totalPrice),
-                    ]}
-                  />
-                }
-                onClick={() => loadEstimate(estimate)}
-                actions={
-                  <div className="flex items-center gap-2">
-                    <StatusPill status={estimate.status || "draft"} />
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        deleteEstimate(estimate);
-                      }}
-                      className="rounded-full border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50"
-                    >
-                      <Trash2Icon size={16} />
-                    </button>
-                  </div>
-                }
-              />
-            ))}
-            {!filteredEstimateList.length ? (
-              <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-8 text-sm text-[color:var(--acm-muted-fg)] lg:col-span-3">
-                No estimates match the current search.
-              </div>
-            ) : null}
-          </div>
-        </section>
-      ) : null}
+      <EstimateRecordsPanel
+        standalone={standalone}
+        loading={clientsQuery.loading || templatesQuery.loading || estimateListQuery.loading || settingsQuery.loading}
+        filteredEstimateList={filteredEstimateList}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        onOpenEstimate={loadEstimate}
+        onDeleteEstimate={deleteEstimate}
+      />
 
       {editorOpen ? (
         <section className="space-y-6">
@@ -2552,9 +2622,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                         rows={line.laborEntries ?? []}
                         columns={laborColumns}
                         context={{ lineId: line.id }}
-                        summaryColumns={[
-                          { key: "targetPay", label: "Target Pay", render: (row, derived) => formatCurrency(derived.targetPay) },
-                        ]}
+                        summaryColumns={laborSummaryColumns}
                         onChange={(rowId, key, value) => updateEntry(line.id, "laborEntries", rowId, key, value)}
                         onAdd={() => addEntry(line.id, "laborEntries")}
                         onRemove={(rowId) => removeEntry(line.id, "laborEntries", rowId)}
@@ -2569,9 +2637,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                         sectionKey="subcontractorEntries"
                         rows={line.subcontractorEntries ?? []}
                         columns={subcontractorColumns}
-                        summaryColumns={[
-                          { key: "finalTotal", label: "Total", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).finalTotal) },
-                        ]}
+                        summaryColumns={markedUpTotalSummaryColumns}
                         onChange={(rowId, key, value) => updateEntry(line.id, "subcontractorEntries", rowId, key, value)}
                         onAdd={() => addEntry(line.id, "subcontractorEntries")}
                         onRemove={(rowId) => removeEntry(line.id, "subcontractorEntries", rowId)}
@@ -2586,9 +2652,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                         sectionKey="materialEntries"
                         rows={line.materialEntries ?? []}
                         columns={materialColumns}
-                        summaryColumns={[
-                          { key: "finalTotal", label: "Total", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).finalTotal) },
-                        ]}
+                        summaryColumns={markedUpTotalSummaryColumns}
                         onChange={(rowId, key, value) => updateEntry(line.id, "materialEntries", rowId, key, value)}
                         onAdd={() => addEntry(line.id, "materialEntries")}
                         onRemove={(rowId) => removeEntry(line.id, "materialEntries", rowId)}
@@ -2603,9 +2667,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                         sectionKey="equipmentEntries"
                         rows={line.equipmentEntries ?? []}
                         columns={equipmentColumns}
-                        summaryColumns={[
-                          { key: "finalTotal", label: "Total", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).finalTotal) },
-                        ]}
+                        summaryColumns={markedUpTotalSummaryColumns}
                         onChange={(rowId, key, value) => updateEntry(line.id, "equipmentEntries", rowId, key, value)}
                         onAdd={() => addEntry(line.id, "equipmentEntries")}
                         onRemove={(rowId) => removeEntry(line.id, "equipmentEntries", rowId)}
@@ -2634,30 +2696,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                 {suggestionLibrary.equipment.map((option) => <option key={option.label} value={option.label} />)}
               </datalist>
 
-              <div className="overflow-x-auto">
-                <table className="min-w-full">
-                  <thead>
-                    <tr className="text-left text-xs uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
-                      <th className="py-2">Labor</th>
-                      <th className="py-2">Material</th>
-                      <th className="py-2">Equipment</th>
-                      <th className="py-2">Overhead</th>
-                      <th className="py-2">Profit</th>
-                      <th className="py-2">Total Estimate</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr className="text-sm font-semibold text-[color:var(--acm-fg)]">
-                      <td className="py-2">{formatCurrency(previewSummary.laborCost)}</td>
-                      <td className="py-2">{formatCurrency(previewSummary.materialCost)}</td>
-                      <td className="py-2">{formatCurrency(previewSummary.equipmentCost)}</td>
-                      <td className="py-2">{formatCurrency(previewSummary.overheadAmount)}</td>
-                      <td className="py-2">{formatCurrency(previewSummary.profitAmount)}</td>
-                      <td className="py-2">{formatCurrency(previewSummary.totalPrice)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+              <EstimateTotalsTable previewSummary={previewSummary} />
           </div>
         </section>
       ) : null}

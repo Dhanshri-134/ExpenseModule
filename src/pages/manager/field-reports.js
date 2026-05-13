@@ -1,6 +1,12 @@
+import dynamic from "next/dynamic";
 import ManagerShell from "@/components/dashboard/ManagerShell";
-import { FieldReportsWorkspacePage } from "@/components/dashboard/Project/ProjectOperationsPanels";
 import { requireRolePage } from "@/lib/pages/requireRolePage";
+import { WorkspaceLoadingCard } from "@/shared/ui/feedback/WorkspaceLoadingCard";
+
+const FieldReportsWorkspacePage = dynamic(
+  () => import("@/components/dashboard/Project/ProjectOperationsPanels").then((mod) => mod.FieldReportsWorkspacePage),
+  { loading: () => <WorkspaceLoadingCard label="Loading field reports workspace..." /> }
+);
 
 export default function ManagerFieldReportsPage({ authContext }) {
   return (

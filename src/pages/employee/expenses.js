@@ -1,6 +1,12 @@
+import dynamic from "next/dynamic";
 import EmployeeShell from "@/components/dashboard/EmployeeShell";
-import { ExpensesWorkspacePage } from "@/components/dashboard/Project/ProjectExpensesPage";
 import { requireRolePage } from "@/lib/pages/requireRolePage";
+import { WorkspaceLoadingCard } from "@/shared/ui/feedback/WorkspaceLoadingCard";
+
+const ExpensesWorkspacePage = dynamic(
+  () => import("@/components/dashboard/Project/ProjectExpensesPage").then((mod) => mod.ExpensesWorkspacePage),
+  { loading: () => <WorkspaceLoadingCard label="Loading expenses workspace..." /> }
+);
 
 export default function EmployeeExpensesPage({ authContext }) {
   return (

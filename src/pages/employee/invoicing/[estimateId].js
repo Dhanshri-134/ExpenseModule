@@ -1,6 +1,12 @@
+import dynamic from "next/dynamic";
 import EmployeeShell from "@/components/dashboard/EmployeeShell";
-import { InvoicingWorkspace } from "@/components/dashboard/InvoicingWorkspace";
 import { requireRolePage } from "@/lib/pages/requireRolePage";
+import { WorkspaceLoadingCard } from "@/shared/ui/feedback/WorkspaceLoadingCard";
+
+const InvoicingWorkspace = dynamic(
+  () => import("@/components/dashboard/InvoicingWorkspace").then((mod) => mod.InvoicingWorkspace),
+  { loading: () => <WorkspaceLoadingCard label="Loading invoice details..." /> }
+);
 
 export default function EmployeeInvoiceDetailPage({ authContext, estimateId }) {
   return (

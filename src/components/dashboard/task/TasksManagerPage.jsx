@@ -1,13 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Modal from "@/components/dashboard/Modal";
 import { BusyButton } from "@/components/dashboard/DashboardUi";
-import { sendJson } from "@/lib/client/apiClient";
-import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
+import { TaskBoardControls } from "@/features/tasks/components/TaskBoardControls";
+import { TaskListSection } from "@/features/tasks/components/TaskListSection";
+import { useTasksBoard } from "@/features/tasks/hooks/useTasksBoard";
+import { useTaskMutations } from "@/features/tasks/hooks/useTaskMutations";
+import { useTaskBoardViewState } from "@/features/tasks/hooks/useTaskBoardViewState";
 import {
   AppDialog,
-  StatusBadge,
   TaskCard,
   TaskReviewPanel,
   UserSelector,
@@ -308,15 +310,38 @@ export function TasksManagerPage({
   fixedProjectId = "",
   currentUserId = "",
 }) {
-  const tasks = useApiQuery(fixedProjectId ? `/api/tasks?projectId=${fixedProjectId}` : "/api/tasks");
-  const projects = useApiQuery("/api/projects");
-  const staff = useApiQuery("/api/staff");
-  const [tab, setTab] = useState("all");
-  const [sortBy, setSortBy] = useState("latest");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [projectFilter, setProjectFilter] = useState(fixedProjectId || "all");
-  const [roleFilter, setRoleFilter] = useState("all");
-  const [searchQuery, setSearchQuery] = useState("");
+  const {
+    tasksQuery: tasks,
+    projectsQuery: projects,
+    staffQuery: staff,
+    taskGroups,
+    projectList,
+    staffData,
+  } = useTasksBoard({ fixedProjectId });
+  const {
+    saveTask: persistTask,
+    deleteTask: removeTask,
+    submitTaskWork,
+    reviewTaskSubmission,
+  } = useTaskMutations({
+    fixedProjectId,
+    refreshStaff: staff.refresh,
+  });
+  const {
+    tab,
+    sortBy,
+    statusFilter,
+    projectFilter,
+    roleFilter,
+    searchQuery,
+    deferredSearchQuery,
+    updateTab,
+    updateSortBy,
+    updateStatusFilter,
+    updateProjectFilter,
+    updateRoleFilter,
+    updateSearchQuery,
+  } = useTaskBoardViewState({ fixedProjectId });
   const [open, setOpen] = useState(false);
   const [submitOpen, setSubmitOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -337,8 +362,6 @@ export function TasksManagerPage({
   const [submitBusy, setSubmitBusy] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
 
-  const staffData = useMemo(() => staff.data?.staff ?? { managers: [], employees: [], subcontractors: [] }, [staff.data]);
-  const projectList = projects.data?.projects ?? [];
   const availableProjects = fixedProjectId ? projectList.filter((project) => project.id === fixedProjectId) : projectList;
   const activeProjectId = form.projectId || fixedProjectId || getProjectDefaultId(availableProjects);
 
@@ -359,16 +382,11 @@ export function TasksManagerPage({
     return [...byUserId.values()].sort((left, right) => getStaffOptionLabel(left).localeCompare(getStaffOptionLabel(right)));
   }, [activeProjectId, canAssignManagers, staffData]);
 
-  const availableApprovers = getApproverOptions(
-    staffData,
-    activeProjectId,
-    form.approvalRole
+  const availableApprovers = useMemo(
+    () => getApproverOptions(staffData, activeProjectId, form.approvalRole),
+    [activeProjectId, form.approvalRole, staffData]
   );
 
-  const taskGroups = useMemo(
-    () => tasks.data ?? { tasks: [], assignedTasks: [], pendingApprovals: [], approvedByMe: [] },
-    [tasks.data]
-  );
   const tabs = useMemo(() => ([
     { key: "all", label: "All Tasks", items: taskGroups.tasks ?? [] },
     { key: "my", label: "My Tasks", items: taskGroups.assignedTasks ?? [] },
@@ -388,7 +406,7 @@ export function TasksManagerPage({
         }
         if (
           !matchesSearchQuery(
-            searchQuery,
+            deferredSearchQuery,
             task.title,
             task.description,
             task.project?.name,
@@ -411,20 +429,20 @@ export function TasksManagerPage({
         return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
       })
       .map(buildDecoratedTask);
-  }, [currentUserId, projectFilter, roleBase, roleFilter, searchQuery, sortBy, statusFilter, tab, tabs]);
+  }, [currentUserId, deferredSearchQuery, projectFilter, roleBase, roleFilter, sortBy, statusFilter, tab, tabs]);
 
-  function resetForm(nextProjectId = fixedProjectId || "") {
+  const resetForm = useCallback((nextProjectId = fixedProjectId || "") => {
     setForm(normalizeTaskForm(nextProjectId));
     setFormErrors({});
-  }
+  }, [fixedProjectId]);
 
-  function openCreate() {
+  const openCreate = useCallback(() => {
     setEditingTask(null);
     resetForm(fixedProjectId || "");
     setOpen(true);
-  }
+  }, [fixedProjectId, resetForm]);
 
-  function openEdit(task) {
+  const openEdit = useCallback((task) => {
     setEditingTask(task);
     setFormErrors({});
     setForm({
@@ -439,25 +457,16 @@ export function TasksManagerPage({
       approverUserId: task.approver_user_id ?? "",
     });
     setOpen(true);
-  }
+  }, []);
 
-  function toggleAssignee(userId) {
+  const toggleAssignee = useCallback((userId) => {
     setForm((prev) => ({
       ...prev,
       assigneeUserIds: prev.assigneeUserIds.includes(userId)
         ? prev.assigneeUserIds.filter((value) => value !== userId)
         : [...prev.assigneeUserIds, userId],
     }));
-  }
-
-  async function refreshTaskData(refreshStaff = false) {
-    invalidateApiQuery("/api/tasks");
-    invalidateApiQuery("/api/dashboard");
-    await Promise.all([
-      tasks.refresh(),
-      refreshStaff ? staff.refresh() : Promise.resolve(),
-    ]);
-  }
+  }, []);
 
   async function saveTask(event) {
     event.preventDefault();
@@ -482,14 +491,14 @@ export function TasksManagerPage({
     };
 
     try {
-      await sendJson("/api/tasks", {
-        method: editingTask ? "PUT" : "POST",
-        body: payload,
+      await persistTask({
+        payload,
+        isEditing: Boolean(editingTask),
+        includeStaff: true,
       });
 
       setMessage(editingTask ? "Task updated." : "Task created.");
       setOpen(false);
-      await refreshTaskData(true);
     } catch (requestError) {
       setError(requestError.message || "task_save_failed");
     } finally {
@@ -497,7 +506,7 @@ export function TasksManagerPage({
     }
   }
 
-  function requestDelete(task) {
+  const requestDelete = useCallback((task) => {
     setDialogState({
       open: true,
       title: "Delete Task",
@@ -509,15 +518,11 @@ export function TasksManagerPage({
         setMessage("");
         setDeleteTaskId(task.id);
         try {
-          await sendJson("/api/tasks", {
-            method: "DELETE",
-            body: { id: task.id },
-          });
+          await removeTask({ id: task.id });
 
           setMessage(`${task.title} deleted.`);
           setDeleteTaskId("");
           setDialogState((current) => ({ ...current, open: false }));
-          await refreshTaskData();
         } catch (requestError) {
           setError(requestError.message || "task_delete_failed");
           setDeleteTaskId("");
@@ -525,9 +530,9 @@ export function TasksManagerPage({
         }
       },
     });
-  }
+  }, [deleteTaskId, removeTask]);
 
-  function openSubmit(assignment) {
+  const openSubmit = useCallback((assignment) => {
     setSelectedAssignment(assignment);
     setSubmitErrors({});
     setSubmitForm({
@@ -536,7 +541,7 @@ export function TasksManagerPage({
       blocker: "",
     });
     setSubmitOpen(true);
-  }
+  }, []);
 
   async function handleFileInput(files) {
     const nextFiles = await Promise.all(Array.from(files).map((file) => readFileAsDataUrl(file)));
@@ -559,19 +564,15 @@ export function TasksManagerPage({
     setSubmitBusy(true);
 
     try {
-      await sendJson("/api/task-submissions", {
-        method: "POST",
-        body: {
+      await submitTaskWork({
         taskAssignmentId: selectedAssignment.id,
         workDescription: submitForm.workDescription.trim(),
         files: submitForm.files,
         blocker: submitForm.blocker.trim() || null,
-        },
       });
 
       setMessage(selectedAssignment.status === "rejected" ? "Task resubmitted." : "Task submitted.");
       setSubmitOpen(false);
-      await refreshTaskData();
     } catch (requestError) {
       setError(requestError.message || "task_submission_failed");
     } finally {
@@ -579,13 +580,13 @@ export function TasksManagerPage({
     }
   }
 
-  function openReview(task, assignment) {
+  const openReview = useCallback((task, assignment) => {
     setSelectedTask(task);
     setSelectedAssignment(assignment);
     setReviewForm({ action: "approved", comment: "" });
     setReviewErrors({});
     setReviewOpen(true);
-  }
+  }, []);
 
   async function submitReview(event) {
     event.preventDefault();
@@ -603,20 +604,16 @@ export function TasksManagerPage({
     setReviewBusy(true);
 
     try {
-      await sendJson("/api/task-approvals", {
-        method: "POST",
-        body: {
+      await reviewTaskSubmission({
         taskAssignmentId: selectedAssignment.id,
         action: reviewForm.action,
         comment: reviewForm.comment.trim() || null,
-        },
       });
 
       setMessage(reviewForm.action === "approved" ? "Task approved." : "Task rejected.");
       setSelectedTask(null);
       setSelectedAssignment(null);
       setReviewOpen(false);
-      await refreshTaskData();
     } catch (requestError) {
       setError(requestError.message || "task_review_failed");
     } finally {
@@ -637,90 +634,40 @@ export function TasksManagerPage({
         ) : null}
       </div>
 
-      <div className={cardClass()}>
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <input className={`${fieldClass()} min-w-[220px] flex-1 md:max-w-md`} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search tasks, assignees, or projects" />
-            <div className="flex flex-wrap items-center gap-2">
-              {tabs.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => setTab(item.key)}
-                  className={`acm-btn ${tab === item.key ? "acm-btn-primary" : "acm-btn-secondary"} h-10 px-4`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className={`grid gap-3 ${roleBase === "owner" ? "md:grid-cols-4" : "md:grid-cols-3 xl:grid-cols-4"}`}>
-            <select className={fieldClass()} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-              <option value="latest">Latest Created</option>
-              <option value="deadline">Deadline</option>
-            </select>
-            <select className={fieldClass()} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="all">All Statuses</option>
-              <option value="assigned">Assigned</option>
-              <option value="submitted">Submitted</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-            </select>
-            {roleBase !== "owner" ? (
-              <select className={fieldClass()} value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
-                <option value="all">All Roles</option>
-                <option value="manager">Manager</option>
-                <option value="employee">Employee</option>
-              </select>
-            ) : null}
-            <select className={fieldClass()} value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} disabled={Boolean(fixedProjectId)}>
-              <option value="all">All Projects</option>
-              {projectList.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name ?? "-"}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </div>
+      <TaskBoardControls
+        tabs={tabs}
+        tab={tab}
+        searchQuery={searchQuery}
+        sortBy={sortBy}
+        statusFilter={statusFilter}
+        roleBase={roleBase}
+        roleFilter={roleFilter}
+        projectFilter={projectFilter}
+        fixedProjectId={fixedProjectId}
+        projectList={projectList}
+        onSearchChange={updateSearchQuery}
+        onTabChange={updateTab}
+        onSortChange={updateSortBy}
+        onStatusFilterChange={updateStatusFilter}
+        onRoleFilterChange={updateRoleFilter}
+        onProjectFilterChange={updateProjectFilter}
+      />
 
       <InlineMessage error={tasks.error || error} message={message} />
 
-      {tasks.loading ? (
-        <div className={cardClass("mt-4 text-sm text-[color:var(--acm-muted-fg)]")}>Loading tasks...</div>
-      ) : null}
-
-      <section className="mt-4 grid gap-4">
-        {visibleTasks.map((task) => {
-          const canModifyTask =
-            canCreateTask &&
-            (roleBase === "owner" || task.creator?.user_id === currentUserId) &&
-            task.approver_user_id !== currentUserId;
-
-          return (
-            <TaskCard
-              key={task.id}
-              task={task}
-              canEdit={canModifyTask}
-              canDelete={canModifyTask}
-              deleteBusy={deleteTaskId === task.id}
-              onOpen={() => setSelectedTask(task)}
-              onEdit={() => openEdit(task)}
-              onDelete={() => requestDelete(task)}
-              onSubmitAssignment={openSubmit}
-              onReviewAssignment={(assignment) => openReview(task, assignment)}
-            />
-          );
-        })}
-
-        {!tasks.loading && !visibleTasks.length ? (
-          <div className={cardClass("text-sm text-[color:var(--acm-muted-fg)]")}>
-            No tasks available for the selected workflow filters.
-          </div>
-        ) : null}
-      </section>
+      <TaskListSection
+        tasksLoading={tasks.loading}
+        visibleTasks={visibleTasks}
+        canCreateTask={canCreateTask}
+        roleBase={roleBase}
+        currentUserId={currentUserId}
+        deleteTaskId={deleteTaskId}
+        onOpenTask={setSelectedTask}
+        onEditTask={openEdit}
+        onDeleteTask={requestDelete}
+        onSubmitAssignment={openSubmit}
+        onReviewAssignment={openReview}
+      />
 
       <ProfileModal
         open={Boolean(selectedTask) && !reviewOpen}

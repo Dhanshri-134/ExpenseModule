@@ -1,6 +1,11 @@
+import dynamic from "next/dynamic";
 import ManagerShell from "@/components/dashboard/ManagerShell";
-import EstimateDashboardPage from "@/components/dashboard/EstimateDashboardPage";
 import { requireRolePage } from "@/lib/pages/requireRolePage";
+import { WorkspaceLoadingCard } from "@/shared/ui/feedback/WorkspaceLoadingCard";
+
+const EstimateDashboardPage = dynamic(() => import("@/components/dashboard/EstimateDashboardPage"), {
+  loading: () => <WorkspaceLoadingCard label="Loading estimates workspace..." />,
+});
 
 export default function ManagerEstimatesPage({ authContext }) {
   return (

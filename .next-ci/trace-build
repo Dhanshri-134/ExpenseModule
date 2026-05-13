@@ -1,0 +1,1 @@
+[{"name":"run-typescript","duration":23481,"timestamp":646770958710,"id":13,"parentId":1,"tags":{"failed":true},"startTime":1778693168628,"traceId":"43c0921292dd7404"},{"name":"next-build","duration":1410671,"timestamp":646769571858,"id":1,"tags":{"buildMode":"default","version":"16.2.4","bundler":"turbopack","failed":true},"startTime":1778693167241,"traceId":"43c0921292dd7404"}]

@@ -1,5 +1,13 @@
+import dynamic from "next/dynamic";
 import ProjectShell from "@/components/dashboard/Project/ProjectShell";
-import { ProjectDashboardView } from "@/components/dashboard/DashboardClientPages";
+import { WorkspaceLoadingCard } from "@/shared/ui/feedback/WorkspaceLoadingCard";
+
+const ProjectDashboardView = dynamic(
+  () => import("@/components/dashboard/DashboardClientPages").then((mod) => mod.ProjectDashboardView),
+  {
+    loading: () => <WorkspaceLoadingCard label="Loading project workspace..." />,
+  }
+);
 
 export const PROJECT_SECTION_TITLES = {
   overview: "Project Overview",

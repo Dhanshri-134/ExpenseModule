@@ -1,20 +1,31 @@
 import { z } from "zod";
 import { canAccessProject, getRequestContext } from "@/lib/server/authz";
 import { extractCompanyAssetMetadata } from "@/lib/server/companyAssets";
-import { expenseReportToPdfBuffer, EXPENSE_CATEGORIES } from "@/lib/projectModules";
-import { sendError, sendOk } from "@/lib/server/responses";
+import { expenseReportToPdfBuffer, EXPENSE_STATUS_OPTIONS, EXPENSE_TYPES } from "@/lib/projectModules";
+import { sendError, sendOk, rejectMethod } from "@/lib/server/responses";
 import { loadUserDirectory } from "@/lib/server/taskWorkflow";
+import { paginateCollection, parsePaginationParams } from "@/shared/services/api/pagination";
 
 const optionalUuid = z.preprocess(
   (value) => (value === "" || value == null ? undefined : value),
   z.string().uuid().optional()
 );
 
+const optionalText = z.preprocess(
+  (value) => (value === "" || value == null ? undefined : value),
+  z.string().optional()
+);
+
+const ExpenseTypeSchema = z.enum(["employee_labor", "subcontractor", "material", "equipment"]);
+const ExpenseStatusSchema = z.enum(["pending", "approved", "paid"]);
+
 const QuerySchema = z.object({
-  projectId: z.string().uuid(),
+  projectId: optionalUuid,
   startDate: z.string().optional().nullable(),
   endDate: z.string().optional().nullable(),
-  category: z.string().optional().nullable(),
+  projectFilter: optionalUuid,
+  expenseType: optionalText,
+  status: optionalText,
   createdByUserId: optionalUuid,
   search: z.string().optional().nullable(),
   export: z.enum(["pdf"]).optional(),
@@ -24,26 +35,38 @@ const QuerySchema = z.object({
 const ExpensePayloadSchema = z.object({
   id: optionalUuid,
   projectId: z.string().uuid(),
-  category: z.string().min(1),
+  expenseType: ExpenseTypeSchema,
+  status: ExpenseStatusSchema.default("approved"),
+  partyName: z.string().optional().nullable(),
   amount: z.coerce.number().nonnegative(),
+  quantity: z.coerce.number().nonnegative().optional().default(0),
+  unitRate: z.coerce.number().nonnegative().optional().default(0),
+  markupPercent: z.coerce.number().min(0).optional().default(0),
   note: z.string().optional().nullable(),
   expenseDate: z.string().min(1),
   vendor: z.string().optional().nullable(),
   paymentMethod: z.string().optional().nullable(),
   referenceNumber: z.string().optional().nullable(),
   receiptUrl: z.string().optional().nullable(),
+  details: z.record(z.string(), z.any()).optional().default({}),
 });
 
 function normalizeExpensePayload(payload = {}) {
   return {
-    category: String(payload.category || "").trim(),
+    expenseType: String(payload.expenseType || "").trim(),
+    status: String(payload.status || "approved").trim(),
+    partyName: String(payload.partyName || "").trim(),
     amount: Number(payload.amount || 0),
+    quantity: Number(payload.quantity || 0),
+    unitRate: Number(payload.unitRate || 0),
+    markupPercent: Number(payload.markupPercent || 0),
     note: String(payload.note || "").trim(),
     expenseDate: String(payload.expenseDate || "").trim(),
     vendor: String(payload.vendor || "").trim(),
     paymentMethod: String(payload.paymentMethod || "").trim(),
     referenceNumber: String(payload.referenceNumber || "").trim(),
     receiptUrl: String(payload.receiptUrl || "").trim(),
+    details: payload.details && typeof payload.details === "object" ? payload.details : {},
   };
 }
 
@@ -56,12 +79,15 @@ function matchesExpenseSearch(expense, query) {
   const search = String(query || "").trim().toLowerCase();
   if (!search) return true;
   return [
-    expense.category,
+    expense.expense_type,
+    expense.party_name,
     expense.note,
     expense.vendor,
     expense.payment_method,
     expense.reference_number,
+    expense.status,
     expense.expense_date,
+    expense.project?.name,
     expense.created_by?.name,
     expense.created_by?.user_name,
     expense.created_by?.user_code,
@@ -84,7 +110,9 @@ async function enrichExpenses(admin, companyId, rows) {
 
 function applyFilters(expenses, filters) {
   return (expenses ?? []).filter((expense) => {
-    if (filters.category && filters.category !== "all" && expense.category !== filters.category) return false;
+    if (filters.projectFilter && expense.project_id !== filters.projectFilter) return false;
+    if (filters.expenseType && filters.expenseType !== "all" && expense.expense_type !== filters.expenseType) return false;
+    if (filters.status && filters.status !== "all" && expense.status !== filters.status) return false;
     if (filters.createdByUserId && expense.created_by_user_id !== filters.createdByUserId) return false;
     if (filters.startDate && expense.expense_date < filters.startDate) return false;
     if (filters.endDate && expense.expense_date > filters.endDate) return false;
@@ -100,35 +128,71 @@ export default async function handler(req, res) {
   if (req.method === "GET") {
     const parsed = QuerySchema.safeParse(req.query);
     if (!parsed.success) return sendError(res, 400, "invalid_project_expense_query", parsed.error.flatten());
-    if (!canAccessProject(ctx, parsed.data.projectId)) return sendError(res, 403, "forbidden");
+    if (parsed.data.projectId && !canAccessProject(ctx, parsed.data.projectId)) return sendError(res, 403, "forbidden");
+    if (parsed.data.projectFilter && !canAccessProject(ctx, parsed.data.projectFilter)) return sendError(res, 403, "forbidden");
 
-    const [{ data: rows, error }, { data: project }] = await Promise.all([
-      ctx.admin
-        .from("project_expenses")
-        .select("*")
-        .eq("company_id", ctx.company.id)
-        .eq("project_id", parsed.data.projectId)
-        .order("expense_date", { ascending: false })
-        .order("created_at", { ascending: false }),
-      ctx.admin
-        .from("projects")
-        .select("id, name, job_number, location, client_id")
-        .eq("company_id", ctx.company.id)
-        .eq("id", parsed.data.projectId)
-        .maybeSingle(),
+    let expenseQuery = ctx.admin
+      .from("project_expenses")
+      .select("*")
+      .eq("company_id", ctx.company.id)
+      .order("expense_date", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    if (parsed.data.projectId) {
+      expenseQuery = expenseQuery.eq("project_id", parsed.data.projectId);
+    } else if (ctx.role !== "owner") {
+      if (!ctx.projectIds.length) {
+        return sendOk(res, {
+          expenses: [],
+          expenseTypes: EXPENSE_TYPES,
+          statusOptions: EXPENSE_STATUS_OPTIONS,
+          projects: [],
+        });
+      }
+      expenseQuery = expenseQuery.in("project_id", ctx.projectIds);
+    }
+
+    let projectQuery = ctx.admin
+      .from("projects")
+      .select("id, name, job_number, location, client_id, contract_value")
+      .eq("company_id", ctx.company.id)
+      .order("created_at", { ascending: false });
+
+    if (parsed.data.projectId) {
+      projectQuery = projectQuery.eq("id", parsed.data.projectId);
+    } else if (ctx.role !== "owner") {
+      projectQuery = projectQuery.in("id", ctx.projectIds);
+    }
+
+    const [{ data: rows, error }, { data: projects }] = await Promise.all([
+      expenseQuery,
+      projectQuery,
     ]);
 
     if (error) return sendError(res, 500, "project_expenses_fetch_failed", error.message);
-    if (!project) return sendError(res, 404, "project_not_found");
+    if (parsed.data.projectId && !(projects ?? []).length) return sendError(res, 404, "project_not_found");
 
-    const [{ data: client }, enrichedRows] = await Promise.all([
-      project.client_id
-        ? ctx.admin.from("clients").select("id, name, contact, email, address").eq("id", project.client_id).maybeSingle()
-        : Promise.resolve({ data: null }),
+    const clientIds = [...new Set((projects ?? []).map((project) => project.client_id).filter(Boolean))];
+    const [{ data: clients }, enrichedRows] = await Promise.all([
+      clientIds.length
+        ? ctx.admin.from("clients").select("id, name, contact, email, address").in("id", clientIds)
+        : Promise.resolve({ data: [] }),
       enrichExpenses(ctx.admin, ctx.company.id, rows ?? []),
     ]);
 
-    const filteredExpenses = applyFilters(enrichedRows, parsed.data);
+    const projectMap = new Map((projects ?? []).map((project) => [project.id, {
+      ...project,
+      client: (clients ?? []).find((client) => client.id === project.client_id) ?? null,
+    }]));
+
+    const enrichedExpenses = enrichedRows.map((expense) => ({
+      ...expense,
+      project: projectMap.get(expense.project_id) ?? null,
+    }));
+
+    const filteredExpenses = applyFilters(enrichedExpenses, parsed.data);
+    const pagination = parsePaginationParams(req.query, { pageSize: 25, maxPageSize: 100 });
+    const pagedExpenses = paginateCollection(filteredExpenses, pagination);
 
     if (parsed.data.export === "pdf") {
       const { data: company } = await ctx.admin
@@ -139,10 +203,8 @@ export default async function handler(req, res) {
 
       const companyMetadata = extractCompanyAssetMetadata(ctx.admin, company?.metadata);
       const pdfBuffer = await expenseReportToPdfBuffer({
-        project: {
-          ...project,
-          client: client ?? null,
-        },
+        project: parsed.data.projectId ? projectMap.get(parsed.data.projectId) ?? null : null,
+        projects: Array.from(projectMap.values()),
         company: company
           ? {
               name: company.name,
@@ -164,15 +226,18 @@ export default async function handler(req, res) {
       res.setHeader("Cache-Control", "no-store, max-age=0");
       res.setHeader(
         "Content-Disposition",
-        `${parsed.data.disposition === "inline" ? "inline" : "attachment"}; filename="project-expenses-${project.job_number || "report"}.pdf"`
+        `${parsed.data.disposition === "inline" ? "inline" : "attachment"}; filename="${parsed.data.projectId ? `project-expenses-${projectMap.get(parsed.data.projectId)?.job_number || "report"}` : "expenses-dashboard-report"}.pdf"`
       );
       res.status(200).send(pdfBuffer);
       return;
     }
 
     return sendOk(res, {
-      expenses: filteredExpenses,
-      categories: EXPENSE_CATEGORIES,
+      expenses: pagedExpenses.items,
+      expenseTypes: EXPENSE_TYPES,
+      statusOptions: EXPENSE_STATUS_OPTIONS,
+      projects: Array.from(projectMap.values()),
+      ...(pagination.enabled ? { pagination: pagedExpenses.pagination } : {}),
     });
   }
 
@@ -187,14 +252,21 @@ export default async function handler(req, res) {
       .insert({
         company_id: ctx.company.id,
         project_id: parsed.data.projectId,
-        category: payload.category,
+        category: payload.expenseType,
+        expense_type: payload.expenseType,
+        status: payload.status,
+        party_name: payload.partyName || null,
         amount: payload.amount,
+        quantity: payload.quantity,
+        unit_rate: payload.unitRate,
+        markup_percent: payload.markupPercent,
         note: payload.note || null,
         expense_date: payload.expenseDate,
         vendor: payload.vendor || null,
         payment_method: payload.paymentMethod || null,
         reference_number: payload.referenceNumber || null,
         receipt_url: payload.receiptUrl || null,
+        details: payload.details,
         created_by_user_id: ctx.user.id,
       })
       .select("*")
@@ -225,14 +297,21 @@ export default async function handler(req, res) {
     const { data, error } = await ctx.admin
       .from("project_expenses")
       .update({
-        category: payload.category,
+        category: payload.expenseType,
+        expense_type: payload.expenseType,
+        status: payload.status,
+        party_name: payload.partyName || null,
         amount: payload.amount,
+        quantity: payload.quantity,
+        unit_rate: payload.unitRate,
+        markup_percent: payload.markupPercent,
         note: payload.note || null,
         expense_date: payload.expenseDate,
         vendor: payload.vendor || null,
         payment_method: payload.paymentMethod || null,
         reference_number: payload.referenceNumber || null,
         receipt_url: payload.receiptUrl || null,
+        details: payload.details,
         updated_at: new Date().toISOString(),
       })
       .eq("company_id", ctx.company.id)
@@ -273,5 +352,5 @@ export default async function handler(req, res) {
     return sendOk(res, { deleted: true });
   }
 
-  return sendError(res, 405, "method_not_allowed");
+  return rejectMethod(res, ["GET", "POST", "PUT", "DELETE"]);
 }

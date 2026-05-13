@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { getRequestContext } from "@/lib/server/authz";
-import { sendError, sendOk } from "@/lib/server/responses";
+import { sendError, sendOk, rejectMethod } from "@/lib/server/responses";
+import { paginateCollection, parsePaginationParams } from "@/shared/services/api/pagination";
 import {
   canManageTasks,
   formatRoleLabel,
@@ -179,7 +180,13 @@ export default async function handler(req, res) {
 
     try {
       const workspace = await getTaskWorkspace(ctx.admin, ctx, { projectId: parsed.data.projectId ?? null });
-      return sendOk(res, workspace);
+      const pagination = parsePaginationParams(req.query, { pageSize: 25, maxPageSize: 100 });
+      const pagedTasks = paginateCollection(workspace.tasks ?? [], pagination);
+      return sendOk(res, {
+        ...workspace,
+        tasks: pagedTasks.items,
+        ...(pagination.enabled ? { pagination: pagedTasks.pagination } : {}),
+      });
     } catch (error) {
       return sendError(res, 500, "tasks_fetch_failed", error.message);
     }
@@ -323,5 +330,5 @@ export default async function handler(req, res) {
     return sendOk(res, { deleted: true });
   }
 
-  return sendError(res, 405, "method_not_allowed");
+  return rejectMethod(res, ["GET", "POST", "PUT", "DELETE"]);
 }

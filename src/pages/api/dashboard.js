@@ -1,11 +1,11 @@
-import { getRequestContext } from "@/lib/server/authz";
-import { sendError, sendOk } from "@/lib/server/responses";
+import { sendOk, rejectMethod } from "@/lib/server/responses";
 import { getTaskWorkspace } from "@/lib/server/taskWorkflow";
+import { requireApiContext } from "@/shared/services/security/request";
 
 export default async function handler(req, res) {
-  const ctx = await getRequestContext(req, res);
-  if (!ctx.ok) return sendError(res, ctx.status, ctx.error);
-  if (req.method !== "GET") return sendError(res, 405, "method_not_allowed");
+  const ctx = await requireApiContext(req, res);
+  if (!ctx) return;
+  if (req.method !== "GET") return rejectMethod(res, ["GET"]);
 
   const [{ data: projects }, { data: companyUsers }, { data: projectUsers }, taskWorkspace] = await Promise.all([
     ctx.admin

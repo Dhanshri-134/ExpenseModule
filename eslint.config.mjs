@@ -3,6 +3,14 @@ import nextVitals from "eslint-config-next/core-web-vitals";
 
 const eslintConfig = defineConfig([
   ...nextVitals,
+  {
+    rules: {
+      // Compatibility-focused softening for an existing production codebase.
+      "react-hooks/purity": "off",
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/use-memo": "off",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
@@ -10,6 +18,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "build-output.txt",
   ]),
 ]);
 

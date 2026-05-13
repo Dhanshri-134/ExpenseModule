@@ -528,15 +528,15 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
     const rightX = page.width - page.margin;
     const headerTop = page.height - 54;
 
-    drawText(pageCommands, companyLines[0] || "Your Company", leftX, headerTop, 16, ink);
-    companyLines.slice(1).forEach((lineText, index) => {
-      drawText(pageCommands, lineText, leftX, headerTop - 16 - index * 12, 8.5, muted);
-    });
-
-    drawRightAlignedText(pageCommands, rightTitle, rightX, headerTop, 16, accent);
+    drawText(pageCommands, rightTitle, leftX, headerTop, 16, accent);
     if (subtitle) {
-      drawRightAlignedText(pageCommands, subtitle, rightX, headerTop - 16, 9, muted);
+      drawText(pageCommands, subtitle, leftX, headerTop - 16, 9, muted);
     }
+
+    drawRightAlignedText(pageCommands, companyLines[0] || "Your Company", rightX, headerTop, 16, ink);
+    companyLines.slice(1).forEach((lineText, index) => {
+      drawRightAlignedText(pageCommands, lineText, rightX, headerTop - 16 - index * 12, 8.5, muted);
+    });
 
     pageCommands.push(`${pdfColor(accent)} RG`);
     pageCommands.push("1.4 w");
@@ -546,7 +546,7 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
   };
 
   let commands = createPage();
-  let y = drawPageHeader(commands, titleText, detailsTitle);
+  let y = drawPageHeader(commands);
 
   const gap = 12;
   const availableWidth = page.width - page.margin * 2;
@@ -677,13 +677,28 @@ function estimateToRawPdfBuffer(estimate, options = {}) {
 }
 
 function decodeDataUrl(value) {
-  const match = String(value || "").match(/^data:(.+?);base64,(.+)$/);
-  if (!match) return null;
+  const input = String(value || "").trim();
+  if (!input.startsWith("data:")) return null;
 
-  return {
-    mimeType: match[1],
-    bytes: Buffer.from(match[2], "base64"),
-  };
+  const commaIndex = input.indexOf(",");
+  if (commaIndex === -1) return null;
+
+  const metadata = input.slice(5, commaIndex);
+  const payload = input.slice(commaIndex + 1);
+  const parts = metadata.split(";");
+  const mimeType = parts[0] || "text/plain";
+  const isBase64 = parts.some((part) => part.toLowerCase() === "base64");
+
+  try {
+    return {
+      mimeType,
+      bytes: isBase64
+        ? Buffer.from(payload, "base64")
+        : Buffer.from(decodeURIComponent(payload), "utf8"),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function isPngBytes(bytes) {
@@ -716,14 +731,30 @@ async function loadPdfImageSource(value) {
   const dataUrl = decodeDataUrl(source);
   if (dataUrl) return dataUrl;
 
+  if (source.startsWith("<svg") || source.startsWith("<?xml")) {
+    return {
+      mimeType: "image/svg+xml",
+      bytes: Buffer.from(source, "utf8"),
+    };
+  }
+
   const response = await fetch(source);
   if (!response.ok) {
     throw new Error(`asset_fetch_failed:${response.status}`);
   }
 
+  const mimeType = response.headers.get("content-type") || "";
+  if (mimeType.toLowerCase().includes("svg")) {
+    const text = await response.text();
+    return {
+      mimeType,
+      bytes: Buffer.from(text, "utf8"),
+    };
+  }
+
   const arrayBuffer = await response.arrayBuffer();
   return {
-    mimeType: response.headers.get("content-type") || "",
+    mimeType,
     bytes: Buffer.from(arrayBuffer),
   };
 }
@@ -756,7 +787,7 @@ async function removeLogoBackground(imageBuffer) {
     .toBuffer();
 }
 
-async function embedPdfImage(pdfDoc, value) {
+async function embedPdfImage(pdfDoc, value, { removeLightBackground = false } = {}) {
   const source = await loadPdfImageSource(value).catch(() => null);
   if (!source?.bytes?.length) return null;
 
@@ -770,9 +801,11 @@ async function embedPdfImage(pdfDoc, value) {
     }
   }
   if (mime.includes("png") || isPngBytes(source.bytes)) {
-  const cleanedPng = await removeLogoBackground(source.bytes);
-  return await pdfDoc.embedPng(cleanedPng);
-}
+    const pngBytes = removeLightBackground
+      ? await removeLogoBackground(source.bytes)
+      : source.bytes;
+    return await pdfDoc.embedPng(pngBytes);
+  }
   if (mime.includes("jpg") || mime.includes("jpeg") || isJpegBytes(source.bytes)) {
     return await pdfDoc.embedJpg(source.bytes);
   }
@@ -800,7 +833,9 @@ export async function estimateToPdfBuffer(estimate, options = {}) {
   }
   
   const firstPage = pages[0];
-  const logoImage = await embedPdfImage(pdfDoc, company.logoDataUrl);
+  const logoImage = await embedPdfImage(pdfDoc, company.logoDataUrl, {
+    removeLightBackground: true,
+  });
   if (logoImage) {
     const dimensions = logoImage.scaleToFit(145, 80);
     firstPage.drawImage(logoImage, {
@@ -897,34 +932,51 @@ export function normalizeFieldReportPayload(payload = {}) {
   };
 }
 
-export const EXPENSE_CATEGORIES = [
-  "Materials",
-  "Labor",
-  "Equipment",
-  "Travel",
-  "Fuel",
-  "Meals",
-  "Permits",
-  "Subcontractor",
-  "Office Supplies",
-  "Miscellaneous",
+export const EXPENSE_TYPES = [
+  { value: "employee_labor", label: "Employee Labor" },
+  { value: "subcontractor", label: "Subcontractor" },
+  { value: "material", label: "Material" },
+  { value: "equipment", label: "Equipment" },
 ];
+
+export const EXPENSE_STATUS_OPTIONS = [
+  { value: "approved", label: "Approved" },
+  { value: "pending", label: "Pending" },
+  { value: "paid", label: "Paid" },
+];
+
+function formatExpenseTypeLabel(value) {
+  return String(value || "")
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
 function normalizeExpenseRows(expenses = []) {
   return (expenses ?? []).map((expense, index) => ({
     id: expense?.id || `expense-${index + 1}`,
-    category: String(expense?.category || "").trim() || "Expense",
+    category: String(expense?.expense_type || expense?.category || "").trim() || "Expense",
+    expenseType: String(expense?.expense_type || expense?.category || "").trim() || "expense",
+    projectName: String(expense?.project?.name || expense?.project_name || "").trim(),
+    projectJobNumber: String(expense?.project?.job_number || "").trim(),
+    partyName: String(expense?.party_name || "").trim(),
+    status: String(expense?.status || "").trim(),
     amount: normalizeNumber(expense?.amount),
+    quantity: normalizeNumber(expense?.quantity),
+    unitRate: normalizeNumber(expense?.unit_rate),
+    markupPercent: normalizeNumber(expense?.markup_percent),
     note: String(expense?.note || "").trim(),
     expenseDate: String(expense?.expense_date || expense?.expenseDate || "").trim(),
     vendor: String(expense?.vendor || "").trim(),
     paymentMethod: String(expense?.payment_method || expense?.paymentMethod || "").trim(),
     referenceNumber: String(expense?.reference_number || expense?.referenceNumber || "").trim(),
+    details: expense?.details && typeof expense.details === "object" ? expense.details : {},
     createdBy: expense?.created_by?.name || expense?.created_by?.user_name || expense?.created_by?.user_code || "",
   }));
 }
 
-function buildExpensePdfPages({ project = {}, company = {}, expenses = [], filters = {} }) {
+function buildExpensePdfPages({ project = {}, projects = [], company = {}, expenses = [], filters = {} }) {
   const accent = [7, 32, 72];
   const ink = [15, 23, 42];
   const muted = [100, 116, 139];
@@ -953,48 +1005,28 @@ function buildExpensePdfPages({ project = {}, company = {}, expenses = [], filte
     commands.push(`0 ${page.height - 125} m ${page.width} ${page.height - 125} l S`);
 
     drawText(commands, "Expense Report", page.margin, page.height - 150, 18, accent);
-    drawText(commands, `Project: ${project.name || "-"}`, page.margin, page.height - 174, 9, ink);
-    drawText(commands, `Job Number: ${project.job_number || "-"}`, page.margin, page.height - 188, 9, ink);
-    drawText(commands, `Location: ${project.location || "-"}`, page.margin, page.height - 202, 9, ink);
-    drawText(commands, `Client: ${project.client?.name || "-"}`, 310, page.height - 174, 9, ink);
-    drawText(commands, `Generated: ${formatPdfDate(new Date().toISOString())}`, 310, page.height - 188, 9, ink);
+    drawText(commands, `Generated: ${formatPdfDate(new Date().toISOString())}`, page.margin, page.height - 174, 9, ink);
 
     const filterSummary = [
       filters.startDate ? `From ${formatPdfDate(filters.startDate)}` : "",
       filters.endDate ? `To ${formatPdfDate(filters.endDate)}` : "",
-      filters.category && filters.category !== "all" ? `Category ${filters.category}` : "All categories",
+      filters.expenseType && filters.expenseType !== "all" ? `Type ${formatExpenseTypeLabel(filters.expenseType)}` : "All types",
     ].filter(Boolean).join(" | ");
-    drawText(commands, filterSummary || "All expenses", 310, page.height - 202, 9, muted);
+    drawText(commands, filterSummary || "All expenses", page.margin, page.height - 188, 9, muted);
 
-    drawRect(commands, page.margin, page.height - 252, 160, 56, null, line, 1);
-    drawRect(commands, page.margin + 174, page.height - 252, 120, 56, null, line, 1);
-    drawRect(commands, page.margin + 308, page.height - 252, 120, 56, null, line, 1);
-
-    drawText(commands, "Total Expense", page.margin + 12, page.height - 214, 8, muted);
-    drawText(commands, formatPdfCurrency(totalAmount), page.margin + 12, page.height - 234, 16, ink);
-    drawText(commands, "Entries", page.margin + 186, page.height - 214, 8, muted);
-    drawText(commands, String(normalizedExpenses.length), page.margin + 186, page.height - 234, 16, ink);
-    drawText(commands, "Top Category", page.margin + 320, page.height - 214, 8, muted);
-    const topCategory = normalizedExpenses.reduce((map, expense) => {
-      map.set(expense.category, (map.get(expense.category) || 0) + expense.amount);
-      return map;
-    }, new Map());
-    const topCategoryEntry = Array.from(topCategory.entries()).sort((a, b) => b[1] - a[1])[0];
-    drawText(commands, topCategoryEntry?.[0] || "-", page.margin + 320, page.height - 234, 12, ink);
-
-    y = page.height - 286;
-    drawRect(commands, page.margin, y - 22, 85, 22, null, line, 0.8);
-    drawRect(commands, page.margin + 85, y - 22, 100, 22, null, line, 0.8);
-    drawRect(commands, page.margin + 185, y - 22, 90, 22, null, line, 0.8);
-    drawRect(commands, page.margin + 275, y - 22, 120, 22, null, line, 0.8);
-    drawRect(commands, page.margin + 395, y - 22, 72, 22, null, line, 0.8);
-    drawRect(commands, page.margin + 467, y - 22, 86, 22, null, line, 0.8);
+    y = page.height - 214;
+    drawRect(commands, page.margin, y - 22, 60, 22, null, line, 0.8);
+    drawRect(commands, page.margin + 60, y - 22, 84, 22, null, line, 0.8);
+    drawRect(commands, page.margin + 144, y - 22, 94, 22, null, line, 0.8);
+    drawRect(commands, page.margin + 238, y - 22, 72, 22, null, line, 0.8);
+    drawRect(commands, page.margin + 310, y - 22, 128, 22, null, line, 0.8);
+    drawRect(commands, page.margin + 438, y - 22, 73, 22, null, line, 0.8);
     drawText(commands, "Date", page.margin + 8, y - 14, 8, ink);
-    drawText(commands, "Category", page.margin + 93, y - 14, 8, ink);
-    drawText(commands, "Amount", page.margin + 193, y - 14, 8, ink);
-    drawText(commands, "Note / Vendor", page.margin + 283, y - 14, 8, ink);
-    drawText(commands, "Payment", page.margin + 403, y - 14, 8, ink);
-    drawText(commands, "Entered By", page.margin + 475, y - 14, 8, ink);
+    drawText(commands, "Project", page.margin + 68, y - 14, 8, ink);
+    drawText(commands, "Type / Party", page.margin + 152, y - 14, 8, ink);
+    drawText(commands, "Amount", page.margin + 246, y - 14, 8, ink);
+    drawText(commands, "Note", page.margin + 318, y - 14, 8, ink);
+    drawText(commands, "Entered By", page.margin + 446, y - 14, 8, ink);
     y -= 22;
   };
 
@@ -1010,44 +1042,41 @@ function buildExpensePdfPages({ project = {}, company = {}, expenses = [], filte
     const detail = [expense.note, expense.vendor].filter(Boolean).join(" | ") || "-";
     const lines = wrapPdfLine(detail, 24).slice(0, 3);
     const rowHeight = Math.max(24, lines.length * 9 + 8);
-    const footerReserve = 110;
+    const footerReserve = 44;
 
     if (startedRows && y - rowHeight < page.margin + footerReserve) {
       pushPage();
     }
 
     startedRows = true;
-    drawRect(commands, page.margin, y - rowHeight, 85, rowHeight, null, line, 0.8);
-    drawRect(commands, page.margin + 85, y - rowHeight, 100, rowHeight, null, line, 0.8);
-    drawRect(commands, page.margin + 185, y - rowHeight, 90, rowHeight, null, line, 0.8);
-    drawRect(commands, page.margin + 275, y - rowHeight, 120, rowHeight, null, line, 0.8);
-    drawRect(commands, page.margin + 395, y - rowHeight, 72, rowHeight, null, line, 0.8);
-    drawRect(commands, page.margin + 467, y - rowHeight, 86, rowHeight, null, line, 0.8);
+    drawRect(commands, page.margin, y - rowHeight, 60, rowHeight, null, line, 0.8);
+    drawRect(commands, page.margin + 60, y - rowHeight, 84, rowHeight, null, line, 0.8);
+    drawRect(commands, page.margin + 144, y - rowHeight, 94, rowHeight, null, line, 0.8);
+    drawRect(commands, page.margin + 238, y - rowHeight, 72, rowHeight, null, line, 0.8);
+    drawRect(commands, page.margin + 310, y - rowHeight, 128, rowHeight, null, line, 0.8);
+    drawRect(commands, page.margin + 438, y - rowHeight, 73, rowHeight, null, line, 0.8);
 
     drawText(commands, formatPdfDate(expense.expenseDate), page.margin + 8, y - 14, 7.5, ink);
-    drawText(commands, fitPdfCellText(expense.category, 94, 7.5), page.margin + 93, y - 14, 7.5, ink);
-    drawText(commands, formatPdfCurrency(expense.amount), page.margin + 193, y - 14, 7.5, ink);
+    drawText(commands, fitPdfCellText(expense.projectName || "-", 78, 7.5), page.margin + 68, y - 14, 7.5, ink);
+    drawText(commands, fitPdfCellText([formatExpenseTypeLabel(expense.category), expense.partyName].filter(Boolean).join(" / ") || "-", 88, 7.5), page.margin + 152, y - 14, 7.5, ink);
+    drawText(commands, formatPdfCurrency(expense.amount), page.margin + 246, y - 14, 7.5, ink);
     lines.forEach((lineText, lineIndex) => {
-      drawText(commands, fitPdfCellText(lineText, 114, 7.2), page.margin + 283, y - 14 - lineIndex * 8, 7.2, ink);
+      drawText(commands, fitPdfCellText(lineText, 122, 7.2), page.margin + 318, y - 14 - lineIndex * 8, 7.2, ink);
     });
-    drawText(commands, fitPdfCellText(expense.paymentMethod || "-", 66, 7.5), page.margin + 403, y - 14, 7.5, ink);
-    drawText(commands, fitPdfCellText(expense.createdBy || "-", 80, 7.5), page.margin + 475, y - 14, 7.5, ink);
+    drawText(commands, fitPdfCellText(expense.createdBy || "-", 67, 7.5), page.margin + 446, y - 14, 7.5, ink);
     y -= rowHeight;
 
     if (index === normalizedExpenses.length - 1) {
       const totalHeight = 28;
-      drawRect(commands, page.margin, y - totalHeight, 275, totalHeight, null, line, 1);
-      drawRect(commands, page.margin + 275, y - totalHeight, 120, totalHeight, null, line, 1);
-      drawRect(commands, page.margin + 395, y - totalHeight, 158, totalHeight, null, line, 1);
-      drawText(commands, "Grand Total", page.margin + 8, y - 17, 9, ink);
-      drawText(commands, formatPdfCurrency(totalAmount), page.margin + 283, y - 17, 9, ink);
+      drawRect(commands, page.margin, y - totalHeight, 310, totalHeight, null, line, 1);
+      drawRect(commands, page.margin + 310, y - totalHeight, 128, totalHeight, null, line, 1);
+      drawRect(commands, page.margin + 438, y - totalHeight, 73, totalHeight, null, line, 1);
+      drawText(commands, "Grand Total", page.margin + 318, y - 17, 9, ink);
+      drawRightAlignedText(commands, formatPdfCurrency(totalAmount), page.margin + 438 + 73 - 8, y - 17, 9, ink);
       y -= totalHeight + 16;
     }
   });
 
-  const footerY = Math.max(page.margin + 26, y - 4);
-  drawText(commands, "Authorized Signature", 398, footerY + 44, 8, muted);
-  drawText(commands, company.signatureName || "", 398, footerY + 10, 8, ink);
   pages.push(commands.join("\n"));
   return pages;
 }
@@ -1099,13 +1128,15 @@ export async function expenseReportToPdfBuffer(payload = {}) {
   const pages = pdfDoc.getPages();
   const company = payload.company || {};
 
-  const logoImage = await embedPdfImage(pdfDoc, company.logoDataUrl);
+  const logoImage = await embedPdfImage(pdfDoc, company.logoDataUrl, {
+    removeLightBackground: true,
+  });
   const signatureImage = await embedPdfImage(pdfDoc, company.signatureDataUrl);
   const stampImage = await embedPdfImage(pdfDoc, company.stampDataUrl);
 
   pages.forEach((page) => {
     if (logoImage) {
-      const dimensions = logoImage.scaleToFit(145, 80);
+      const dimensions = logoImage.scaleToFit(220, 128);
       page.drawImage(logoImage, {
         x: 42,
         y: 700,

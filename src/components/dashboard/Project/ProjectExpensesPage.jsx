@@ -1,10 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useRouter } from "next/router";
 import Modal from "@/components/dashboard/Modal";
-import { BusyButton, CompactListRow } from "@/components/dashboard/DashboardUi";
-import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
-import { sendJson } from "@/lib/client/apiClient";
+import { BusyButton } from "@/components/dashboard/DashboardUi";
+import { ChevronRightIcon } from "@/components/dashboard/icons";
+import { ExpenseChartsSection } from "@/features/expenses/components/ExpenseChartsSection";
+import { ExpenseDetailsContent, ExpenseRegisterSection } from "@/features/expenses/components/ExpenseRegisterSection";
+import { ExpenseFiltersPanel } from "@/features/expenses/components/ExpenseFiltersPanel";
+import { useExpenseMutations } from "@/features/expenses/hooks/useExpenseMutations";
+import { useProjectExpenses } from "@/features/expenses/hooks/useProjectExpenses";
+import { useExpenseViewState } from "@/features/expenses/hooks/useExpenseViewState";
+import { ExpenseSummaryCards } from "@/features/expenses/components/ExpenseSummaryCards";
 
 function cardClass(extra = "") {
   return `rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.08)] ${extra}`.trim();
@@ -12,15 +19,6 @@ function cardClass(extra = "") {
 
 function fieldClass() {
   return "acm-input mt-0";
-}
-
-function SectionHeader({ title, action }) {
-  return (
-    <div className="mb-4 flex items-center justify-between gap-3">
-      <div className="text-xl font-bold text-[color:var(--acm-fg)]">{title}</div>
-      {action}
-    </div>
-  );
 }
 
 function LabeledField({ label, children }) {
@@ -60,16 +58,6 @@ function InlineMessage({ error, message, onDismiss }) {
   return null;
 }
 
-function formatApiError(json, fallback) {
-  if (json?.detail?.fieldErrors) {
-    const fieldMessages = Object.values(json.detail.fieldErrors).flat().filter(Boolean);
-    if (fieldMessages.length) return fieldMessages[0];
-  }
-  if (typeof json?.detail === "string" && json.detail.trim()) return json.detail;
-  if (typeof json?.error === "string" && json.error.trim()) return json.error;
-  return fallback;
-}
-
 function formatCurrency(value) {
   const numericValue = Number(value || 0);
   return new Intl.NumberFormat("en-US", {
@@ -86,196 +74,310 @@ function formatDate(value) {
   return date.toLocaleDateString();
 }
 
-function createExpenseForm(projectId) {
+function createExpenseForm(projectId = "") {
   return {
     id: "",
     projectId,
-    category: "Materials",
+    expenseType: "material",
+    status: "approved",
+    partyName: "",
     amount: "",
+    quantity: "",
+    unitRate: "",
+    markupPercent: "",
     note: "",
     expenseDate: new Date().toISOString().slice(0, 10),
     vendor: "",
     paymentMethod: "Cash",
     referenceNumber: "",
     receiptUrl: "",
+    details: {
+      materialName: "",
+      rentalCost: "",
+      fuelCost: "",
+    },
   };
 }
 
-function buildQuery(projectId, filters) {
-  const params = new URLSearchParams({ projectId });
-  if (filters.search) params.set("search", filters.search);
-  if (filters.category && filters.category !== "all") params.set("category", filters.category);
-  if (filters.startDate) params.set("startDate", filters.startDate);
-  if (filters.endDate) params.set("endDate", filters.endDate);
-  if (filters.createdByUserId && filters.createdByUserId !== "all") params.set("createdByUserId", filters.createdByUserId);
-  return `/api/project-expenses?${params.toString()}`;
+function toNumber(value) {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function MiniBarChart({ items = [] }) {
-  const maxValue = Math.max(...items.map((item) => item.value), 0);
+function computeAmount(form) {
+  if (form.expenseType === "employee_labor") {
+    const base = toNumber(form.quantity) * toNumber(form.unitRate);
+    return base + (base * toNumber(form.markupPercent)) / 100;
+  }
+  if (form.expenseType === "material" && form.quantity && form.unitRate) {
+    return toNumber(form.quantity) * toNumber(form.unitRate);
+  }
+  if (form.expenseType === "equipment") {
+    return toNumber(form.details.rentalCost) + toNumber(form.details.fuelCost);
+  }
+  return toNumber(form.amount);
+}
 
+function formatTypeLabel(value) {
+  return String(value || "")
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function ProjectBudgetCards({ totals }) {
   return (
-    <div className="space-y-3">
-      {items.length ? items.map((item) => (
-        <div key={item.label} className="space-y-1">
-          <div className="flex items-center justify-between gap-3 text-sm">
-            <span className="font-medium text-[color:var(--acm-fg)]">{item.label}</span>
-            <span className="text-[color:var(--acm-muted-fg)]">{formatCurrency(item.value)}</span>
-          </div>
-          <div className="h-2 overflow-hidden rounded-full bg-[color:var(--acm-border)]">
-            <div
-              className="h-full rounded-full bg-[linear-gradient(90deg,#0f3b66,#5fa8d3)]"
-              style={{ width: `${maxValue ? Math.max((item.value / maxValue) * 100, 6) : 0}%` }}
-            />
+    <div className="grid gap-4 xl:grid-cols-3">
+      {totals.projectSummaries.slice(0, 6).map((project) => (
+        <div key={project.id || project.name} className={cardClass()}>
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">{project.name}</div>
+          <div className="mt-3 grid gap-2 text-sm text-[color:var(--acm-fg)]">
+            <div className="flex items-center justify-between gap-3"><span>Budget</span><span className="font-semibold">{formatCurrency(project.budget)}</span></div>
+            <div className="flex items-center justify-between gap-3"><span>Spent</span><span className="font-semibold">{formatCurrency(project.spent)}</span></div>
+            <div className="flex items-center justify-between gap-3"><span>Remaining</span><span className="font-semibold">{formatCurrency(project.remaining)}</span></div>
           </div>
         </div>
-      )) : <div className="text-sm text-[color:var(--acm-muted-fg)]">No expense data yet.</div>}
+      ))}
     </div>
   );
 }
 
-function DonutChart({ total = 0, items = [] }) {
-  const radius = 52;
-  const circumference = 2 * Math.PI * radius;
-  const colors = ["#0f3b66", "#2f6690", "#3a7ca5", "#5fa8d3", "#81c3d7", "#16425b"];
-  let offset = 0;
+function ProjectBudgetPreview({ totals, roleBase, onSeeMore }) {
+  const router = useRouter();
+  const previewProjects = totals.projectSummaries.slice(0, 3);
 
   return (
-    <div className="flex items-center gap-5">
-      <svg width="140" height="140" viewBox="0 0 140 140" className="shrink-0">
-        <circle cx="70" cy="70" r={radius} fill="none" stroke="rgba(148,163,184,0.22)" strokeWidth="18" />
-        {items.map((item, index) => {
-          const ratio = total ? item.value / total : 0;
-          const dash = circumference * ratio;
-          const segment = (
-            <circle
-              key={item.label}
-              cx="70"
-              cy="70"
-              r={radius}
-              fill="none"
-              stroke={colors[index % colors.length]}
-              strokeWidth="18"
-              strokeDasharray={`${dash} ${circumference - dash}`}
-              strokeDashoffset={-offset}
-              strokeLinecap="butt"
-              transform="rotate(-90 70 70)"
-            />
-          );
-          offset += dash;
-          return segment;
-        })}
-        <text x="70" y="64" textAnchor="middle" className="fill-[color:var(--acm-muted-fg)] text-[10px] font-semibold">TOTAL</text>
-        <text x="70" y="82" textAnchor="middle" className="fill-[color:var(--acm-fg)] text-[12px] font-bold">
-          {total ? formatCurrency(total) : "$0"}
-        </text>
-      </svg>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-xl font-bold text-[color:var(--acm-fg)]">Project List</div>
+          {/* <div className="text-sm text-[color:var(--acm-muted-fg)]">Quick project budget and spending snapshot.</div> */}
+        </div>
+        <button type="button" onClick={onSeeMore} className="acm-btn acm-btn-secondary h-10 px-4">
+          See More
+        </button>
+      </div>
 
-      <div className="grid gap-2 text-sm">
-        {items.length ? items.map((item, index) => (
-          <div key={item.label} className="flex items-center gap-2">
-            <span className="h-3 w-3 rounded-full" style={{ backgroundColor: colors[index % colors.length] }} />
-            <span className="text-[color:var(--acm-fg)]">{item.label}</span>
-          </div>
-        )) : <div className="text-[color:var(--acm-muted-fg)]">No category split yet.</div>}
+      <div className="grid gap-4 xl:grid-cols-3">
+        {previewProjects.map((project) => (
+          <button
+            key={project.id || project.name}
+            type="button"
+            onClick={() => router.push(`/${roleBase}/project/${project.id}/expenses`)}
+            className={`${cardClass()} text-left transition hover:-translate-y-0.5`}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">{project.name}</div>
+              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-[color:var(--acm-border)] text-[color:var(--acm-muted-fg)]">
+                <ChevronRightIcon className="h-4 w-4" />
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2 text-sm text-[color:var(--acm-fg)]">
+              <div className="flex items-center justify-between gap-3"><span>Budget</span><span className="font-semibold">{formatCurrency(project.budget)}</span></div>
+              <div className="flex items-center justify-between gap-3"><span>Spent</span><span className="font-semibold">{formatCurrency(project.spent)}</span></div>
+              <div className="flex items-center justify-between gap-3"><span>Remaining</span><span className="font-semibold">{formatCurrency(project.remaining)}</span></div>
+            </div>
+          </button>
+        ))}
       </div>
     </div>
   );
 }
 
-export function ProjectExpensesPage({ projectId, roleBase = "employee", currentUserId = "" }) {
-  const [filters, setFilters] = useState({
-    search: "",
-    category: "all",
-    startDate: "",
-    endDate: "",
-    createdByUserId: "all",
-  });
+function ExpensePageHeader({ title, subtitle, onAddExpense }) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <div className="text-2xl font-bold text-[color:var(--acm-fg)]">{title}</div>
+        <div className="text-sm text-[color:var(--acm-muted-fg)]">{subtitle}</div>
+      </div>
+      <button type="button" onClick={onAddExpense} className="acm-btn acm-btn-primary h-10 px-4">
+        Add Expense
+      </button>
+    </div>
+  );
+}
+
+function ProjectExpenseTable({ expenses, formatCurrency, formatDate }) {
+  return (
+    <div className={cardClass("overflow-hidden p-0")}>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="bg-[color:var(--acm-accent-soft)] text-left text-[color:var(--acm-fg)]">
+            <tr>
+              <th className="px-4 py-3 font-semibold">Date</th>
+              <th className="px-4 py-3 font-semibold">Type</th>
+              <th className="px-4 py-3 font-semibold">Payee / Vendor</th>
+              <th className="px-4 py-3 font-semibold">Amount</th>
+              <th className="px-4 py-3 font-semibold">Reference</th>
+              <th className="px-4 py-3 font-semibold">Entered By</th>
+            </tr>
+          </thead>
+          <tbody>
+            {!expenses.length ? (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-[color:var(--acm-muted-fg)]">
+                  No expenses match the current filters.
+                </td>
+              </tr>
+            ) : null}
+            {expenses.map((expense) => (
+              <tr key={expense.id} className="border-t border-[color:var(--acm-border)]">
+                <td className="px-4 py-3">{formatDate(expense.expense_date)}</td>
+                <td className="px-4 py-3">{formatTypeLabel(expense.expense_type || expense.category)}</td>
+                <td className="px-4 py-3">{expense.party_name || expense.vendor || "-"}</td>
+                <td className="px-4 py-3 font-semibold">{formatCurrency(expense.amount)}</td>
+                <td className="px-4 py-3">{expense.reference_number || "-"}</td>
+                <td className="px-4 py-3">{expense.created_by?.name || expense.created_by?.user_name || expense.created_by?.user_code || "-"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function DynamicExpenseFields({ form, setForm }) {
+  if (form.expenseType === "employee_labor") {
+    return (
+      <div className="grid gap-3 md:grid-cols-2">
+        <LabeledField label="Employee Name">
+          <input className={fieldClass()} value={form.partyName} onChange={(event) => setForm((current) => ({ ...current, partyName: event.target.value }))} />
+        </LabeledField>
+        <LabeledField label="Hours">
+          <input type="number" min="0" step="0.01" className={fieldClass()} value={form.quantity} onChange={(event) => setForm((current) => ({ ...current, quantity: event.target.value }))} />
+        </LabeledField>
+        <LabeledField label="Target Wage">
+          <input type="number" min="0" step="0.01" className={fieldClass()} value={form.unitRate} onChange={(event) => setForm((current) => ({ ...current, unitRate: event.target.value }))} />
+        </LabeledField>
+        <LabeledField label="Markup %">
+          <input type="number" min="0" step="0.01" className={fieldClass()} value={form.markupPercent} onChange={(event) => setForm((current) => ({ ...current, markupPercent: event.target.value }))} />
+        </LabeledField>
+      </div>
+    );
+  }
+
+  if (form.expenseType === "subcontractor") {
+    return (
+      <div className="grid gap-3 md:grid-cols-2">
+        <LabeledField label="Subcontractor Name">
+          <input className={fieldClass()} value={form.partyName} onChange={(event) => setForm((current) => ({ ...current, partyName: event.target.value }))} />
+        </LabeledField>
+        <LabeledField label="Rate / Amount">
+          <input type="number" min="0" step="0.01" className={fieldClass()} value={form.amount} onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))} />
+        </LabeledField>
+      </div>
+    );
+  }
+
+  if (form.expenseType === "material") {
+    return (
+      <div className="grid gap-3 md:grid-cols-2">
+        <LabeledField label="Vendor">
+          <input className={fieldClass()} value={form.vendor} onChange={(event) => setForm((current) => ({ ...current, vendor: event.target.value }))} />
+        </LabeledField>
+        <LabeledField label="Material Name">
+          <input className={fieldClass()} value={form.details.materialName} onChange={(event) => setForm((current) => ({ ...current, details: { ...current.details, materialName: event.target.value } }))} />
+        </LabeledField>
+        <LabeledField label="Quantity">
+          <input type="number" min="0" step="0.01" className={fieldClass()} value={form.quantity} onChange={(event) => setForm((current) => ({ ...current, quantity: event.target.value }))} />
+        </LabeledField>
+        <LabeledField label="Unit Rate">
+          <input type="number" min="0" step="0.01" className={fieldClass()} value={form.unitRate} onChange={(event) => setForm((current) => ({ ...current, unitRate: event.target.value }))} />
+        </LabeledField>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      <LabeledField label="Equipment Name">
+        <input className={fieldClass()} value={form.partyName} onChange={(event) => setForm((current) => ({ ...current, partyName: event.target.value }))} />
+      </LabeledField>
+      <LabeledField label="Rental Cost">
+        <input type="number" min="0" step="0.01" className={fieldClass()} value={form.details.rentalCost} onChange={(event) => setForm((current) => ({ ...current, details: { ...current.details, rentalCost: event.target.value } }))} />
+      </LabeledField>
+      <LabeledField label="Fuel Cost">
+        <input type="number" min="0" step="0.01" className={fieldClass()} value={form.details.fuelCost} onChange={(event) => setForm((current) => ({ ...current, details: { ...current.details, fuelCost: event.target.value } }))} />
+      </LabeledField>
+    </div>
+  );
+}
+
+function ExpensesModulePage({ lockedProjectId = "", roleBase = "employee", currentUserId = "" }) {
+  const { filters, setFilters } = useExpenseViewState();
+  const router = useRouter();
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
+  const [projectsOpen, setProjectsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selectedExpense, setSelectedExpense] = useState(null);
-  const [form, setForm] = useState(() => createExpenseForm(projectId));
-  const queryKey = buildQuery(projectId, filters);
-  const expensesQuery = useApiQuery(projectId ? queryKey : null);
-
-  const expenses = expensesQuery.data?.expenses ?? [];
-  const categories = expensesQuery.data?.categories ?? [];
-  const canCreateExpenses = Boolean(projectId);
+  const [form, setForm] = useState(() => createExpenseForm(lockedProjectId));
+  const overviewData = useProjectExpenses({
+    projectId: lockedProjectId || undefined,
+    filters: lockedProjectId ? { projectId: lockedProjectId } : {},
+  });
+  const listData = useProjectExpenses({
+    projectId: lockedProjectId || undefined,
+    filters: lockedProjectId ? { ...filters, projectId: lockedProjectId } : filters,
+  });
+  const { query: expensesQuery, queryUrl, expenses, projects, expenseTypes, enteredByOptions } = listData;
+  const statusOptions = listData.statusOptions;
+  const totals = overviewData.totals;
+  const { saveExpense: persistExpense, deleteExpense: removeExpense } = useExpenseMutations({ projectId: lockedProjectId || undefined });
   const canManageAll = roleBase === "owner" || roleBase === "manager";
-  const enteredByOptions = useMemo(() => {
-    const map = new Map();
-    expenses.forEach((expense) => {
-      if (!expense.created_by_user_id) return;
-      map.set(
-        expense.created_by_user_id,
-        expense.created_by?.name || expense.created_by?.user_name || expense.created_by?.user_code || "Team Member"
-      );
-    });
-    return Array.from(map.entries()).map(([id, label]) => ({ id, label }));
-  }, [expenses]);
+  const canCreateExpenses = projects.length > 0 || Boolean(lockedProjectId);
+  const activeProject = useMemo(
+    () => projects.find((project) => project.id === lockedProjectId) ?? null,
+    [lockedProjectId, projects]
+  );
 
-  const totals = useMemo(() => {
-    const totalAmount = expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
-    const categoryMap = new Map();
-    const monthlyMap = new Map();
-
-    expenses.forEach((expense) => {
-      const amount = Number(expense.amount || 0);
-      categoryMap.set(expense.category, (categoryMap.get(expense.category) || 0) + amount);
-      const monthKey = String(expense.expense_date || "").slice(0, 7);
-      monthlyMap.set(monthKey, (monthlyMap.get(monthKey) || 0) + amount);
-    });
-
-    return {
-      totalAmount,
-      totalEntries: expenses.length,
-      averageAmount: expenses.length ? totalAmount / expenses.length : 0,
-      topCategories: Array.from(categoryMap.entries())
-        .map(([label, value]) => ({ label, value }))
-        .sort((a, b) => b.value - a.value)
-        .slice(0, 5),
-      monthlySpend: Array.from(monthlyMap.entries())
-        .map(([label, value]) => ({ label, value }))
-        .sort((a, b) => a.label.localeCompare(b.label))
-        .slice(-6),
-    };
-  }, [expenses]);
-
-  function canEdit(expense) {
+  const canEdit = useCallback((expense) => {
     if (!expense) return false;
     if (canManageAll) return true;
     return expense.created_by_user_id === currentUserId;
-  }
+  }, [canManageAll, currentUserId]);
 
-  function openCreate() {
-    setForm(createExpenseForm(projectId));
+  const openCreate = useCallback(() => {
+    setForm(createExpenseForm(lockedProjectId || ""));
     setOpen(true);
     setError("");
     setMessage("");
-  }
+  }, [lockedProjectId]);
 
-  function openEdit(expense) {
+  const openEdit = useCallback((expense) => {
     setForm({
       id: expense.id,
-      projectId,
-      category: expense.category || categories[0] || "Materials",
+      projectId: expense.project_id || lockedProjectId || "",
+      expenseType: expense.expense_type || "material",
+      status: expense.status || "approved",
+      partyName: expense.party_name || "",
       amount: expense.amount ?? "",
+      quantity: expense.quantity ?? "",
+      unitRate: expense.unit_rate ?? "",
+      markupPercent: expense.markup_percent ?? "",
       note: expense.note || "",
       expenseDate: expense.expense_date || new Date().toISOString().slice(0, 10),
       vendor: expense.vendor || "",
       paymentMethod: expense.payment_method || "Cash",
       referenceNumber: expense.reference_number || "",
       receiptUrl: expense.receipt_url || "",
+      details: {
+        materialName: expense.details?.materialName || "",
+        rentalCost: expense.details?.rentalCost || "",
+        fuelCost: expense.details?.fuelCost || "",
+      },
     });
     setSelectedExpense(null);
     setOpen(true);
     setError("");
     setMessage("");
-  }
+  }, [lockedProjectId]);
 
-  async function saveExpense(event) {
+  const saveExpense = useCallback(async (event) => {
     event.preventDefault();
     if (busy) return;
     setBusy(true);
@@ -283,203 +385,138 @@ export function ProjectExpensesPage({ projectId, roleBase = "employee", currentU
     setMessage("");
 
     try {
-      await sendJson("/api/project-expenses", {
-        method: form.id ? "PUT" : "POST",
-        body: form,
+      const nextAmount = computeAmount(form);
+      await persistExpense({
+        ...form,
+        amount: nextAmount,
+        projectId: form.projectId || lockedProjectId,
       });
       setOpen(false);
       setMessage(form.id ? "Expense updated." : "Expense added.");
-      invalidateApiQuery(queryKey);
-      await expensesQuery.refresh();
     } catch (requestError) {
-      setError(formatApiError(requestError.payload, "expense_save_failed"));
+      setError(requestError.message || "expense_save_failed");
     } finally {
       setBusy(false);
     }
-  }
+  }, [busy, form, lockedProjectId, persistExpense]);
 
-  async function deleteExpense(expense) {
+  const deleteExpense = useCallback(async (expense) => {
     if (!window.confirm(`Delete expense for ${formatCurrency(expense.amount)}?`)) return;
     setError("");
     setMessage("");
     try {
-      await sendJson("/api/project-expenses", {
-        method: "DELETE",
-        body: { id: expense.id, projectId },
-      });
+      await removeExpense({ id: expense.id, activeProjectId: expense.project_id || lockedProjectId });
       if (selectedExpense?.id === expense.id) setSelectedExpense(null);
       setMessage("Expense deleted.");
-      invalidateApiQuery(queryKey);
-      await expensesQuery.refresh();
     } catch (requestError) {
-      setError(formatApiError(requestError.payload, "expense_delete_failed"));
+      setError(requestError.message || "expense_delete_failed");
     }
-  }
+  }, [lockedProjectId, removeExpense, selectedExpense]);
 
-  function exportPdf() {
-    const url = `${buildQuery(projectId, filters)}&export=pdf&disposition=attachment`;
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
+  const exportPdf = useCallback(() => {
+    const url = new URL(queryUrl || "/api/project-expenses", window.location.origin);
+    url.searchParams.set("export", "pdf");
+    url.searchParams.set("disposition", "attachment");
+    window.open(url.toString(), "_blank", "noopener,noreferrer");
+  }, [queryUrl]);
+
+  const computedAmount = useMemo(() => computeAmount(form), [form]);
 
   return (
     <>
       <div className="space-y-4">
         <InlineMessage error={expensesQuery.error || error} message={message} onDismiss={() => { setError(""); setMessage(""); }} />
 
-        <div className="grid gap-4 xl:grid-cols-3">
-          <div className={cardClass()}>
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Total Expense</div>
-            <div className="mt-3 text-3xl font-bold text-[color:var(--acm-fg)]">{formatCurrency(totals.totalAmount)}</div>
-            <div className="mt-2 text-sm text-[color:var(--acm-muted-fg)]">{totals.totalEntries} entries</div>
-          </div>
-
-          <div className={cardClass()}>
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Average Entry</div>
-            <div className="mt-3 text-3xl font-bold text-[color:var(--acm-fg)]">{formatCurrency(totals.averageAmount)}</div>
-            <div className="mt-2 text-sm text-[color:var(--acm-muted-fg)]">Filtered results</div>
-          </div>
-
-          <div className={cardClass()}>
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Top Category</div>
-            <div className="mt-3 text-3xl font-bold text-[color:var(--acm-fg)]">{totals.topCategories[0]?.label || "-"}</div>
-            <div className="mt-2 text-sm text-[color:var(--acm-muted-fg)]">{formatCurrency(totals.topCategories[0]?.value || 0)}</div>
-          </div>
-        </div>
-
-        <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-          <div className={cardClass()}>
-            <SectionHeader title="Expense Trends" />
-            <MiniBarChart
-              items={totals.monthlySpend.map((item) => ({
-                label: item.label || "Current",
-                value: item.value,
-              }))}
-            />
-          </div>
-
-          <div className={cardClass()}>
-            <SectionHeader title="Category Split" />
-            <DonutChart total={totals.totalAmount} items={totals.topCategories} />
-          </div>
-        </div>
-
-        <div className={cardClass()}>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.2fr_repeat(4,minmax(0,1fr))]">
-            <LabeledField label="Search">
-              <input className={fieldClass()} value={filters.search} onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))} placeholder="Category, note, vendor, date, user" />
-            </LabeledField>
-            <LabeledField label="Category">
-              <select className={fieldClass()} value={filters.category} onChange={(event) => setFilters((current) => ({ ...current, category: event.target.value }))}>
-                <option value="all">All Categories</option>
-                {categories.map((category) => <option key={category} value={category}>{category}</option>)}
-              </select>
-            </LabeledField>
-            <LabeledField label="Start Date">
-              <input type="date" className={fieldClass()} value={filters.startDate} onChange={(event) => setFilters((current) => ({ ...current, startDate: event.target.value }))} />
-            </LabeledField>
-            <LabeledField label="End Date">
-              <input type="date" className={fieldClass()} value={filters.endDate} onChange={(event) => setFilters((current) => ({ ...current, endDate: event.target.value }))} />
-            </LabeledField>
-            <LabeledField label="Entered By">
-              <select className={fieldClass()} value={filters.createdByUserId} onChange={(event) => setFilters((current) => ({ ...current, createdByUserId: event.target.value }))}>
-                <option value="all">All Users</option>
-                {enteredByOptions.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
-              </select>
-            </LabeledField>
-          </div>
-        </div>
-
-        <div className={cardClass()}>
-          <SectionHeader
-            title="Expense Register"
-            action={(
-              <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={exportPdf} className="acm-btn acm-btn-secondary h-10 px-4">
-                  Export PDF
-                </button>
-                {canCreateExpenses ? (
-                  <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
-                    Add Expense
-                  </button>
-                ) : null}
-              </div>
-            )}
+        <ExpensePageHeader
+          title={lockedProjectId ? `${activeProject?.name || "Project"} Expenses` : null}
+          // subtitle={lockedProjectId ? "Project expense register with statistics and filters." : "Centralized expense overview with project list and expense stats."}
+          onAddExpense={openCreate}
+        />
+        <ExpenseSummaryCards totals={totals} formatCurrency={formatCurrency} />
+        {lockedProjectId ? null : <ProjectBudgetPreview totals={totals} roleBase={roleBase} onSeeMore={() => setProjectsOpen(true)} />}
+        {/* <ExpenseChartsSection totals={totals} formatCurrency={formatCurrency} cardClass={cardClass} /> */}
+        <ExpenseFiltersPanel
+          filters={lockedProjectId ? { ...filters, projectId: lockedProjectId } : filters}
+          setFilters={setFilters}
+          projects={projects}
+          expenseTypes={expenseTypes}
+          enteredByOptions={enteredByOptions}
+          cardClass={cardClass}
+          fieldClass={fieldClass}
+        />
+        {lockedProjectId ? (
+          <>
+            <div className="flex justify-end">
+              <button type="button" onClick={exportPdf} className="acm-btn acm-btn-secondary h-10 px-4">
+                Export PDF
+              </button>
+            </div>
+            <ProjectExpenseTable expenses={expenses} formatCurrency={formatCurrency} formatDate={formatDate} />
+          </>
+        ) : (
+          <ExpenseRegisterSection
+            expenses={expenses}
+            canCreateExpenses={canCreateExpenses}
+            canEdit={canEdit}
+            setSelectedExpense={setSelectedExpense}
+            openCreate={openCreate}
+            openEdit={openEdit}
+            deleteExpense={deleteExpense}
+            exportPdf={exportPdf}
+            formatCurrency={formatCurrency}
+            formatDate={formatDate}
+            cardClass={cardClass}
+            hideAddButton
           />
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            {!expenses.length ? (
-              <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-6 text-sm text-[color:var(--acm-muted-fg)] lg:col-span-2">
-                No expenses match the current filters.
-              </div>
-            ) : null}
-
-            {expenses.map((expense) => (
-              <div key={expense.id} className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
-                <CompactListRow
-                  primary={`${expense.category || "Expense"} • ${formatCurrency(expense.amount)}`}
-                  secondary={
-                    <>
-                      {expense.note || "No note"}
-                      <br />
-                      {formatDate(expense.expense_date)} • {expense.vendor || "Vendor pending"}
-                    </>
-                  }
-                  tertiary={
-                    <>
-                      {expense.payment_method || "Payment method pending"}
-                      {expense.reference_number ? ` • Ref ${expense.reference_number}` : ""}
-                      <br />
-                      Entered by {expense.created_by?.name || expense.created_by?.user_name || expense.created_by?.user_code || "-"}
-                    </>
-                  }
-                  onClick={() => setSelectedExpense(expense)}
-                  actions={canEdit(expense) ? (
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={(event) => { event.stopPropagation(); openEdit(expense); }} className="acm-btn acm-btn-secondary h-9 px-3 text-xs">
-                        Edit
-                      </button>
-                      <button type="button" onClick={(event) => { event.stopPropagation(); deleteExpense(expense); }} className="acm-btn acm-btn-secondary h-9 px-3 text-xs">
-                        Delete
-                      </button>
-                    </div>
-                  ) : null}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
+        )}
       </div>
 
       <Modal open={open} title={form.id ? "Edit Expense" : "Add Expense"} onClose={() => setOpen(false)}>
         <form onSubmit={saveExpense} className="grid gap-4">
           <div className="grid gap-3 md:grid-cols-2">
-            <LabeledField label="Category">
-              <select className={fieldClass()} value={form.category} onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}>
-                {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+            <LabeledField label="Project">
+              <select className={fieldClass()} value={form.projectId} onChange={(event) => setForm((current) => ({ ...current, projectId: event.target.value }))} disabled={Boolean(lockedProjectId)}>
+                <option value="">Select Project</option>
+                {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
               </select>
             </LabeledField>
-            <LabeledField label="Amount">
-              <input type="number" min="0" step="0.01" className={fieldClass()} value={form.amount} onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))} />
+            <LabeledField label="Expense Type">
+              <select className={fieldClass()} value={form.expenseType} onChange={(event) => setForm((current) => ({ ...current, expenseType: event.target.value }))}>
+                {expenseTypes.map((entry) => <option key={entry.value} value={entry.value}>{entry.label}</option>)}
+              </select>
+            </LabeledField>
+            <LabeledField label="Status">
+              <select className={fieldClass()} value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}>
+                {statusOptions.map((entry) => <option key={entry.value} value={entry.value}>{entry.label}</option>)}
+              </select>
             </LabeledField>
             <LabeledField label="Date">
               <input type="date" className={fieldClass()} value={form.expenseDate} onChange={(event) => setForm((current) => ({ ...current, expenseDate: event.target.value }))} />
             </LabeledField>
+          </div>
+
+          <DynamicExpenseFields form={form} setForm={setForm} />
+
+          <div className="grid gap-3 md:grid-cols-2">
             <LabeledField label="Payment Method">
               <select className={fieldClass()} value={form.paymentMethod} onChange={(event) => setForm((current) => ({ ...current, paymentMethod: event.target.value }))}>
                 {["Cash", "Card", "Bank Transfer", "Cheque", "UPI", "Petty Cash"].map((entry) => <option key={entry} value={entry}>{entry}</option>)}
               </select>
-            </LabeledField>
-            <LabeledField label="Vendor">
-              <input className={fieldClass()} value={form.vendor} onChange={(event) => setForm((current) => ({ ...current, vendor: event.target.value }))} />
             </LabeledField>
             <LabeledField label="Reference">
               <input className={fieldClass()} value={form.referenceNumber} onChange={(event) => setForm((current) => ({ ...current, referenceNumber: event.target.value }))} />
             </LabeledField>
           </div>
 
-          <LabeledField label="Note">
+          <LabeledField label="Description / Note">
             <textarea className={fieldClass()} value={form.note} onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))} rows={4} />
           </LabeledField>
+
+          <div className={cardClass("p-4")}>
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--acm-muted-fg)]">Total Amount</div>
+            <div className="mt-2 text-2xl font-bold text-[color:var(--acm-fg)]">{formatCurrency(computedAmount)}</div>
+            <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{formatTypeLabel(form.expenseType)}</div>
+          </div>
 
           <BusyButton type="submit" busy={busy} className="acm-btn acm-btn-primary">
             {form.id ? "Save Expense" : "Create Expense"}
@@ -502,52 +539,47 @@ export function ProjectExpensesPage({ projectId, roleBase = "employee", currentU
                 </>
               ) : null}
             </div>
-            <div className="space-y-2 text-sm">
-              <div className="grid grid-cols-[140px_1fr] gap-3 border-b border-[color:var(--acm-border)] py-2"><div className="font-semibold text-[color:var(--acm-muted-fg)]">Category</div><div>{selectedExpense.category || "-"}</div></div>
-              <div className="grid grid-cols-[140px_1fr] gap-3 border-b border-[color:var(--acm-border)] py-2"><div className="font-semibold text-[color:var(--acm-muted-fg)]">Amount</div><div>{formatCurrency(selectedExpense.amount)}</div></div>
-              <div className="grid grid-cols-[140px_1fr] gap-3 border-b border-[color:var(--acm-border)] py-2"><div className="font-semibold text-[color:var(--acm-muted-fg)]">Date</div><div>{formatDate(selectedExpense.expense_date)}</div></div>
-              <div className="grid grid-cols-[140px_1fr] gap-3 border-b border-[color:var(--acm-border)] py-2"><div className="font-semibold text-[color:var(--acm-muted-fg)]">Vendor</div><div>{selectedExpense.vendor || "-"}</div></div>
-              <div className="grid grid-cols-[140px_1fr] gap-3 border-b border-[color:var(--acm-border)] py-2"><div className="font-semibold text-[color:var(--acm-muted-fg)]">Payment</div><div>{selectedExpense.payment_method || "-"}</div></div>
-              <div className="grid grid-cols-[140px_1fr] gap-3 border-b border-[color:var(--acm-border)] py-2"><div className="font-semibold text-[color:var(--acm-muted-fg)]">Reference</div><div>{selectedExpense.reference_number || "-"}</div></div>
-              <div className="grid grid-cols-[140px_1fr] gap-3 py-2"><div className="font-semibold text-[color:var(--acm-muted-fg)]">Entered By</div><div>{selectedExpense.created_by?.name || selectedExpense.created_by?.user_name || selectedExpense.created_by?.user_code || "-"}</div></div>
-            </div>
+            <ExpenseDetailsContent expense={selectedExpense} formatCurrency={formatCurrency} formatDate={formatDate} />
             <div className="rounded-[18px] border border-[color:var(--acm-border)] p-4 text-sm text-[color:var(--acm-fg)]">
               {selectedExpense.note || "No note"}
             </div>
           </div>
         ) : null}
       </Modal>
+
+      <Modal open={projectsOpen} title="All Projects" onClose={() => setProjectsOpen(false)} maxWidth="max-w-5xl">
+        <div className="grid gap-4 md:grid-cols-2">
+          {totals.projectSummaries.map((project) => (
+            <button
+              key={project.id || project.name}
+              type="button"
+              onClick={() => {
+                setProjectsOpen(false);
+                router.push(`/${roleBase}/project/${project.id}/expenses`);
+              }}
+              className="rounded-[18px] border border-[color:var(--acm-border)] px-4 py-4 text-left"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="font-semibold text-[color:var(--acm-fg)]">{project.name}</div>
+                <div className="flex h-9 w-9 items-center justify-center rounded-full border border-[color:var(--acm-border)] text-[color:var(--acm-muted-fg)]">
+                  <ChevronRightIcon className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-2 text-sm text-[color:var(--acm-muted-fg)]">
+                Budget {formatCurrency(project.budget)} | Spent {formatCurrency(project.spent)} | Remaining {formatCurrency(project.remaining)}
+              </div>
+            </button>
+          ))}
+        </div>
+      </Modal>
     </>
   );
 }
 
+export function ProjectExpensesPage({ projectId, roleBase = "employee", currentUserId = "" }) {
+  return <ExpensesModulePage lockedProjectId={projectId} roleBase={roleBase} currentUserId={currentUserId} />;
+}
+
 export function ExpensesWorkspacePage({ roleBase = "owner", currentUserId = "" }) {
-  const projectsQuery = useApiQuery("/api/projects");
-  const projectList = useMemo(() => projectsQuery.data?.projects ?? [], [projectsQuery.data?.projects]);
-  const [projectId, setProjectId] = useState("");
-  const activeProjectId = projectId || projectList[0]?.id || "";
-
-  return (
-    <div className="space-y-4">
-      <div className={cardClass()}>
-        <div className="grid gap-3 md:grid-cols-[220px_1fr] md:items-end">
-          <LabeledField label="Project">
-            <select className={fieldClass()} value={activeProjectId} onChange={(event) => setProjectId(event.target.value)}>
-              {projectList.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </LabeledField>
-        </div>
-      </div>
-
-      {activeProjectId ? (
-        <ProjectExpensesPage projectId={activeProjectId} roleBase={roleBase} currentUserId={currentUserId} />
-      ) : (
-        <div className={cardClass()}>No projects available yet.</div>
-      )}
-    </div>
-  );
+  return <ExpensesModulePage roleBase={roleBase} currentUserId={currentUserId} />;
 }

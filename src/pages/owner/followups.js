@@ -1,6 +1,11 @@
+import dynamic from "next/dynamic";
 import OwnerShell from "@/components/dashboard/OwnerShell";
-import FollowUpsPage from "@/components/dashboard/FollowUpsPage";
 import { requireOwner } from "@/lib/pages/requireOwner";
+import { WorkspaceLoadingCard } from "@/shared/ui/feedback/WorkspaceLoadingCard";
+
+const FollowUpsPage = dynamic(() => import("@/components/dashboard/FollowUpsPage"), {
+  loading: () => <WorkspaceLoadingCard label="Loading follow-ups..." />,
+});
 
 export default function OwnerFollowUpsRoute({ companyName, viewer }) {
   return (

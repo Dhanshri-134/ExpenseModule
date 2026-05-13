@@ -1,16 +1,18 @@
-import ProjectSectionPage from "@/components/dashboard/Project/ProjectSectionPage";
+import ProjectShell from "@/components/dashboard/Project/ProjectShell";
+import { ProjectExpensesPage } from "@/components/dashboard/Project/ProjectExpensesPage";
 import { requireOwner } from "@/lib/pages/requireOwner";
 
 export default function OwnerProjectExpensesPage({ companyName, viewer, id }) {
   return (
-    <ProjectSectionPage
+    <ProjectShell
       companyName={companyName}
       viewer={viewer}
+      title="Project Expenses"
       roleBase="owner"
       projectId={id}
-      section="expenses"
-      ownerMode
-    />
+    >
+      <ProjectExpensesPage projectId={id} roleBase="owner" currentUserId={viewer.id} />
+    </ProjectShell>
   );
 }
 

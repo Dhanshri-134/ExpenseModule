@@ -1,11 +1,23 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import { useDeferredValue, useMemo, useState } from "react";
 import Modal from "@/components/dashboard/Modal";
-import { BusyButton, CompactListRow } from "@/components/dashboard/DashboardUi";
+import { BusyButton } from "@/components/dashboard/DashboardUi";
 import { sendJson } from "@/lib/client/apiClient";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
 import { ProjectEstimatesWorkspace } from "@/components/dashboard/Project/ProjectEstimateTemplate";
+import { PanelLoadingFallback } from "@/shared/ui/feedback/PanelLoadingFallback";
+
+const FieldReportsArchivePanel = dynamic(
+  () => import("@/features/field-reports/components/FieldReportsArchivePanel").then((mod) => mod.FieldReportsArchivePanel),
+  { loading: () => <PanelLoadingFallback message="Loading field reports..." /> }
+);
+
+const FieldReportDetailsPanel = dynamic(
+  () => import("@/features/field-reports/components/FieldReportDetailsPanel").then((mod) => mod.FieldReportDetailsPanel),
+  { loading: () => <PanelLoadingFallback message="Loading report details..." /> }
+);
 
 function cardClass(extra = "") {
   return `rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.08)] ${extra}`.trim();
@@ -105,15 +117,6 @@ function SectionHeader({ title, action }) {
   );
 }
 
-function DetailRow({ label, value }) {
-  return (
-    <div className="grid grid-cols-[140px_1fr] gap-3 border-b border-[color:var(--acm-border)] py-2 text-sm last:border-b-0">
-      <div className="font-semibold text-[color:var(--acm-muted-fg)]">{label}</div>
-      <div className="text-[color:var(--acm-fg)]">{value || "-"}</div>
-    </div>
-  );
-}
-
 function createFieldReportForm(projectId) {
   return {
     id: "",
@@ -167,6 +170,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selectedReport, setSelectedReport] = useState(null);
@@ -175,7 +179,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
   const reports = reportsQuery.data?.reports ?? [];
   const filteredReports = reports.filter((report) =>
     matchesSearchQuery(
-      searchQuery,
+      deferredSearchQuery,
       report.location,
       report.report_date,
       report.report_time,
@@ -336,7 +340,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
 
       setMessage(form.id ? "Field report updated." : "Field report created.");
       setOpen(false);
-      invalidateApiQuery(`/api/field-reports?projectId=${projectId}`);
+      invalidateApiQuery(`/api/field-reports?projectId=${projectId}`, { refetchType: "none" });
       await reportsQuery.refresh();
     } catch (requestError) {
       setError(formatApiError(requestError.payload, "field_report_save_failed"));
@@ -356,7 +360,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
       });
       setMessage("Field report deleted.");
       if (selectedReport?.id === report.id) setSelectedReport(null);
-      invalidateApiQuery(`/api/field-reports?projectId=${projectId}`);
+      invalidateApiQuery(`/api/field-reports?projectId=${projectId}`, { refetchType: "none" });
       await reportsQuery.refresh();
     } catch (requestError) {
       setError(formatApiError(requestError.payload, "field_report_delete_failed"));
@@ -369,81 +373,18 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
 
       <InlineMessage error={reportsQuery.error || error} message={message} onDismiss={() => { setError(""); setMessage(""); }} />
 
-      <div className={cardClass()}>
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <input className={fieldClass()} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search reports by location, weather, date, creator, or notes" />
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="text-lg font-bold text-[color:var(--acm-fg)]">Daily Inspection Archive</div>
-            {canCreateReports ? (
-              <button type="button" onClick={openCreate} className="acm-btn acm-btn-primary h-10 px-4">
-                New Report
-              </button>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-2">
-          {!filteredReports.length ? (
-            <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-6 text-sm text-[color:var(--acm-muted-fg)] lg:col-span-2">
-              No field reports match the current search.
-            </div>
-          ) : null}
-
-          {filteredReports.map((report) => (
-            <div key={report.id} className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
-              <CompactListRow
-              key={report.id}
-              primary={formatDate(report.report_date)}
-              secondary={
-                <>
-                  {report.location || "Site report"}
-                  <br />
-                  {report.report_time || "Time pending"}
-                  <br />
-                  {report.weather_conditions || "Weather pending"}
-                </>
-              }
-              tertiary={
-                <>
-                  {report.temperature_range || "Temp pending"}
-                  <br />
-                  Created by {report.created_by?.name || report.created_by?.user_name || report.created_by?.user_code || "-"}
-                  <br />
-                  {report.work_activities?.length || 0} work logs, {(report.equipment_used ?? []).length || 0} equipment entries
-                </>
-              }
-              onClick={() => setSelectedReport(report)}
-              actions={
-                canEdit(report) ? (
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openEdit(report);
-                      }}
-                      className="acm-btn acm-btn-secondary h-9 px-3 text-xs"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        deleteReport(report);
-                      }}
-                      className="acm-btn acm-btn-secondary h-9 px-3 text-xs"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                ) : null
-              }
-            />
-            </div>
-          ))}
-        </div>
-      </div>
+      <FieldReportsArchivePanel
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        canCreateReports={canCreateReports}
+        onCreate={openCreate}
+        filteredReports={filteredReports}
+        canEdit={canEdit}
+        onSelectReport={setSelectedReport}
+        onEditReport={openEdit}
+        onDeleteReport={deleteReport}
+        formatDate={formatDate}
+      />
 
       <Modal open={open} title={form.id ? "Edit Field Report" : "Create Field Report"} onClose={() => setOpen(false)}>
         <form onSubmit={saveReport} className="grid gap-4">
@@ -713,138 +654,14 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
       </Modal>
 
       <Modal open={Boolean(selectedReport)} title="Field Report Details" onClose={() => setSelectedReport(null)}>
-        {selectedReport ? (
-          <div className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-              {canEdit(selectedReport) ? (
-                <>
-                  <button type="button" onClick={() => openEdit(selectedReport)} className="acm-btn acm-btn-secondary h-10 px-4">
-                    Edit Report
-                  </button>
-                  <button type="button" onClick={() => deleteReport(selectedReport)} className="acm-btn acm-btn-secondary h-10 px-4">
-                    Delete Report
-                  </button>
-                </>
-              ) : null}
-            </div>
-            <div className="space-y-2">
-              <DetailRow label="Date" value={formatDate(selectedReport.report_date)} />
-              <DetailRow label="Time" value={selectedReport.report_time || "-"} />
-              <DetailRow label="Location" value={selectedReport.location || "-"} />
-              <DetailRow label="Weather" value={selectedReport.weather_conditions || "-"} />
-              <DetailRow label="Temperature" value={selectedReport.temperature_range || "-"} />
-              <DetailRow label="Impact" value={selectedReport.weather_impact || "-"} />
-              <DetailRow label="Comments" value={selectedReport.comments || "-"} />
-              <DetailRow label="Signoff" value={[selectedReport.signoff_name || "-", selectedReport.signoff_role || "-"].join(", ")} />
-            </div>
-
-            {useDetailedInspectionForm ? (
-              <>
-                <div className="rounded-[18px] border border-[color:var(--acm-border)] p-4">
-                  <div className="mb-2 text-sm font-semibold text-[color:var(--acm-fg)]">Communications With Public</div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {(selectedReport.public_communications ?? []).length ? (selectedReport.public_communications ?? []).map((entry, index) => (
-                      <div key={`public-view-${index}`} className="rounded-[14px] border border-[color:var(--acm-border)] px-3 py-3 text-sm">
-                        <div className="font-semibold">{entry.name || "-"}</div>
-                        <div className="mt-1 text-[color:var(--acm-muted-fg)]">{entry.phoneNumber || "-"}</div>
-                        <div className="mt-2">{entry.comments || "-"}</div>
-                      </div>
-                    )) : <div className="text-sm text-[color:var(--acm-muted-fg)]">No public communication entries.</div>}
-                  </div>
-                </div>
-
-                <div className="grid gap-4 xl:grid-cols-2">
-                  <div className="rounded-[18px] border border-[color:var(--acm-border)] p-4">
-                    <div className="mb-2 text-sm font-semibold text-[color:var(--acm-fg)]">Contractor Labor Force</div>
-                    <div className="space-y-2 text-sm">
-                      {(selectedReport.contractor_labor_force ?? []).length ? (selectedReport.contractor_labor_force ?? []).map((entry, index) => (
-                        <div key={`labor-view-${index}`} className="rounded-[14px] border border-[color:var(--acm-border)] px-3 py-2">
-                          <div className="font-semibold">{entry.classification || "-"}</div>
-                          <div className="mt-1 text-[color:var(--acm-muted-fg)]">{entry.personnel || "-"}</div>
-                        </div>
-                      )) : <div className="text-[color:var(--acm-muted-fg)]">No labor entries.</div>}
-                    </div>
-                  </div>
-
-                  <div className="rounded-[18px] border border-[color:var(--acm-border)] p-4">
-                    <div className="mb-2 text-sm font-semibold text-[color:var(--acm-fg)]">Subcontractors Onsite</div>
-                    <div className="space-y-2 text-sm">
-                      {(selectedReport.subcontractors_onsite ?? []).length ? (selectedReport.subcontractors_onsite ?? []).map((entry, index) => (
-                        <div key={`subcontractor-view-${index}`} className="rounded-[14px] border border-[color:var(--acm-border)] px-3 py-2">
-                          <div className="font-semibold">{entry.companyName || "-"}</div>
-                          <div className="mt-1 text-[color:var(--acm-muted-fg)]">{entry.supervisor || "-"} | {entry.totalPersons || "-"} persons</div>
-                        </div>
-                      )) : <div className="text-[color:var(--acm-muted-fg)]">No subcontractor entries.</div>}
-                    </div>
-                  </div>
-                </div>
-              </>
-            ) : null}
-
-            <div className="rounded-[18px] border border-[color:var(--acm-border)] p-4">
-              <div className="mb-2 text-sm font-semibold text-[color:var(--acm-fg)]">Work Activity Logs</div>
-              <div className="space-y-2 text-sm text-[color:var(--acm-fg)]">
-                {(selectedReport.work_activities ?? []).map((entry, index) => (
-                  <div key={`work-view-${index}`} className="rounded-[14px] border border-[color:var(--acm-border)] px-3 py-2">
-                    {entry.text || "-"}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-[18px] border border-[color:var(--acm-border)] p-4">
-              <div className="mb-2 text-sm font-semibold text-[color:var(--acm-fg)]">Coordination Logs</div>
-              <div className="space-y-2 text-sm text-[color:var(--acm-fg)]">
-                {(selectedReport.coordination_logs ?? []).map((entry, index) => (
-                  <div key={`coordination-view-${index}`} className="rounded-[14px] border border-[color:var(--acm-border)] px-3 py-2">
-                    {entry.text || "-"}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {useDetailedInspectionForm ? (
-              <div className="grid gap-4 xl:grid-cols-2">
-                <div className="rounded-[18px] border border-[color:var(--acm-border)] p-4">
-                  <div className="mb-2 text-sm font-semibold text-[color:var(--acm-fg)]">Equipment Used Today</div>
-                  <div className="space-y-2 text-sm">
-                    {(selectedReport.equipment_used ?? []).length ? (selectedReport.equipment_used ?? []).map((entry, index) => (
-                      <div key={`equipment-view-${index}`} className="rounded-[14px] border border-[color:var(--acm-border)] px-3 py-2">
-                        <div className="font-semibold">{entry.equipmentType || "-"}</div>
-                        <div className="mt-1 text-[color:var(--acm-muted-fg)]">{entry.makeModel || "-"} | {entry.typeOfWork || "-"}</div>
-                        <div className="mt-1 text-[color:var(--acm-muted-fg)]">Time In Use: {entry.timeInUse || "-"}</div>
-                      </div>
-                    )) : <div className="text-[color:var(--acm-muted-fg)]">No equipment entries.</div>}
-                  </div>
-                </div>
-
-                <div className="rounded-[18px] border border-[color:var(--acm-border)] p-4">
-                  <div className="mb-2 text-sm font-semibold text-[color:var(--acm-fg)]">Materials Used Today</div>
-                  <div className="space-y-2 text-sm">
-                    {(selectedReport.materials_used ?? []).length ? (selectedReport.materials_used ?? []).map((entry, index) => (
-                      <div key={`materials-view-${index}`} className="rounded-[14px] border border-[color:var(--acm-border)] px-3 py-2">
-                        <div className="font-semibold">{entry.type || "-"}</div>
-                        <div className="mt-1 text-[color:var(--acm-muted-fg)]">Used: {entry.amountUsed || "-"}</div>
-                        <div className="mt-1 text-[color:var(--acm-muted-fg)]">Remaining: {entry.amountRemaining || "-"}</div>
-                      </div>
-                    )) : <div className="text-[color:var(--acm-muted-fg)]">No material entries.</div>}
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            {(selectedReport.site_pictures ?? []).length ? (
-              <div className="rounded-[18px] border border-[color:var(--acm-border)] p-4">
-                <div className="mb-2 text-sm font-semibold text-[color:var(--acm-fg)]">Site Pictures</div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  {(selectedReport.site_pictures ?? []).map((image, index) => (
-                    <img key={`picture-view-${index}`} src={image} alt={`Field report ${index + 1}`} className="h-40 w-full rounded-[14px] object-cover" />
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+        <FieldReportDetailsPanel
+          selectedReport={selectedReport}
+          canEdit={canEdit}
+          onEdit={openEdit}
+          onDelete={deleteReport}
+          useDetailedInspectionForm={useDetailedInspectionForm}
+          formatDate={formatDate}
+        />
       </Modal>
     </>
   );

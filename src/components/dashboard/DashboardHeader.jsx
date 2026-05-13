@@ -42,6 +42,12 @@ export default function DashboardHeader({
     };
   }, [notificationOpen]);
 
+  useEffect(() => {
+    if (!notificationOpen && notifications.length) {
+      setNotifications([]);
+    }
+  }, [notificationOpen, notifications.length]);
+
   return (
     <>
       <header className={styles.header}>

@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import Modal from "@/components/dashboard/Modal";
 import { BusyButton, CompactListRow } from "@/components/dashboard/DashboardUi";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
+import { ProjectEstimateDetailsPanel } from "@/features/estimates/components/ProjectEstimateDetailsPanel";
+import { EMPTY_ESTIMATE_PREVIEW_SUMMARY, useProjectEstimatePreview } from "@/features/estimates/hooks/useProjectEstimatePreview";
 
 function cardClass(extra = "") {
   return `rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.08)] ${extra}`.trim();
@@ -459,7 +461,7 @@ function InlineMessage({ error, message }) {
   return null;
 }
 
-function EstimateSummaryCard({ summary }) {
+const EstimateSummaryCard = memo(function EstimateSummaryCard({ summary }) {
   return (
     <div className={cardClass("h-full")}>
       <div className="text-lg font-bold text-[color:var(--acm-fg)]">Estimate Summary</div>
@@ -475,7 +477,7 @@ function EstimateSummaryCard({ summary }) {
       </div>
     </div>
   );
-}
+});
 
 function LineSection({ title, subtitle, children, action, defaultOpen = true }) {
   return (
@@ -499,54 +501,20 @@ export function ProjectEstimatesWorkspace({ projectId, canManage = false }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selectedEstimate, setSelectedEstimate] = useState(null);
-  const [previewSummary, setPreviewSummary] = useState({
-    laborCost: 0,
-    materialCost: 0,
-    equipmentCost: 0,
-    directOverheadCost: 0,
-    baseCost: 0,
-    finalBid: 0,
-    totalPrice: 0,
-  });
   const [form, setForm] = useState(() => createEstimateForm(projectId));
 
   const estimates = estimatesQuery.data?.estimates ?? [];
 
   const payload = useMemo(() => buildPayload(form), [form]);
-
-  useEffect(() => {
-    if (!open || !projectId) return undefined;
-
-    let active = true;
-
-    async function previewEstimate() {
-      const res = await fetch("/api/estimates/preview", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json().catch(() => null);
-      if (!active) return;
-      if (!res.ok) {
-        setPreviewSummary({
-          laborCost: 0,
-          materialCost: 0,
-          equipmentCost: 0,
-          directOverheadCost: 0,
-          baseCost: 0,
-          finalBid: 0,
-          totalPrice: 0,
-        });
-        return;
-      }
-      setPreviewSummary(json?.summary || {});
-    }
-
-    previewEstimate();
-    return () => {
-      active = false;
-    };
-  }, [open, payload, projectId]);
+  const {
+    previewSummary,
+    setPreviewSummary,
+  } = useProjectEstimatePreview({
+    open,
+    projectId,
+    payload,
+    initialSummary: selectedEstimate?.summary || EMPTY_ESTIMATE_PREVIEW_SUMMARY,
+  });
 
   function openCreate() {
     setForm(createEstimateForm(projectId));
@@ -702,8 +670,8 @@ export function ProjectEstimatesWorkspace({ projectId, canManage = false }) {
 
     setMessage(form.id ? "Estimate updated." : "Estimate created.");
     setOpen(false);
-    invalidateApiQuery(`/api/estimates?projectId=${projectId}`);
-    invalidateApiQuery("/api/estimates-index");
+    invalidateApiQuery(`/api/estimates?projectId=${projectId}`, { refetchType: "none" });
+    invalidateApiQuery("/api/estimates-index", { refetchType: "none" });
     await estimatesQuery.refresh();
     setBusy(false);
   }
@@ -725,8 +693,8 @@ export function ProjectEstimatesWorkspace({ projectId, canManage = false }) {
 
     setMessage("Estimate deleted.");
     setSelectedEstimate(null);
-    invalidateApiQuery(`/api/estimates?projectId=${projectId}`);
-    invalidateApiQuery("/api/estimates-index");
+    invalidateApiQuery(`/api/estimates?projectId=${projectId}`, { refetchType: "none" });
+    invalidateApiQuery("/api/estimates-index", { refetchType: "none" });
     await estimatesQuery.refresh();
   }
 
@@ -1223,51 +1191,18 @@ export function ProjectEstimatesWorkspace({ projectId, canManage = false }) {
       </Modal>
 
       <Modal open={Boolean(selectedEstimate)} title="Estimate Details" onClose={() => setSelectedEstimate(null)}>
-        {selectedEstimate ? (
-          <div className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => exportEstimate(selectedEstimate, "pdf")} className="acm-btn acm-btn-secondary h-10 px-4">
-                Download PDF
-              </button>
-              <button type="button" onClick={() => exportEstimate(selectedEstimate, "csv")} className="acm-btn acm-btn-secondary h-10 px-4">
-                Export CSV
-              </button>
-              {canManage ? (
-                <>
-                  <button type="button" onClick={() => openEdit(selectedEstimate)} className="acm-btn acm-btn-secondary h-10 px-4">
-                    Edit Estimate
-                  </button>
-                  <button type="button" onClick={() => deleteEstimate(selectedEstimate)} className="acm-btn acm-btn-secondary h-10 px-4">
-                    Delete Estimate
-                  </button>
-                </>
-              ) : null}
-            </div>
-
-            <div className="space-y-2">
-              <DetailRow label="Estimate" value={`${buildEstimateTitle(selectedEstimate)} | ${selectedEstimate.title || "-"}`} />
-              <DetailRow label="Date" value={formatDate(selectedEstimate.estimate_date)} />
-              <DetailRow label="Status" value={selectedEstimate.status || "-"} />
-              <DetailRow label="Prepared By" value={selectedEstimate.prepared_by?.name || selectedEstimate.prepared_by?.user_name || selectedEstimate.prepared_by?.user_code || "-"} />
-              <DetailRow label="Notes" value={selectedEstimate.notes || "-"} />
-            </div>
-
-            {(selectedEstimate.cost_codes ?? []).map((line, index) => (
-              <div key={line.id || `${line.costCode?.code}-${index}`} className="rounded-[18px] border border-[color:var(--acm-border)] p-4">
-                <div className="text-sm font-bold text-[color:var(--acm-fg)]">{line.costCode?.name || `Cost Line ${index + 1}`}</div>
-                <div className="mt-1 text-xs text-[color:var(--acm-muted-fg)]">{line.costCode?.code || "-"} | {line.costCode?.description || "-"}</div>
-                <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4 text-sm">
-                  <div>Labor: {formatCurrency(line.laborCost)}</div>
-                  <div>Material: {formatCurrency(line.materialCost)}</div>
-                  <div>Equipment: {formatCurrency(line.equipmentCost)}</div>
-                  <div>Overhead: {formatCurrency(line.directOverhead)}</div>
-                </div>
-              </div>
-            ))}
-
-            <EstimateSummaryCard summary={selectedEstimate.summary || previewSummary} />
-          </div>
-        ) : null}
+        <ProjectEstimateDetailsPanel
+          selectedEstimate={selectedEstimate}
+          canManage={canManage}
+          exportEstimate={exportEstimate}
+          openEdit={openEdit}
+          deleteEstimate={deleteEstimate}
+          buildEstimateTitle={buildEstimateTitle}
+          formatDate={formatDate}
+          formatCurrency={formatCurrency}
+          previewSummary={previewSummary}
+          EstimateSummaryCard={EstimateSummaryCard}
+        />
       </Modal>
     </>
   );
