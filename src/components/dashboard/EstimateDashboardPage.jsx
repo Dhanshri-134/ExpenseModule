@@ -2538,8 +2538,8 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                <div className="flex flex-wrap justify-end gap-2">
                   <BusyButton type="button" busy={activeAction === "preview"} onClick={() => openPdf("preview")} className="acm-btn acm-btn-primary h-10 px-4">Preview PDF</BusyButton>
                   <BusyButton
                     type="button"

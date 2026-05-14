@@ -32,6 +32,15 @@ const nullableUuid = z.preprocess(
   z.string().uuid().nullable().optional()
 );
 
+const optionalNonEmptyString = z.preprocess(
+  (value) => {
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    return trimmed === "" ? undefined : trimmed;
+  },
+  z.string().optional()
+);
+
 const QuerySchema = z.object({
   projectId: optionalUuid,
   clientId: optionalUuid,
@@ -122,8 +131,8 @@ const EstimateLineItemSchema = z.object({
 
 const CostCodeInputSchema = z.object({
   costCodeId: nullableUuid,
-  code: z.string().min(1).optional().nullable(),
-  name: z.string().min(1).optional().nullable(),
+  code: optionalNonEmptyString.nullable().optional(),
+  name: optionalNonEmptyString.nullable().optional(),
   description: z.string().optional().nullable(),
   overheadPercent: z.coerce.number().nonnegative().optional(),
   profitPercent: z.coerce.number().nonnegative().optional(),
@@ -145,9 +154,9 @@ const EstimatePayloadSchema = z.object({
   templateId: optionalUuid,
   title: z.string().optional().nullable(),
   estimateDate: z.string().optional().nullable(),
-  status: z.string().min(1).default("draft"),
-  approvalStatus: z.string().optional().default("draft"),
-  invoiceStatus: z.string().optional().default("not_started"),
+  status: optionalNonEmptyString.default("draft"),
+  approvalStatus: optionalNonEmptyString.default("draft"),
+  invoiceStatus: optionalNonEmptyString.default("not_started"),
   scenario: z.enum(["best_case", "expected_case", "worst_case"]).default("expected_case"),
   overheadPercent: z.coerce.number().nonnegative().default(0),
   profitPercent: z.coerce.number().nonnegative().default(0),
@@ -164,12 +173,29 @@ const EstimatePayloadSchema = z.object({
 function normalizeEstimatePayload(payload) {
   const estimateDate = String(payload.estimateDate || "").trim() || new Date().toISOString().slice(0, 10);
   const title = String(payload.title || "").trim() || `Estimate ${estimateDate}`;
+  const costCodes = (payload.costCodes ?? []).filter((costCode) => {
+    const hasIdentity = Boolean(costCode?.costCodeId || String(costCode?.code || "").trim() || String(costCode?.name || "").trim());
+    const hasEntries =
+      (costCode?.laborEntries?.length ?? 0) > 0 ||
+      (costCode?.materialEntries?.length ?? 0) > 0 ||
+      (costCode?.equipmentEntries?.length ?? 0) > 0 ||
+      (costCode?.overheadEntries?.length ?? 0) > 0;
+
+    return hasIdentity || hasEntries;
+  });
 
   return {
     ...payload,
     estimateNumber: payload.estimateNumber ? Number(payload.estimateNumber) : undefined,
+    status: String(payload.status || "").trim() || "draft",
+    approvalStatus: String(payload.approvalStatus || "").trim() || "draft",
+    invoiceStatus: String(payload.invoiceStatus || "").trim() || "not_started",
+    scenario: ["best_case", "expected_case", "worst_case"].includes(String(payload.scenario || "").trim())
+      ? String(payload.scenario).trim()
+      : "expected_case",
     title,
     estimateDate,
+    costCodes,
   };
 }
 

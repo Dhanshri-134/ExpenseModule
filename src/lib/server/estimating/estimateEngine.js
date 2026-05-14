@@ -330,7 +330,6 @@ export async function persistEstimateGraph(admin, ctx, estimate, computed) {
     const { data: itemRow, error: itemError } = await admin
       .from("estimate_cost_code_items")
       .insert({
-        ...(row.id ? { id: row.id } : {}),
         estimate_id: estimate.id,
         company_id: ctx.company.id,
         project_id: estimate.project_id,
