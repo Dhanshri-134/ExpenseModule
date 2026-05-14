@@ -5,21 +5,51 @@ function toNumber(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export function startOfWeekIso(value = new Date()) {
-  const date = new Date(value);
-  const day = date.getUTCDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  date.setUTCDate(date.getUTCDate() + diff);
-  date.setUTCHours(0, 0, 0, 0);
-  return date;
+export function normalizeTimeZone(value) {
+  const timeZone = String(value || "").trim();
+  if (!timeZone) return "UTC";
+  try {
+    Intl.DateTimeFormat("en-US", { timeZone }).format(new Date());
+    return timeZone;
+  } catch {
+    return "UTC";
+  }
 }
 
-export function endOfWeekIso(value = new Date()) {
-  const start = startOfWeekIso(value);
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 6);
-  end.setUTCHours(23, 59, 59, 999);
-  return end;
+function formatDateParts(date, timeZone) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: normalizeTimeZone(timeZone),
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = formatter.formatToParts(date);
+  const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  return {
+    year: Number(values.year),
+    month: Number(values.month),
+    day: Number(values.day),
+  };
+}
+
+export function formatDateInTimeZone(value = new Date(), timeZone = "UTC") {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const { year, month, day } = formatDateParts(date, timeZone);
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function parseCalendarDate(value, timeZone = "UTC") {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    const [year, month, day] = value.trim().split("-").map(Number);
+    return { year, month, day };
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return formatDateParts(new Date(), timeZone);
+  }
+  return formatDateParts(date, timeZone);
 }
 
 export function formatMinutes(totalMinutes) {
@@ -29,9 +59,15 @@ export function formatMinutes(totalMinutes) {
   return `${hours}h ${String(remainder).padStart(2, "0")}m`;
 }
 
-export function weekBoundsForDate(value) {
-  const start = startOfWeekIso(value);
-  const end = endOfWeekIso(value);
+export function weekBoundsForDate(value, timeZone = "UTC") {
+  const { year, month, day } = parseCalendarDate(value, timeZone);
+  const baseDate = new Date(Date.UTC(year, month - 1, day));
+  const weekDay = baseDate.getUTCDay();
+  const diff = weekDay === 0 ? -6 : 1 - weekDay;
+  const start = new Date(baseDate);
+  start.setUTCDate(start.getUTCDate() + diff);
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 6);
   return {
     startIso: start.toISOString(),
     endIso: end.toISOString(),
@@ -40,8 +76,8 @@ export function weekBoundsForDate(value) {
   };
 }
 
-export async function recomputeWeeklyOvertime(admin, { companyId, userId, referenceDate }) {
-  const bounds = weekBoundsForDate(referenceDate);
+export async function recomputeWeeklyOvertime(admin, { companyId, userId, referenceDate, timeZone = "UTC" }) {
+  const bounds = weekBoundsForDate(referenceDate, timeZone);
   const { data: entries, error } = await admin
     .from("time_clock_entries")
     .select("id, clock_in, payable_minutes")

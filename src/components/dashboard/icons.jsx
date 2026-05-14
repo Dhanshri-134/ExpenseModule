@@ -15,6 +15,7 @@ import {
   LogOut,
   Menu,
   PauseCircle,
+  RefreshCw,
   Settings,
   Sparkles,
   Users,
@@ -106,4 +107,8 @@ export function EyeIcon(props) {
 
 export function EyeOffIcon(props) {
   return renderIcon(EyeOff, props);
+}
+
+export function RefreshIcon(props) {
+  return renderIcon(RefreshCw, props);
 }

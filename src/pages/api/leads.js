@@ -23,6 +23,10 @@ const UpdateLeadSchema = LeadSchema.pick({
   id: z.string().uuid(),
 });
 
+const DeleteLeadSchema = z.object({
+  id: z.string().uuid(),
+});
+
 export default async function handler(req, res) {
   const ctx = await requireApiContext(req, res, { moduleKey: "leads" });
   if (!ctx) return;
@@ -93,9 +97,9 @@ export default async function handler(req, res) {
       .insert({
         company_id: ctx.company.id,
         name: payload.name,
-        address: payload.address || null,
-        contact: payload.contact || null,
-        email: payload.email || null,
+        address: payload.address || "",
+        contact: payload.contact || "",
+        email: payload.email || "",
       })
       .select("*")
       .single();
@@ -135,9 +139,9 @@ export default async function handler(req, res) {
       .from("leads")
       .update({
         name: payload.name,
-        address: payload.address || null,
-        contact: payload.contact || null,
-        email: payload.email || null,
+        address: payload.address || "",
+        contact: payload.contact || "",
+        email: payload.email || "",
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)
@@ -150,5 +154,22 @@ export default async function handler(req, res) {
     return sendOk(res, { lead });
   }
 
-  return rejectMethod(res, ["GET", "POST", "PUT"]);
+  if (req.method === "DELETE") {
+    if (ctx.role !== "owner") return sendError(res, 403, "forbidden");
+
+    const parsed = DeleteLeadSchema.safeParse(req.body);
+    if (!parsed.success) return sendError(res, 400, "invalid_payload", parsed.error.flatten());
+
+    const { error } = await ctx.admin
+      .from("leads")
+      .delete()
+      .eq("id", parsed.data.id)
+      .eq("company_id", ctx.company.id);
+
+    if (error) return sendError(res, 500, "lead_delete_failed", error.message);
+
+    return sendOk(res, { deleted: true });
+  }
+
+  return rejectMethod(res, ["GET", "POST", "PUT", "DELETE"]);
 }

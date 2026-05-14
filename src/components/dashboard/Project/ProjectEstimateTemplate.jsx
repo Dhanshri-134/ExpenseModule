@@ -6,6 +6,7 @@ import { BusyButton, CompactListRow } from "@/components/dashboard/DashboardUi";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
 import { ProjectEstimateDetailsPanel } from "@/features/estimates/components/ProjectEstimateDetailsPanel";
 import { EMPTY_ESTIMATE_PREVIEW_SUMMARY, useProjectEstimatePreview } from "@/features/estimates/hooks/useProjectEstimatePreview";
+import { getLocalDateInputValue } from "@/shared/utils/dateTime";
 
 function cardClass(extra = "") {
   return `rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.08)] ${extra}`.trim();
@@ -161,7 +162,7 @@ function createEstimateForm(projectId) {
     id: "",
     projectId,
     title: "",
-    estimateDate: new Date().toISOString().slice(0, 10),
+    estimateDate: getLocalDateInputValue(),
     status: "draft",
     notes: "",
     overheadPercent: "10",
@@ -308,7 +309,7 @@ function formFromEstimate(estimate, projectId) {
     id: estimate.id,
     projectId,
     title: estimate.title || "",
-    estimateDate: estimate.estimate_date || new Date().toISOString().slice(0, 10),
+    estimateDate: estimate.estimate_date || getLocalDateInputValue(),
     status: estimate.status || "draft",
     notes: estimate.notes || "",
     overheadPercent: String(percentInput(estimate.summary?.overheadPercent ?? estimate.overhead_percent ?? 0)),

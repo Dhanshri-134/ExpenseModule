@@ -7,6 +7,9 @@ import { BusyButton } from "@/components/dashboard/DashboardUi";
 import { sendJson } from "@/lib/client/apiClient";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
 import { ProjectEstimatesWorkspace } from "@/components/dashboard/Project/ProjectEstimateTemplate";
+import { PhoneInput } from "@/shared/forms/PhoneInput";
+import { getLocalDateInputValue } from "@/shared/utils/dateTime";
+import { fieldReportFormSchema, focusFirstInvalidField, getValidationErrors } from "@/shared/validations/forms";
 import { PanelLoadingFallback } from "@/shared/ui/feedback/PanelLoadingFallback";
 
 const FieldReportsArchivePanel = dynamic(
@@ -23,8 +26,8 @@ function cardClass(extra = "") {
   return `rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.08)] ${extra}`.trim();
 }
 
-function fieldClass() {
-  return "acm-input mt-0";
+function fieldClass(error = false) {
+  return `acm-input mt-0 ${error ? "border-rose-400 focus:border-rose-500 focus:ring-rose-200" : ""}`.trim();
 }
 
 function formatDate(value) {
@@ -34,13 +37,14 @@ function formatDate(value) {
   return date.toLocaleDateString();
 }
 
-function LabeledField({ label, children }) {
+function LabeledField({ label, fieldName = "", error = "", children }) {
   return (
-    <label className="relative block pt-3">
+    <label className="relative block pt-3" data-field={fieldName || undefined}>
       <span className="absolute left-3 top-0 z-10 bg-[color:var(--acm-surface)] px-2 text-xs font-semibold text-[color:var(--acm-muted-fg)]">
         {label}
       </span>
       {children}
+      {error ? <span className="mt-2 block text-sm text-rose-700">{error}</span> : null}
     </label>
   );
 }
@@ -121,7 +125,7 @@ function createFieldReportForm(projectId) {
   return {
     id: "",
     projectId,
-    reportDate: new Date().toISOString().slice(0, 10),
+    reportDate: getLocalDateInputValue(),
     reportTime: "08:00",
     location: "",
     weatherConditions: "",
@@ -175,6 +179,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
   const [busy, setBusy] = useState(false);
   const [selectedReport, setSelectedReport] = useState(null);
   const [form, setForm] = useState(() => createFieldReportForm(projectId));
+  const [formErrors, setFormErrors] = useState({});
 
   const reports = reportsQuery.data?.reports ?? [];
   const filteredReports = reports.filter((report) =>
@@ -202,6 +207,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
   }
 
   function openCreate() {
+    setFormErrors({});
     setForm(createFieldReportForm(projectId));
     setError("");
     setMessage("");
@@ -209,10 +215,11 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
   }
 
   function openEdit(report) {
+    setFormErrors({});
     setForm({
       id: report.id,
       projectId,
-      reportDate: report.report_date || new Date().toISOString().slice(0, 10),
+      reportDate: report.report_date || getLocalDateInputValue(),
       reportTime: report.report_time || "",
       location: report.location || "",
       weatherConditions: report.weather_conditions || "",
@@ -327,9 +334,16 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
   async function saveReport(event) {
     event.preventDefault();
     if (busy) return;
+    const nextErrors = getValidationErrors(fieldReportFormSchema, form);
+    if (Object.keys(nextErrors).length) {
+      setFormErrors(nextErrors);
+      focusFirstInvalidField(nextErrors);
+      return;
+    }
     setBusy(true);
     setError("");
     setMessage("");
+    setFormErrors({});
 
     const method = form.id ? "PUT" : "POST";
     try {
@@ -390,8 +404,8 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
         <form onSubmit={saveReport} className="grid gap-4">
           <FieldGroup title="Report Details">
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <LabeledField label="Project Date">
-                <input type="date" className={fieldClass()} value={form.reportDate} onChange={(event) => setForm((current) => ({ ...current, reportDate: event.target.value }))} />
+              <LabeledField label="Project Date" fieldName="reportDate" error={formErrors.reportDate}>
+                <input name="reportDate" type="date" className={fieldClass(Boolean(formErrors.reportDate))} value={form.reportDate} onChange={(event) => setForm((current) => ({ ...current, reportDate: event.target.value }))} />
               </LabeledField>
               <LabeledField label="Time">
                 <input type="time" className={fieldClass()} value={form.reportTime} onChange={(event) => setForm((current) => ({ ...current, reportTime: event.target.value }))} />
@@ -404,8 +418,8 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
               </LabeledField>
               {useDetailedInspectionForm ? (
                 <>
-                  <LabeledField label="Temperature Value">
-                    <input inputMode="decimal" className={`${fieldClass()} [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`} value={form.temperatureValue} onChange={(event) => setForm((current) => ({ ...current, temperatureValue: event.target.value, temperatureRange: "" }))} />
+                  <LabeledField label="Temperature Value" fieldName="temperatureValue" error={formErrors.temperatureValue}>
+                    <input name="temperatureValue" inputMode="decimal" className={`${fieldClass(Boolean(formErrors.temperatureValue))} [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`} value={form.temperatureValue} onChange={(event) => setForm((current) => ({ ...current, temperatureValue: event.target.value, temperatureRange: "" }))} />
                   </LabeledField>
                   <LabeledField label="Temperature Unit">
                     <select className={fieldClass()} value={form.temperatureUnit} onChange={(event) => setForm((current) => ({ ...current, temperatureUnit: event.target.value }))}>
@@ -444,7 +458,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
                       <input className={fieldClass()} value={entry.name} onChange={(event) => updateStructuredValue("publicCommunications", index, "name", event.target.value)} />
                     </LabeledField>
                     <LabeledField label="Phone Number">
-                      <input className={fieldClass()} value={entry.phoneNumber} onChange={(event) => updateStructuredValue("publicCommunications", index, "phoneNumber", event.target.value)} />
+                      <PhoneInput className={fieldClass()} value={entry.phoneNumber} onValueChange={(value) => updateStructuredValue("publicCommunications", index, "phoneNumber", value)} />
                     </LabeledField>
                     <LabeledField label="Comments">
                       <input className={fieldClass()} value={entry.comments} onChange={(event) => updateStructuredValue("publicCommunications", index, "comments", event.target.value)} />

@@ -6,6 +6,7 @@ import { useRouter } from "next/router";
 import { BusyButton } from "@/components/dashboard/DashboardUi";
 import { sendJson } from "@/lib/client/apiClient";
 import { useApiQuery, invalidateApiQuery } from "@/lib/client/apiQuery";
+import { getLocalDateInputValue } from "@/shared/utils/dateTime";
 import { PanelLoadingFallback } from "@/shared/ui/feedback/PanelLoadingFallback";
 
 const InvoiceCandidateGrid = dynamic(
@@ -135,7 +136,7 @@ function buildInvoiceForm(estimate, company) {
   const customer = meta.customer || {};
   const invoiceMeta = meta.invoice || {};
   const companyMeta = meta.company || {};
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getLocalDateInputValue();
 
   return {
     clientMode: estimate?.client_id ? "existing" : "new",

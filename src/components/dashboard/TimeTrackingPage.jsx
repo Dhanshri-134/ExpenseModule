@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Modal from "@/components/dashboard/Modal";
 import { BusyButton } from "@/components/dashboard/DashboardUi";
 import { sendJson } from "@/lib/client/apiClient";
 import { useApiQuery } from "@/lib/client/apiQuery";
+import { getBrowserTimeZone, getLocalDateInputValue, localDateTimeInputToIso, toLocalDateTimeInputValue } from "@/shared/utils/dateTime";
 
 function fieldClass() {
   return "acm-input mt-0";
@@ -38,13 +39,15 @@ function SummaryCard({ label, value }) {
 }
 
 export default function TimeTrackingPage({ roleBase = "employee", currentUserId = "" }) {
-  const [weekOf, setWeekOf] = useState(() => new Date().toISOString().slice(0, 10));
+  const [weekOf, setWeekOf] = useState(() => getLocalDateInputValue());
   const [selectedUserId, setSelectedUserId] = useState(currentUserId);
+  const timeZone = getBrowserTimeZone();
   const [clockForm, setClockForm] = useState({
     projectId: "",
-    overheadLabel: "Overhead",
     notes: "",
     breakMinutes: "0",
+    clockIn: toLocalDateTimeInputValue(new Date()),
+    clockOut: toLocalDateTimeInputValue(new Date()),
   });
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -52,12 +55,14 @@ export default function TimeTrackingPage({ roleBase = "employee", currentUserId 
   const [editingEntry, setEditingEntry] = useState(null);
 
   const query = useApiQuery(
-    `/api/time-tracking?weekOf=${encodeURIComponent(weekOf)}${selectedUserId ? `&userId=${encodeURIComponent(selectedUserId)}` : ""}`
+    `/api/time-tracking?weekOf=${encodeURIComponent(weekOf)}${selectedUserId ? `&userId=${encodeURIComponent(selectedUserId)}` : ""}&timeZone=${encodeURIComponent(timeZone)}`
   );
+  const isOwnerView = roleBase === "owner";
 
   const canManage = Boolean(query.data?.canManage);
   const currentEntry = query.data?.currentEntry || null;
   const staff = query.data?.staff || [];
+  const staffOptions = staff.filter((item) => item.role !== "owner");
   const projects = query.data?.projects || [];
   const entries = query.data?.entries || [];
   const dailySummary = query.data?.dailySummary || [];
@@ -67,9 +72,32 @@ export default function TimeTrackingPage({ roleBase = "employee", currentUserId 
   const activeStaff = query.data?.activeStaff || [];
   const auditLogs = query.data?.auditLogs || [];
   const weeklySummary = query.data?.weeklySummary || { minutes: 0, overtimeMinutes: 0, todayMinutes: 0 };
+  const selectedStaffId = query.data?.selectedUserId || selectedUserId;
 
   const selectedStaffName =
-    staff.find((item) => item.user_id === (query.data?.selectedUserId || selectedUserId))?.name || "Selected staff";
+    staffOptions.find((item) => item.user_id === selectedStaffId)?.name || "Selected staff";
+
+  useEffect(() => {
+    if (!canManage || !staffOptions.length) return;
+    if (!selectedUserId || !staffOptions.some((item) => item.user_id === selectedUserId)) {
+      setSelectedUserId(staffOptions[0].user_id);
+    }
+  }, [canManage, selectedUserId, staffOptions]);
+
+  useEffect(() => {
+    if (!currentEntry) {
+        setClockForm((current) => ({
+          ...current,
+          clockOut: toLocalDateTimeInputValue(new Date()),
+        }));
+      return;
+    }
+
+    setClockForm((current) => ({
+      ...current,
+      clockOut: toLocalDateTimeInputValue(currentEntry.clock_out || new Date()),
+    }));
+  }, [currentEntry]);
 
   async function runAction(action, body, successMessage) {
     setBusy(action);
@@ -80,7 +108,13 @@ export default function TimeTrackingPage({ roleBase = "employee", currentUserId 
       await query.refresh();
       setMessage(successMessage);
       if (action === "clock_in") {
-        setClockForm((current) => ({ ...current, notes: "" }));
+        setClockForm((current) => ({
+          ...current,
+          notes: "",
+          breakMinutes: "0",
+          clockIn: toLocalDateTimeInputValue(new Date()),
+          clockOut: toLocalDateTimeInputValue(new Date()),
+        }));
       }
       if (action === "edit") setEditingEntry(null);
     } catch (requestError) {
@@ -90,9 +124,51 @@ export default function TimeTrackingPage({ roleBase = "employee", currentUserId 
     }
   }
 
+  async function deleteEntry(entry) {
+    if (!entry?.id) return;
+    if (!window.confirm("Delete this timesheet entry?")) return;
+
+    setBusy(`delete:${entry.id}`);
+    setError("");
+    setMessage("");
+    try {
+      await sendJson("/api/time-tracking", {
+        method: "DELETE",
+        body: {
+          id: entry.id,
+          userId: entry.user_id,
+          timeZone,
+        },
+      });
+      await query.refresh();
+      setMessage("Timesheet entry deleted.");
+      if (editingEntry?.id === entry.id) setEditingEntry(null);
+    } catch (requestError) {
+      setError(requestError.message || "time_tracking_delete_failed");
+    } finally {
+      setBusy("");
+    }
+  }
+
   return (
     <div className="space-y-6">
       <InlineMessage error={query.error || error} message={message} />
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="text-sm text-[color:var(--acm-muted-fg)]">Week of {weekOf}</div>
+        <input type="date" className={fieldClass()} value={weekOf} onChange={(e) => setWeekOf(e.target.value)} />
+      </div>
+
+      {isOwnerView && canManage ? (
+        <label className="block">
+          <div className="mb-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">Staff</div>
+          <select className={fieldClass()} value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)}>
+            {staffOptions.map((item) => (
+              <option key={item.user_id} value={item.user_id}>{item.name || item.user_name || item.user_code}</option>
+            ))}
+          </select>
+        </label>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-5">
         <SummaryCard label="Today" value={formatMinutes(weeklySummary.todayMinutes)} />
@@ -102,119 +178,174 @@ export default function TimeTrackingPage({ roleBase = "employee", currentUserId 
         <SummaryCard label="Viewing" value={selectedStaffName} />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.3fr_1fr]">
-        <div className="rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="text-lg font-bold text-[color:var(--acm-fg)]">Check In / Out</div>
-            <input type="date" className={fieldClass()} value={weekOf} onChange={(e) => setWeekOf(e.target.value)} />
-          </div>
+      {isOwnerView ? null : (
+        <div className="grid gap-4 xl:grid-cols-2">
+          <div className="rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-lg font-bold text-[color:var(--acm-fg)]">Clock In</div>
+            </div>
 
-          {canManage ? (
-            <label className="mb-4 block">
-              <div className="mb-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">Staff</div>
-              <select className={fieldClass()} value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)}>
-                {staff.map((item) => (
-                  <option key={item.user_id} value={item.user_id}>{item.name || item.user_name || item.user_code}</option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-
-          {!currentEntry ? (
-            <div className="grid gap-3 md:grid-cols-2">
-              <label>
-                <div className="mb-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">Project</div>
-                <select className={fieldClass()} value={clockForm.projectId} onChange={(e) => setClockForm((prev) => ({ ...prev, projectId: e.target.value }))}>
-                  <option value="">Overhead / Non-project</option>
-                  {projects.map((project) => (
-                    <option key={project.id} value={project.id}>{project.name}</option>
+            {canManage ? (
+              <label className="mb-4 block">
+                <div className="mb-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">Staff</div>
+                <select className={fieldClass()} value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)}>
+                  {staffOptions.map((item) => (
+                    <option key={item.user_id} value={item.user_id}>{item.name || item.user_name || item.user_code}</option>
                   ))}
                 </select>
               </label>
-              {!clockForm.projectId ? (
-                <label>
-                  <div className="mb-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">Overhead</div>
-                  <input className={fieldClass()} value={clockForm.overheadLabel} onChange={(e) => setClockForm((prev) => ({ ...prev, overheadLabel: e.target.value }))} />
-                </label>
-              ) : null}
-              <label className="md:col-span-2">
-                <div className="mb-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">Notes</div>
-                <textarea className={fieldClass()} rows={3} value={clockForm.notes} onChange={(e) => setClockForm((prev) => ({ ...prev, notes: e.target.value }))} />
-              </label>
-              <BusyButton
-                type="button"
-                busy={busy === "clock_in"}
-                className="acm-btn acm-btn-primary w-fit"
-                onClick={() =>
-                  runAction(
-                    "clock_in",
-                    {
-                      action: "clock_in",
-                      userId: selectedUserId,
-                      projectId: clockForm.projectId || null,
-                      overheadLabel: clockForm.projectId ? null : clockForm.overheadLabel,
-                      notes: clockForm.notes,
-                    },
-                    "Clock in recorded."
-                  )
-                }
-              >
-                Clock In
-              </BusyButton>
-            </div>
-          ) : (
+            ) : null}
+
             <div className="space-y-4">
-              <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm">
-                Active since {formatDateTime(currentEntry.clock_in)} for {currentEntry.project?.name || currentEntry.overhead_label || "Overhead"}.
-              </div>
+              {currentEntry ? (
+                <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm">
+                  Active since {formatDateTime(currentEntry.clock_in)} for {currentEntry.project?.name || currentEntry.overhead_label || "Overhead"}.
+                </div>
+              ) : (
+                <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-3 text-sm text-[color:var(--acm-muted-fg)]">
+                  No active clock-in for this staff member.
+                </div>
+              )}
               <div className="grid gap-3 md:grid-cols-2">
                 <label>
-                  <div className="mb-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">Break (minutes)</div>
-                  <input className={fieldClass()} inputMode="numeric" value={clockForm.breakMinutes} onChange={(e) => setClockForm((prev) => ({ ...prev, breakMinutes: e.target.value }))} />
+                  <div className="mb-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">Project</div>
+                  <select
+                    className={fieldClass()}
+                    value={clockForm.projectId}
+                    disabled={Boolean(currentEntry)}
+                    onChange={(e) => setClockForm((prev) => ({ ...prev, projectId: e.target.value }))}
+                  >
+                    <option value="">Overhead</option>
+                    {projects.map((project) => (
+                      <option key={project.id} value={project.id}>{project.name}</option>
+                    ))}
+                  </select>
                 </label>
                 <label>
-                  <div className="mb-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">Notes</div>
-                  <input className={fieldClass()} value={clockForm.notes} onChange={(e) => setClockForm((prev) => ({ ...prev, notes: e.target.value }))} />
+                  <div className="mb-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">Time</div>
+                  <input
+                    type="datetime-local"
+                    className={fieldClass()}
+                    disabled={Boolean(currentEntry)}
+                    value={clockForm.clockIn}
+                    onChange={(e) => setClockForm((prev) => ({ ...prev, clockIn: e.target.value }))}
+                  />
                 </label>
+                <label className="md:col-span-2">
+                  <div className="mb-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">Notes</div>
+                  <textarea
+                    className={fieldClass()}
+                    rows={3}
+                    disabled={Boolean(currentEntry)}
+                    value={clockForm.notes}
+                    onChange={(e) => setClockForm((prev) => ({ ...prev, notes: e.target.value }))}
+                  />
+                </label>
+                <BusyButton
+                  type="button"
+                  busy={busy === "clock_in"}
+                  className="acm-btn acm-btn-primary w-fit"
+                  disabled={Boolean(currentEntry)}
+                  onClick={() =>
+                    runAction(
+                      "clock_in",
+                      {
+                        action: "clock_in",
+                        userId: selectedUserId,
+                        projectId: clockForm.projectId || null,
+                        overheadLabel: clockForm.projectId ? null : "Overhead",
+                        notes: clockForm.notes,
+                        clockIn: localDateTimeInputToIso(clockForm.clockIn) || new Date().toISOString(),
+                        timeZone,
+                      },
+                      "Clock in recorded."
+                    )
+                  }
+                >
+                  Clock In
+                </BusyButton>
               </div>
-              <BusyButton
-                type="button"
-                busy={busy === "clock_out"}
-                className="acm-btn acm-btn-primary w-fit"
-                onClick={() =>
-                  runAction(
-                    "clock_out",
-                    {
-                      action: "clock_out",
-                      id: currentEntry.id,
-                      userId: selectedUserId,
-                      breakMinutes: Number(clockForm.breakMinutes || 0),
-                      notes: clockForm.notes,
-                    },
-                    "Clock out recorded."
-                  )
-                }
-              >
-                Clock Out
-              </BusyButton>
             </div>
-          )}
-        </div>
+          </div>
 
-        <div className="rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5">
-          <div className="text-lg font-bold text-[color:var(--acm-fg)]">Real-time Active Staff</div>
-          <div className="mt-4 space-y-3">
-            {activeStaff.map((entry) => (
-              <div key={entry.id} className="rounded-[16px] border border-[color:var(--acm-border)] px-4 py-3 text-sm">
-                <div className="font-semibold">{entry.staff?.name || entry.staff?.user_code || "Staff"}</div>
-                <div className="mt-1 text-[color:var(--acm-muted-fg)]">{entry.project?.name || entry.overhead_label || "Overhead"}</div>
-                <div className="mt-1 text-[color:var(--acm-muted-fg)]">{formatDateTime(entry.clock_in)}</div>
+          <div className="rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="text-lg font-bold text-[color:var(--acm-fg)]">Clock Out</div>
+              {currentEntry ? (
+                <div className="text-sm text-[color:var(--acm-muted-fg)]">
+                  Started {formatDateTime(currentEntry.clock_in)}
+                </div>
+              ) : null}
+            </div>
+            <div className="space-y-4">
+              {currentEntry ? (
+                <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm">
+                  Closing shift for {currentEntry.project?.name || currentEntry.overhead_label || "Overhead"}.
+                </div>
+              ) : (
+                <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-3 text-sm text-[color:var(--acm-muted-fg)]">
+                  Clock out becomes available after a staff member has clocked in.
+                </div>
+              )}
+              <div className="grid gap-3 md:grid-cols-2">
+                <label>
+                  <div className="mb-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">Time</div>
+                  <input
+                    type="datetime-local"
+                    className={fieldClass()}
+                    disabled={!currentEntry}
+                    value={clockForm.clockOut}
+                    onChange={(e) => setClockForm((prev) => ({ ...prev, clockOut: e.target.value }))}
+                  />
+                </label>
+                <label>
+                  <div className="mb-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">Break (minutes)</div>
+                  <input
+                    className={fieldClass()}
+                    inputMode="numeric"
+                    disabled={!currentEntry}
+                    value={clockForm.breakMinutes}
+                    onChange={(e) => setClockForm((prev) => ({ ...prev, breakMinutes: e.target.value }))}
+                  />
+                </label>
+                <label className="md:col-span-2">
+                  <div className="mb-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">Notes</div>
+                  <textarea
+                    className={fieldClass()}
+                    rows={3}
+                    disabled={!currentEntry}
+                    value={clockForm.notes}
+                    onChange={(e) => setClockForm((prev) => ({ ...prev, notes: e.target.value }))}
+                  />
+                </label>
+                <BusyButton
+                  type="button"
+                  busy={busy === "clock_out"}
+                  className="acm-btn acm-btn-primary w-fit"
+                  disabled={!currentEntry}
+                  onClick={() =>
+                    runAction(
+                      "clock_out",
+                      {
+                        action: "clock_out",
+                        id: currentEntry.id,
+                        userId: selectedUserId,
+                        breakMinutes: Number(clockForm.breakMinutes || 0),
+                        notes: clockForm.notes,
+                        clockOut: localDateTimeInputToIso(clockForm.clockOut) || new Date().toISOString(),
+                        timeZone,
+                      },
+                      "Clock out recorded."
+                    )
+                  }
+                >
+                  Clock Out
+                </BusyButton>
               </div>
-            ))}
-            {!activeStaff.length ? <div className="text-sm text-[color:var(--acm-muted-fg)]">No active staff right now.</div> : null}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="grid gap-6 xl:grid-cols-2">
         <div className="rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5">
@@ -228,7 +359,21 @@ export default function TimeTrackingPage({ roleBase = "employee", currentUserId 
                 </div>
                 <div className="mt-1 text-[color:var(--acm-muted-fg)]">{formatDateTime(entry.clock_in)} to {formatDateTime(entry.clock_out)}</div>
                 <div className="mt-1 text-[color:var(--acm-muted-fg)]">Break: {entry.break_minutes || 0} min | OT: {formatMinutes(entry.overtime_minutes)}</div>
-                {canManage ? <button type="button" className="mt-3 text-sm font-semibold text-[color:var(--acm-accent)]" onClick={() => setEditingEntry(entry)}>Edit</button> : null}
+                <div className="mt-3 flex flex-wrap gap-3">
+                  {canManage ? (
+                    <button type="button" className="text-sm font-semibold text-[color:var(--acm-accent)]" onClick={() => setEditingEntry(entry)}>
+                      Edit
+                    </button>
+                  ) : null}
+                  <BusyButton
+                    type="button"
+                    busy={busy === `delete:${entry.id}`}
+                    className="text-sm font-semibold text-rose-600"
+                    onClick={() => deleteEntry(entry)}
+                  >
+                    Delete
+                  </BusyButton>
+                </div>
               </div>
             ))}
             {!entries.length ? <div className="text-sm text-[color:var(--acm-muted-fg)]">No entries for this week yet.</div> : null}
@@ -320,6 +465,7 @@ export default function TimeTrackingPage({ roleBase = "employee", currentUserId 
                   clockIn: editingEntry.clock_in,
                   clockOut: editingEntry.clock_out,
                   breakMinutes: Number(editingEntry.break_minutes || 0),
+                  timeZone,
                 },
                 "Timesheet updated."
               );
@@ -342,11 +488,11 @@ export default function TimeTrackingPage({ roleBase = "employee", currentUserId 
             ) : null}
             <label>
               <div className="mb-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">Clock In</div>
-              <input type="datetime-local" className={fieldClass()} value={(editingEntry.clock_in || "").slice(0, 16)} onChange={(e) => setEditingEntry((prev) => ({ ...prev, clock_in: new Date(e.target.value).toISOString() }))} />
+              <input type="datetime-local" className={fieldClass()} value={toLocalDateTimeInputValue(editingEntry.clock_in)} onChange={(e) => setEditingEntry((prev) => ({ ...prev, clock_in: localDateTimeInputToIso(e.target.value) || prev.clock_in }))} />
             </label>
             <label>
               <div className="mb-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">Clock Out</div>
-              <input type="datetime-local" className={fieldClass()} value={editingEntry.clock_out ? editingEntry.clock_out.slice(0, 16) : ""} onChange={(e) => setEditingEntry((prev) => ({ ...prev, clock_out: e.target.value ? new Date(e.target.value).toISOString() : null }))} />
+              <input type="datetime-local" className={fieldClass()} value={toLocalDateTimeInputValue(editingEntry.clock_out)} onChange={(e) => setEditingEntry((prev) => ({ ...prev, clock_out: e.target.value ? localDateTimeInputToIso(e.target.value) : null }))} />
             </label>
             <label>
               <div className="mb-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">Break (minutes)</div>

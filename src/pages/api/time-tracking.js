@@ -1,12 +1,21 @@
 import { z } from "zod";
 import { getRequestContext } from "@/lib/server/authz";
 import { sendError, sendOk } from "@/lib/server/responses";
-import { canManageTimesheets, formatMinutes, logTimesheetActivity, recomputeWeeklyOvertime, weekBoundsForDate } from "@/lib/server/timeTracking";
+import {
+  canManageTimesheets,
+  formatDateInTimeZone,
+  formatMinutes,
+  logTimesheetActivity,
+  normalizeTimeZone,
+  recomputeWeeklyOvertime,
+  weekBoundsForDate,
+} from "@/lib/server/timeTracking";
 import { loadUserDirectory } from "@/lib/server/taskWorkflow";
 
 const QuerySchema = z.object({
   weekOf: z.string().optional(),
   userId: z.string().uuid().optional(),
+  timeZone: z.string().optional(),
 });
 
 const ClockInSchema = z.object({
@@ -16,6 +25,7 @@ const ClockInSchema = z.object({
   overheadLabel: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
   clockIn: z.string().optional(),
+  timeZone: z.string().optional(),
 });
 
 const ClockOutSchema = z.object({
@@ -25,6 +35,7 @@ const ClockOutSchema = z.object({
   breakMinutes: z.coerce.number().min(0).optional(),
   notes: z.string().optional().nullable(),
   clockOut: z.string().optional(),
+  timeZone: z.string().optional(),
 });
 
 const UpdateEntrySchema = z.object({
@@ -36,6 +47,13 @@ const UpdateEntrySchema = z.object({
   clockIn: z.string(),
   clockOut: z.string().nullable().optional(),
   breakMinutes: z.coerce.number().min(0).default(0),
+  timeZone: z.string().optional(),
+});
+
+const DeleteEntrySchema = z.object({
+  id: z.string().uuid(),
+  userId: z.string().uuid().optional(),
+  timeZone: z.string().optional(),
 });
 
 function toNumber(value) {
@@ -117,8 +135,9 @@ function summarizeEntries(entries = []) {
   };
 }
 
-async function loadTimeTrackingPayload(ctx, weekOf, targetUserId) {
-  const bounds = weekBoundsForDate(weekOf || new Date());
+async function loadTimeTrackingPayload(ctx, weekOf, targetUserId, timeZone = "UTC") {
+  const resolvedTimeZone = normalizeTimeZone(timeZone);
+  const bounds = weekBoundsForDate(weekOf || new Date(), resolvedTimeZone);
 
   const visibleUserIds = new Set([ctx.user.id]);
   if (ctx.role === "owner") {
@@ -183,7 +202,7 @@ async function loadTimeTrackingPayload(ctx, weekOf, targetUserId) {
 
   const currentUserEntries = entries.filter((entry) => entry.user_id === effectiveUserId);
   const currentUserSummary = summarizeEntries(currentUserEntries);
-  const dailyKey = new Date().toISOString().slice(0, 10);
+  const dailyKey = formatDateInTimeZone(new Date(), resolvedTimeZone);
   const todayMinutes = currentUserEntries
     .filter((entry) => entry.entry_date === dailyKey)
     .reduce((sum, entry) => sum + toNumber(entry.payable_minutes), 0);
@@ -221,6 +240,7 @@ async function loadTimeTrackingPayload(ctx, weekOf, targetUserId) {
     employeeTotals: summaries.employees,
     auditLogs,
     selectedUserId: effectiveUserId,
+    timeZone: resolvedTimeZone,
   };
 }
 
@@ -236,7 +256,7 @@ export default async function handler(req, res) {
       return sendError(res, 403, "forbidden");
     }
 
-    const payload = await loadTimeTrackingPayload(ctx, parsed.data.weekOf, parsed.data.userId);
+    const payload = await loadTimeTrackingPayload(ctx, parsed.data.weekOf, parsed.data.userId, parsed.data.timeZone);
     if (payload.error) return sendError(res, 500, payload.error);
     return sendOk(res, payload);
   }
@@ -246,6 +266,7 @@ export default async function handler(req, res) {
     if (!parsed.success) return sendError(res, 400, "invalid_payload", parsed.error.flatten());
 
     const payload = parsed.data;
+    const timeZone = normalizeTimeZone(payload.timeZone);
     const targetUserId = payload.userId || ctx.user.id;
     if (!(await canManageTargetUser(ctx, targetUserId))) return sendError(res, 403, "forbidden");
 
@@ -266,6 +287,7 @@ export default async function handler(req, res) {
         .insert({
           company_id: ctx.company.id,
           user_id: targetUserId,
+          entry_date: formatDateInTimeZone(clockIn, timeZone),
           project_id: payload.projectId || null,
           clock_in: clockIn,
           work_type: payload.projectId ? "project" : "overhead",
@@ -284,6 +306,7 @@ export default async function handler(req, res) {
         companyId: ctx.company.id,
         userId: targetUserId,
         referenceDate: clockIn,
+        timeZone,
       });
       await logTimesheetActivity(ctx.admin, ctx, "Clocked in", {
         entry_id: entry.id,
@@ -331,6 +354,7 @@ export default async function handler(req, res) {
         companyId: ctx.company.id,
         userId: targetUserId,
         referenceDate: existing?.clock_in || clockOut,
+        timeZone,
       });
       await logTimesheetActivity(ctx.admin, ctx, "Clocked out", {
         entry_id: entryId,
@@ -339,7 +363,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const refreshPayload = await loadTimeTrackingPayload(ctx, new Date().toISOString(), targetUserId);
+    const refreshPayload = await loadTimeTrackingPayload(ctx, new Date(), targetUserId, timeZone);
     if (refreshPayload.error) return sendError(res, 500, refreshPayload.error);
     return sendOk(res, refreshPayload);
   }
@@ -359,9 +383,11 @@ export default async function handler(req, res) {
     if (!existing?.id) return sendError(res, 404, "time_entry_not_found");
     if (!(await canManageTargetUser(ctx, existing.user_id))) return sendError(res, 403, "forbidden");
 
+    const timeZone = normalizeTimeZone(parsed.data.timeZone);
     const { error } = await ctx.admin
       .from("time_clock_entries")
       .update({
+        entry_date: formatDateInTimeZone(parsed.data.clockIn, timeZone),
         project_id: parsed.data.projectId || null,
         work_type: parsed.data.projectId ? "project" : "overhead",
         overhead_label: parsed.data.projectId ? null : parsed.data.overheadLabel || "Overhead",
@@ -382,6 +408,7 @@ export default async function handler(req, res) {
       companyId: ctx.company.id,
       userId: existing.user_id,
       referenceDate: parsed.data.clockIn,
+      timeZone,
     });
     await logTimesheetActivity(ctx.admin, ctx, "Timesheet entry updated", {
       entry_id: parsed.data.id,
@@ -389,7 +416,48 @@ export default async function handler(req, res) {
       project_id: parsed.data.projectId || null,
     });
 
-    const refreshPayload = await loadTimeTrackingPayload(ctx, parsed.data.clockIn, existing.user_id);
+    const refreshPayload = await loadTimeTrackingPayload(ctx, parsed.data.clockIn, existing.user_id, timeZone);
+    if (refreshPayload.error) return sendError(res, 500, refreshPayload.error);
+    return sendOk(res, refreshPayload);
+  }
+
+  if (req.method === "DELETE") {
+    const parsed = DeleteEntrySchema.safeParse(req.body);
+    if (!parsed.success) return sendError(res, 400, "invalid_payload", parsed.error.flatten());
+    if (!canManageTimesheets(ctx, parsed.data.userId || ctx.user.id)) return sendError(res, 403, "forbidden");
+
+    const { data: existing } = await ctx.admin
+      .from("time_clock_entries")
+      .select("id, user_id, project_id, clock_in")
+      .eq("company_id", ctx.company.id)
+      .eq("id", parsed.data.id)
+      .maybeSingle();
+
+    if (!existing?.id) return sendError(res, 404, "time_entry_not_found");
+    if (!(await canManageTargetUser(ctx, existing.user_id))) return sendError(res, 403, "forbidden");
+
+    const timeZone = normalizeTimeZone(parsed.data.timeZone);
+    const { error } = await ctx.admin
+      .from("time_clock_entries")
+      .delete()
+      .eq("company_id", ctx.company.id)
+      .eq("id", parsed.data.id);
+
+    if (error) return sendError(res, 500, "time_entry_delete_failed", error.message);
+
+    await recomputeWeeklyOvertime(ctx.admin, {
+      companyId: ctx.company.id,
+      userId: existing.user_id,
+      referenceDate: existing.clock_in,
+      timeZone,
+    });
+    await logTimesheetActivity(ctx.admin, ctx, "Timesheet entry deleted", {
+      entry_id: parsed.data.id,
+      subject_user_id: existing.user_id,
+      project_id: existing.project_id || null,
+    });
+
+    const refreshPayload = await loadTimeTrackingPayload(ctx, existing.clock_in, existing.user_id, timeZone);
     if (refreshPayload.error) return sendError(res, 500, refreshPayload.error);
     return sendOk(res, refreshPayload);
   }

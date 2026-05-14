@@ -7,6 +7,8 @@ import { ChevronRightIcon } from "@/components/dashboard/icons";
 import { useEstimateDetail, useEstimateList, useEstimateTemplates } from "@/features/estimates/hooks/useEstimateTemplates";
 import Modal from "@/components/dashboard/Modal";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
+import { PhoneInput } from "@/shared/forms/PhoneInput";
+import { getLocalDateInputValue } from "@/shared/utils/dateTime";
 import { Check, ChevronDown, Trash, Trash2Icon } from "lucide-react";
 
 const BRAND_PALETTES = {
@@ -330,7 +332,7 @@ function emptyTemplateForm() {
 }
 
 function emptyEstimateForm(clientId = "", templateId = "") {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getLocalDateInputValue();
   const valid = new Date();
   valid.setDate(valid.getDate() + 30);
 
@@ -341,7 +343,7 @@ function emptyEstimateForm(clientId = "", templateId = "") {
     templateId,
     title: "Estimate",
     estimateDate: today,
-    validUntil: valid.toISOString().slice(0, 10),
+    validUntil: getLocalDateInputValue(valid),
     status: "draft",
     approvalStatus: "draft",
     invoiceStatus: "not_started",
@@ -709,7 +711,7 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
       ? `${String(form.customerName || "").trim()} Estimate`
       : form.estimateNumber
         ? `Estimate #${form.estimateNumber}`
-        : `Estimate ${form.estimateDate || new Date().toISOString().slice(0, 10)}`;
+        : `Estimate ${form.estimateDate || getLocalDateInputValue()}`;
   return {
     id: form.id || undefined,
     estimateNumber: form.estimateNumber,
@@ -901,7 +903,7 @@ function mapEstimateToForm(estimate, templates) {
   const customer = meta.customer || {};
   const company = meta.company || {};
   const templateId = estimate.template_id || "";
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getLocalDateInputValue();
 
   return {
     ...emptyEstimateForm(estimate.client_id || "", templateId),
@@ -2744,7 +2746,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                 <input className={sheetInputClass()} value={projectForm.clientName} onChange={(event) => setProjectForm((current) => ({ ...current, clientName: event.target.value }))} />
               </LabeledInput>
               <LabeledInput label="Client Contact">
-                <input className={sheetInputClass()} value={projectForm.clientContact} onChange={(event) => setProjectForm((current) => ({ ...current, clientContact: event.target.value }))} />
+                <PhoneInput className={sheetInputClass()} value={projectForm.clientContact} onValueChange={(value) => setProjectForm((current) => ({ ...current, clientContact: value }))} />
               </LabeledInput>
               <LabeledInput label="Client Email">
                 <input className={sheetInputClass()} value={projectForm.clientEmail} onChange={(event) => setProjectForm((current) => ({ ...current, clientEmail: event.target.value }))} />

@@ -12,22 +12,25 @@ import { useExpenseMutations } from "@/features/expenses/hooks/useExpenseMutatio
 import { useProjectExpenses } from "@/features/expenses/hooks/useProjectExpenses";
 import { useExpenseViewState } from "@/features/expenses/hooks/useExpenseViewState";
 import { ExpenseSummaryCards } from "@/features/expenses/components/ExpenseSummaryCards";
+import { getLocalDateInputValue } from "@/shared/utils/dateTime";
+import { expenseFormSchema, focusFirstInvalidField, getValidationErrors } from "@/shared/validations/forms";
 
 function cardClass(extra = "") {
   return `rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.08)] ${extra}`.trim();
 }
 
-function fieldClass() {
-  return "acm-input mt-0";
+function fieldClass(error = false) {
+  return `acm-input mt-0 ${error ? "border-rose-400 focus:border-rose-500 focus:ring-rose-200" : ""}`.trim();
 }
 
-function LabeledField({ label, children }) {
+function LabeledField({ label, fieldName = "", error = "", children }) {
   return (
-    <label className="relative block pt-3">
+    <label className="relative block pt-3" data-field={fieldName || undefined}>
       <span className="absolute left-3 top-0 z-10 bg-[color:var(--acm-surface)] px-2 text-xs font-semibold text-[color:var(--acm-muted-fg)]">
         {label}
       </span>
       {children}
+      {error ? <span className="mt-2 block text-sm text-rose-700">{error}</span> : null}
     </label>
   );
 }
@@ -86,7 +89,7 @@ function createExpenseForm(projectId = "") {
     unitRate: "",
     markupPercent: "",
     note: "",
-    expenseDate: new Date().toISOString().slice(0, 10),
+    expenseDate: getLocalDateInputValue(),
     vendor: "",
     paymentMethod: "Cash",
     referenceNumber: "",
@@ -199,7 +202,7 @@ function ExpensePageHeader({ title, subtitle, onAddExpense }) {
   );
 }
 
-function ProjectExpenseTable({ expenses, formatCurrency, formatDate }) {
+function ProjectExpenseTable({ expenses, formatCurrency, formatDate, canEdit, openEdit, deleteExpense }) {
   return (
     <div className={cardClass("overflow-hidden p-0")}>
       <div className="overflow-x-auto">
@@ -212,12 +215,13 @@ function ProjectExpenseTable({ expenses, formatCurrency, formatDate }) {
               <th className="px-4 py-3 font-semibold">Amount</th>
               <th className="px-4 py-3 font-semibold">Reference</th>
               <th className="px-4 py-3 font-semibold">Entered By</th>
+              <th className="px-4 py-3 font-semibold">Actions</th>
             </tr>
           </thead>
           <tbody>
             {!expenses.length ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-[color:var(--acm-muted-fg)]">
+                <td colSpan={7} className="px-4 py-8 text-center text-[color:var(--acm-muted-fg)]">
                   No expenses match the current filters.
                 </td>
               </tr>
@@ -230,6 +234,20 @@ function ProjectExpenseTable({ expenses, formatCurrency, formatDate }) {
                 <td className="px-4 py-3 font-semibold">{formatCurrency(expense.amount)}</td>
                 <td className="px-4 py-3">{expense.reference_number || "-"}</td>
                 <td className="px-4 py-3">{expense.created_by?.name || expense.created_by?.user_name || expense.created_by?.user_code || "-"}</td>
+                <td className="px-4 py-3">
+                  {canEdit(expense) ? (
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => openEdit(expense)} className="acm-btn acm-btn-secondary h-8 px-3 text-xs">
+                        Edit
+                      </button>
+                      <button type="button" onClick={() => deleteExpense(expense)} className="acm-btn acm-btn-secondary h-8 px-3 text-xs">
+                        Delete
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-[color:var(--acm-muted-fg)]">-</span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -316,6 +334,7 @@ function ExpensesModulePage({ lockedProjectId = "", roleBase = "employee", curre
   const [busy, setBusy] = useState(false);
   const [selectedExpense, setSelectedExpense] = useState(null);
   const [form, setForm] = useState(() => createExpenseForm(lockedProjectId));
+  const [formErrors, setFormErrors] = useState({});
   const overviewData = useProjectExpenses({
     projectId: lockedProjectId || undefined,
     filters: lockedProjectId ? { projectId: lockedProjectId } : {},
@@ -342,6 +361,7 @@ function ExpensesModulePage({ lockedProjectId = "", roleBase = "employee", curre
   }, [canManageAll, currentUserId]);
 
   const openCreate = useCallback(() => {
+    setFormErrors({});
     setForm(createExpenseForm(lockedProjectId || ""));
     setOpen(true);
     setError("");
@@ -349,6 +369,7 @@ function ExpensesModulePage({ lockedProjectId = "", roleBase = "employee", curre
   }, [lockedProjectId]);
 
   const openEdit = useCallback((expense) => {
+    setFormErrors({});
     setForm({
       id: expense.id,
       projectId: expense.project_id || lockedProjectId || "",
@@ -360,7 +381,7 @@ function ExpensesModulePage({ lockedProjectId = "", roleBase = "employee", curre
       unitRate: expense.unit_rate ?? "",
       markupPercent: expense.markup_percent ?? "",
       note: expense.note || "",
-      expenseDate: expense.expense_date || new Date().toISOString().slice(0, 10),
+      expenseDate: expense.expense_date || getLocalDateInputValue(),
       vendor: expense.vendor || "",
       paymentMethod: expense.payment_method || "Cash",
       referenceNumber: expense.reference_number || "",
@@ -380,9 +401,19 @@ function ExpensesModulePage({ lockedProjectId = "", roleBase = "employee", curre
   const saveExpense = useCallback(async (event) => {
     event.preventDefault();
     if (busy) return;
+    const nextErrors = getValidationErrors(expenseFormSchema, {
+      ...form,
+      projectId: form.projectId || lockedProjectId,
+    });
+    if (Object.keys(nextErrors).length) {
+      setFormErrors(nextErrors);
+      focusFirstInvalidField(nextErrors);
+      return;
+    }
     setBusy(true);
     setError("");
     setMessage("");
+    setFormErrors({});
 
     try {
       const nextAmount = computeAmount(form);
@@ -451,14 +482,20 @@ function ExpensesModulePage({ lockedProjectId = "", roleBase = "employee", curre
                 Export PDF
               </button>
             </div>
-            <ProjectExpenseTable expenses={expenses} formatCurrency={formatCurrency} formatDate={formatDate} />
+            <ProjectExpenseTable
+              expenses={expenses}
+              formatCurrency={formatCurrency}
+              formatDate={formatDate}
+              canEdit={canEdit}
+              openEdit={openEdit}
+              deleteExpense={deleteExpense}
+            />
           </>
         ) : (
           <ExpenseRegisterSection
             expenses={expenses}
             canCreateExpenses={canCreateExpenses}
             canEdit={canEdit}
-            setSelectedExpense={setSelectedExpense}
             openCreate={openCreate}
             openEdit={openEdit}
             deleteExpense={deleteExpense}
@@ -474,24 +511,24 @@ function ExpensesModulePage({ lockedProjectId = "", roleBase = "employee", curre
       <Modal open={open} title={form.id ? "Edit Expense" : "Add Expense"} onClose={() => setOpen(false)}>
         <form onSubmit={saveExpense} className="grid gap-4">
           <div className="grid gap-3 md:grid-cols-2">
-            <LabeledField label="Project">
-              <select className={fieldClass()} value={form.projectId} onChange={(event) => setForm((current) => ({ ...current, projectId: event.target.value }))} disabled={Boolean(lockedProjectId)}>
+            <LabeledField label="Project" fieldName="projectId" error={formErrors.projectId}>
+              <select name="projectId" className={fieldClass(Boolean(formErrors.projectId))} value={form.projectId} onChange={(event) => setForm((current) => ({ ...current, projectId: event.target.value }))} disabled={Boolean(lockedProjectId)}>
                 <option value="">Select Project</option>
                 {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
               </select>
             </LabeledField>
-            <LabeledField label="Expense Type">
-              <select className={fieldClass()} value={form.expenseType} onChange={(event) => setForm((current) => ({ ...current, expenseType: event.target.value }))}>
+            <LabeledField label="Expense Type" fieldName="expenseType" error={formErrors.expenseType}>
+              <select name="expenseType" className={fieldClass(Boolean(formErrors.expenseType))} value={form.expenseType} onChange={(event) => setForm((current) => ({ ...current, expenseType: event.target.value }))}>
                 {expenseTypes.map((entry) => <option key={entry.value} value={entry.value}>{entry.label}</option>)}
               </select>
             </LabeledField>
-            <LabeledField label="Status">
-              <select className={fieldClass()} value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}>
+            <LabeledField label="Status" fieldName="status" error={formErrors.status}>
+              <select name="status" className={fieldClass(Boolean(formErrors.status))} value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}>
                 {statusOptions.map((entry) => <option key={entry.value} value={entry.value}>{entry.label}</option>)}
               </select>
             </LabeledField>
-            <LabeledField label="Date">
-              <input type="date" className={fieldClass()} value={form.expenseDate} onChange={(event) => setForm((current) => ({ ...current, expenseDate: event.target.value }))} />
+            <LabeledField label="Date" fieldName="expenseDate" error={formErrors.expenseDate}>
+              <input name="expenseDate" type="date" className={fieldClass(Boolean(formErrors.expenseDate))} value={form.expenseDate} onChange={(event) => setForm((current) => ({ ...current, expenseDate: event.target.value }))} />
             </LabeledField>
           </div>
 

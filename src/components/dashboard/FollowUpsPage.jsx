@@ -5,6 +5,7 @@ import { useRouter } from "next/router";
 import Modal from "@/components/dashboard/Modal";
 import { BusyButton, CompactListRow, DrilldownModal, StatusMetricButton } from "@/components/dashboard/DashboardUi";
 import { useApiQuery } from "@/lib/client/apiQuery";
+import { PhoneInput } from "@/shared/forms/PhoneInput";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 
 function formatDate(value) {
@@ -578,7 +579,7 @@ const followUps = useApiQuery(query);
                         <input required className={fieldClass()} value={leadEditForm.name} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, name: e.target.value }))} />
                       </LabeledField>
                       <LabeledField label="Client Contact">
-                        <input required className={fieldClass()} value={leadEditForm.contact} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, contact: e.target.value }))} />
+                        <PhoneInput required className={fieldClass()} value={leadEditForm.contact} onValueChange={(value) => setLeadEditForm((prev) => ({ ...prev, contact: value }))} />
                       </LabeledField>
                       <LabeledField label="Client Email">
                         <input required type="email" className={fieldClass()} value={leadEditForm.email} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, email: e.target.value }))} />

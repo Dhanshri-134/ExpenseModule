@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import { BusyButton } from "@/components/dashboard/DashboardUi";
+import { PhoneInput } from "@/shared/forms/PhoneInput";
 
 function fieldClass(extra = "") {
   return `acm-input mt-0 h-9 text-[color:var(--acm-fg)] ${extra}`.trim();
@@ -104,7 +105,7 @@ function InvoiceEditorPanelComponent({
                 <input className={sheetFieldClass("text-xl font-bold")} value={form.companyName} onChange={(event) => updateForm("companyName", event.target.value)} placeholder="Company name" />
                 <textarea className={sheetFieldClass("min-h-[52px] resize-none")} value={form.companyAddress} onChange={(event) => updateForm("companyAddress", event.target.value)} placeholder="Company address" />
                 <div className="grid gap-2 md:grid-cols-2">
-                  <input className={sheetFieldClass()} value={form.companyPhone} onChange={(event) => updateForm("companyPhone", event.target.value)} placeholder="Company phone" />
+                  <PhoneInput className={sheetFieldClass()} value={form.companyPhone} onValueChange={(value) => updateForm("companyPhone", value)} placeholder="Company phone" />
                   <input className={sheetFieldClass()} value={form.companyEmail} onChange={(event) => updateForm("companyEmail", event.target.value)} placeholder="Company email" />
                 </div>
               </div>
@@ -169,7 +170,7 @@ function InvoiceEditorPanelComponent({
                 </LabeledInput>
                 <div className="grid gap-3 md:grid-cols-2">
                   <LabeledInput label="Client Phone">
-                    <input className={fieldClass()} value={form.customerPhone} onChange={(event) => updateForm("customerPhone", event.target.value)} />
+                    <PhoneInput className={fieldClass()} value={form.customerPhone} onValueChange={(value) => updateForm("customerPhone", value)} />
                   </LabeledInput>
                   <LabeledInput label="Client Email">
                     <input className={fieldClass()} value={form.customerEmail} onChange={(event) => updateForm("customerEmail", event.target.value)} />

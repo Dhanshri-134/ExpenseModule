@@ -9,6 +9,24 @@ import { useDashboardOverviewAnalytics } from "@/features/dashboard/hooks/useDas
 import { useProjectExpenses } from "@/features/expenses/hooks/useProjectExpenses";
 import { ProjectEstimatesPage, ProjectFieldReportsPage } from "@/components/dashboard/Project/ProjectOperationsPanels";
 import { TasksManagerPage as TaskModulePage } from "@/components/dashboard/task/TasksManagerPage";
+import { PhoneInput } from "@/shared/forms/PhoneInput";
+import {
+  clientEditSchema,
+  clientFormSchema,
+  focusFirstInvalidField,
+  followUpSchema,
+  getValidationErrors,
+  leadEditSchema,
+  leadFormSchema,
+  passwordChangeSchema,
+  projectClientEditSchema,
+  projectFormSchema,
+  projectInfoEditSchema,
+  settingsCompanySchema,
+  settingsProfileSchema,
+  staffCreateSchema,
+  staffEditSchema,
+} from "@/shared/validations/forms";
 import { VirtualizedActivityFeed } from "@/shared/ui/lists/VirtualizedActivityFeed";
 import PasswordInput from "@/components/shared/PasswordInput";
 import { useRenderMetric } from "@/shared/performance/useMeasuredMemo";
@@ -30,8 +48,8 @@ function cardClass(extra = "") {
   return `rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 ${extra}`.trim();
 }
 
-function fieldClass() {
-  return "acm-input mt-0";
+function fieldClass(error = false) {
+  return `acm-input mt-0 ${error ? "border-rose-400 focus:border-rose-500 focus:ring-rose-200" : ""}`.trim();
 }
 
 function roleName(role) {
@@ -358,13 +376,14 @@ function getApproverOptions(staffData, projectId, role) {
   });
 }
 
-function LabeledField({ label, children }) {
+function LabeledField({ label, fieldName = "", error = "", children }) {
   return (
-    <label className="relative block pt-3">
+    <label className="relative block pt-3" data-field={fieldName || undefined}>
       <span className="acm-field-label">
         {label}
       </span>
       {children}
+      {error ? <span className="mt-2 block text-sm text-rose-700">{error}</span> : null}
     </label>
   );
 }
@@ -1136,6 +1155,7 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
   const [formBusy, setFormBusy] = useState(false);
   const [deletingProjectId, setDeletingProjectId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [formErrors, setFormErrors] = useState({});
   const [form, setForm] = useState({
     id: "",
     name: "",
@@ -1169,6 +1189,7 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
   );
 
   function openCreate() {
+    setFormErrors({});
     setEditingProject(null);
     setForm({
       id: "",
@@ -1188,6 +1209,7 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
   }
 
   function openEdit(project) {
+    setFormErrors({});
     setEditingProject(project);
     setForm({
       id: project.id,
@@ -1209,8 +1231,15 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
   async function saveProject(e) {
     e.preventDefault();
     if (formBusy) return;
+    const nextErrors = getValidationErrors(projectFormSchema, form);
+    if (Object.keys(nextErrors).length) {
+      setFormErrors(nextErrors);
+      focusFirstInvalidField(nextErrors);
+      return;
+    }
     setError("");
     setMessage("");
+    setFormErrors({});
     setFormBusy(true);
 
     try {
@@ -1398,9 +1427,10 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
 
           <fieldset disabled={Boolean(message && !editingProject && !error)} className="contents">
             <FieldGroup title="Client Info">
-              <LabeledField label="Client Source">
+              <LabeledField label="Client Source" fieldName="clientMode" error={formErrors.clientMode}>
                 <select
-                  className={fieldClass()}
+                  name="clientMode"
+                  className={fieldClass(Boolean(formErrors.clientMode))}
                   value={form.clientMode}
                   disabled={Boolean(filteredClient && !editingProject)}
                   onChange={(e) =>
@@ -1420,9 +1450,10 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
                 </select>
               </LabeledField>
               {form.clientMode === "existing" ? (
-                <LabeledField label="Client">
+                <LabeledField label="Client" fieldName="clientId" error={formErrors.clientId}>
                   <select
-                    className={fieldClass()}
+                    name="clientId"
+                    className={fieldClass(Boolean(formErrors.clientId))}
                     value={form.clientId}
                     disabled={Boolean(filteredClient && !editingProject)}
                     onChange={(e) => setForm((prev) => ({ ...prev, clientId: e.target.value }))}
@@ -1435,37 +1466,37 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
                 </LabeledField>
               ) : (
                 <>
-                  <LabeledField label="Client Name">
-                    <input className={fieldClass()} value={form.clientName} onChange={(e) => setForm((prev) => ({ ...prev, clientName: e.target.value }))} />
+                  <LabeledField label="Client Name" fieldName="clientName" error={formErrors.clientName}>
+                    <input name="clientName" className={fieldClass(Boolean(formErrors.clientName))} value={form.clientName} onChange={(e) => setForm((prev) => ({ ...prev, clientName: e.target.value }))} />
                   </LabeledField>
-                  <LabeledField label="Client Contact">
-                    <input className={fieldClass()} value={form.clientContact} onChange={(e) => setForm((prev) => ({ ...prev, clientContact: e.target.value }))} />
+                  <LabeledField label="Client Contact" fieldName="clientContact" error={formErrors.clientContact}>
+                    <PhoneInput name="clientContact" className={fieldClass(Boolean(formErrors.clientContact))} value={form.clientContact} onValueChange={(value) => setForm((prev) => ({ ...prev, clientContact: value }))} />
                   </LabeledField>
-                  <LabeledField label="Client Email">
-                    <input className={fieldClass()} type="email" value={form.clientEmail} onChange={(e) => setForm((prev) => ({ ...prev, clientEmail: e.target.value }))} />
+                  <LabeledField label="Client Email" fieldName="clientEmail" error={formErrors.clientEmail}>
+                    <input name="clientEmail" className={fieldClass(Boolean(formErrors.clientEmail))} type="email" value={form.clientEmail} onChange={(e) => setForm((prev) => ({ ...prev, clientEmail: e.target.value }))} />
                   </LabeledField>
-                  <LabeledField label="Client Address">
-                    <textarea className={fieldClass()} rows={3} value={form.clientAddress} onChange={(e) => setForm((prev) => ({ ...prev, clientAddress: e.target.value }))} />
+                  <LabeledField label="Client Address" fieldName="clientAddress" error={formErrors.clientAddress}>
+                    <textarea name="clientAddress" className={fieldClass(Boolean(formErrors.clientAddress))} rows={3} value={form.clientAddress} onChange={(e) => setForm((prev) => ({ ...prev, clientAddress: e.target.value }))} />
                   </LabeledField>
                 </>
               )}
             </FieldGroup>
 
             <FieldGroup title="Project Info">
-              <LabeledField label="Project Name">
-                <input className={fieldClass()} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+              <LabeledField label="Project Name" fieldName="name" error={formErrors.name}>
+                <input name="name" className={fieldClass(Boolean(formErrors.name))} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
               </LabeledField>
-              <LabeledField label="Location">
-                <input className={fieldClass()} value={form.location} onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))} />
+              <LabeledField label="Location" fieldName="location" error={formErrors.location}>
+                <input name="location" className={fieldClass(Boolean(formErrors.location))} value={form.location} onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))} />
               </LabeledField>
-              <LabeledField label="Start Date">
-                <input className={fieldClass()} type="date" value={form.startDate} onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))} />
+              <LabeledField label="Start Date" fieldName="startDate" error={formErrors.startDate}>
+                <input name="startDate" className={fieldClass(Boolean(formErrors.startDate))} type="date" value={form.startDate} onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))} />
               </LabeledField>
-              <LabeledField label="End Date">
-                <input className={fieldClass()} type="date" value={form.endDate} onChange={(e) => setForm((prev) => ({ ...prev, endDate: e.target.value }))} />
+              <LabeledField label="End Date" fieldName="endDate" error={formErrors.endDate}>
+                <input name="endDate" className={fieldClass(Boolean(formErrors.endDate))} type="date" value={form.endDate} onChange={(e) => setForm((prev) => ({ ...prev, endDate: e.target.value }))} />
               </LabeledField>
-              <LabeledField label="Estimate Budget">
-                <input className={fieldClass()} inputMode="decimal" value={form.contractValue} onChange={(e) => setForm((prev) => ({ ...prev, contractValue: e.target.value }))} />
+              <LabeledField label="Estimate Budget" fieldName="contractValue" error={formErrors.contractValue}>
+                <input name="contractValue" className={fieldClass(Boolean(formErrors.contractValue))} inputMode="decimal" value={form.contractValue} onChange={(e) => setForm((prev) => ({ ...prev, contractValue: e.target.value }))} />
               </LabeledField>
             </FieldGroup>
 
@@ -1483,20 +1514,25 @@ export function ProjectsManagerPage({ roleBase, canCreateProject = false }) {
 
 export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) {
   const router = useRouter();
+  const canDeleteLead = roleBase === "owner";
   const leads = useApi("/api/leads");
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [formBusy, setFormBusy] = useState(false);
+  const [leadFormErrors, setLeadFormErrors] = useState({});
   const [convertBusyId, setConvertBusyId] = useState("");
   const [selectedLead, setSelectedLead] = useState(null);
   const [leadEditOpen, setLeadEditOpen] = useState(false);
   const [leadEditForm, setLeadEditForm] = useState({ name: "", address: "", contact: "", email: "" });
   const [leadEditBusy, setLeadEditBusy] = useState(false);
+  const [leadEditErrors, setLeadEditErrors] = useState({});
+  const [leadDeleteBusy, setLeadDeleteBusy] = useState(false);
   const [followUpMessage, setFollowUpMessage] = useState("");
   const [followUpError, setFollowUpError] = useState("");
   const [followUpBusy, setFollowUpBusy] = useState(false);
+  const [followUpFormErrors, setFollowUpFormErrors] = useState({});
   const [followUpFormOpen, setFollowUpFormOpen] = useState(false);
   const [editingFollowUpId, setEditingFollowUpId] = useState("");
   const [deletingFollowUpId, setDeletingFollowUpId] = useState("");
@@ -1526,6 +1562,7 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
   );
 
   function openCreate() {
+    setLeadFormErrors({});
     setForm({
       name: "",
       address: "",
@@ -1541,9 +1578,16 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
   async function saveLead(e) {
     e.preventDefault();
     if (formBusy) return;
+    const nextErrors = getValidationErrors(leadFormSchema, form);
+    if (Object.keys(nextErrors).length) {
+      setLeadFormErrors(nextErrors);
+      focusFirstInvalidField(nextErrors);
+      return;
+    }
 
     setError("");
     setMessage("");
+    setLeadFormErrors({});
     setFormBusy(true);
 
     try {
@@ -1562,6 +1606,7 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
 
   function openLeadEdit() {
     if (!selectedLead) return;
+    setLeadEditErrors({});
     setLeadEditForm({
       name: selectedLead.name || "",
       address: selectedLead.address || "",
@@ -1577,10 +1622,17 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
   async function saveLeadEdit(e) {
     e.preventDefault();
     if (!selectedLead || leadEditBusy) return;
+    const nextErrors = getValidationErrors(leadEditSchema, leadEditForm);
+    if (Object.keys(nextErrors).length) {
+      setLeadEditErrors(nextErrors);
+      focusFirstInvalidField(nextErrors);
+      return;
+    }
 
     setLeadEditBusy(true);
     setFollowUpMessage("");
     setFollowUpError("");
+    setLeadEditErrors({});
 
     try {
       const json = await sendJson("/api/leads", {
@@ -1598,6 +1650,36 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
       setFollowUpError(requestError.message || "lead_update_failed");
     } finally {
       setLeadEditBusy(false);
+    }
+  }
+
+  async function deleteLead() {
+    if (!selectedLead || leadDeleteBusy || !canDeleteLead) return;
+    if (!window.confirm(`Delete lead "${selectedLead.name}"? This will also remove its follow-ups.`)) return;
+
+    setLeadDeleteBusy(true);
+    setFollowUpMessage("");
+    setFollowUpError("");
+
+    try {
+      await sendJson("/api/leads", {
+        method: "DELETE",
+        body: { id: selectedLead.id },
+      });
+
+      setSelectedLead(null);
+      setLeadEditOpen(false);
+      setFollowUpFormOpen(false);
+      setEditingFollowUpId("");
+      setFollowUpForm({ note: "", nextFollowUpDate: "", status: "pending" });
+      setMessage("Lead deleted");
+      invalidateApiQuery("/api/leads");
+      invalidateApiQuery("/api/dashboard");
+      await leads.refresh();
+    } catch (requestError) {
+      setFollowUpError(requestError.message || "lead_delete_failed");
+    } finally {
+      setLeadDeleteBusy(false);
     }
   }
 
@@ -1626,9 +1708,16 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
   async function saveFollowUp(e) {
     e.preventDefault();
     if (!selectedLead || followUpBusy) return;
+    const nextErrors = getValidationErrors(followUpSchema, followUpForm);
+    if (Object.keys(nextErrors).length) {
+      setFollowUpFormErrors(nextErrors);
+      focusFirstInvalidField(nextErrors);
+      return;
+    }
 
     setFollowUpMessage("");
     setFollowUpError("");
+    setFollowUpFormErrors({});
     setFollowUpBusy(true);
 
     try {
@@ -1667,6 +1756,7 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
     });
     setFollowUpMessage("");
     setFollowUpError("");
+    setFollowUpFormErrors({});
   }
 
   async function deleteLeadFollowUp(item) {
@@ -1766,33 +1856,33 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
       <Modal open={open} title="Create Lead" onClose={() => setOpen(false)}>
         <form onSubmit={saveLead} className="grid gap-3">
           <FieldGroup title="Lead Info">
-            <LabeledField label="Client Name">
-              <input required className={fieldClass()} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+            <LabeledField label="Client Name" fieldName="name" error={leadFormErrors.name}>
+              <input name="name" required className={fieldClass(Boolean(leadFormErrors.name))} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
             </LabeledField>
-            <LabeledField label="Client Contact">
-              <input className={fieldClass()} value={form.contact} onChange={(e) => setForm((prev) => ({ ...prev, contact: e.target.value }))} />
+            <LabeledField label="Client Contact" fieldName="contact" error={leadFormErrors.contact}>
+              <PhoneInput name="contact" className={fieldClass(Boolean(leadFormErrors.contact))} value={form.contact} onValueChange={(value) => setForm((prev) => ({ ...prev, contact: value }))} />
             </LabeledField>
-            <LabeledField label="Client Email">
-              <input type="email" className={fieldClass()} value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
+            <LabeledField label="Client Email" fieldName="email" error={leadFormErrors.email}>
+              <input name="email" type="email" className={fieldClass(Boolean(leadFormErrors.email))} value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
             </LabeledField>
-            <LabeledField label="Client Address">
-              <textarea className={fieldClass()} rows={3} value={form.address} onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))} />
+            <LabeledField label="Client Address" fieldName="address" error={leadFormErrors.address}>
+              <textarea name="address" className={fieldClass(Boolean(leadFormErrors.address))} rows={3} value={form.address} onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))} />
             </LabeledField>
           </FieldGroup>
           <FieldGroup title="Create Follow-up">
             <div className="grid gap-3 md:grid-cols-2">
-              <LabeledField label="Follow-up Date">
-                <input className={fieldClass()} type="date" value={form.followUpDate} onChange={(e) => setForm((prev) => ({ ...prev, followUpDate: e.target.value }))} />
+              <LabeledField label="Follow-up Date" fieldName="followUpDate" error={leadFormErrors.followUpDate}>
+                <input name="followUpDate" className={fieldClass(Boolean(leadFormErrors.followUpDate))} type="date" value={form.followUpDate} onChange={(e) => setForm((prev) => ({ ...prev, followUpDate: e.target.value }))} />
               </LabeledField>
-              <LabeledField label="Status">
-                <select className={fieldClass()} value={form.followUpStatus} onChange={(e) => setForm((prev) => ({ ...prev, followUpStatus: e.target.value }))}>
+              <LabeledField label="Status" fieldName="followUpStatus" error={leadFormErrors.followUpStatus}>
+                <select name="followUpStatus" className={fieldClass(Boolean(leadFormErrors.followUpStatus))} value={form.followUpStatus} onChange={(e) => setForm((prev) => ({ ...prev, followUpStatus: e.target.value }))}>
                   <option value="pending">Pending</option>
                   <option value="done">Done</option>
                 </select>
               </LabeledField>
             </div>
-            <LabeledField label="Note">
-              <textarea className={fieldClass()} rows={3} value={form.followUpNote} onChange={(e) => setForm((prev) => ({ ...prev, followUpNote: e.target.value }))} />
+            <LabeledField label="Note" fieldName="followUpNote" error={leadFormErrors.followUpNote}>
+              <textarea name="followUpNote" className={fieldClass(Boolean(leadFormErrors.followUpNote))} rows={3} value={form.followUpNote} onChange={(e) => setForm((prev) => ({ ...prev, followUpNote: e.target.value }))} />
             </LabeledField>
           </FieldGroup>
           <BusyButton type="submit" busy={formBusy} className="acm-btn acm-btn-primary">
@@ -1818,8 +1908,18 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
 
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={openLeadEdit} className="acm-btn acm-btn-secondary h-10 px-4">
-              Edit Lead
+              <Pencil size={16} />
             </button>
+            {canDeleteLead ? (
+              <BusyButton
+                type="button"
+                busy={leadDeleteBusy}
+                className="acm-btn h-10 px-4 text-rose-600 border border-rose-200 bg-rose-50 hover:bg-rose-100"
+                onClick={deleteLead}
+              >
+                <Trash2 size={16} />
+              </BusyButton>
+            ) : null}
             <button type="button" onClick={() => openFollowUpForm()} className="acm-btn acm-btn-primary h-10 px-4">
               <Plus size={16} />
               Add Follow Up
@@ -1829,17 +1929,17 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
           {leadEditOpen ? (
             <form onSubmit={saveLeadEdit} className="grid gap-3 rounded-[20px] border border-[color:var(--acm-border)] p-4">
               <FieldGroup title="Edit Lead">
-                <LabeledField label="Client Name">
-                  <input required className={fieldClass()} value={leadEditForm.name} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, name: e.target.value }))} />
+                <LabeledField label="Client Name" fieldName="name" error={leadEditErrors.name}>
+                  <input name="name" required className={fieldClass(Boolean(leadEditErrors.name))} value={leadEditForm.name} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, name: e.target.value }))} />
                 </LabeledField>
-                <LabeledField label="Client Contact">
-                  <input className={fieldClass()} value={leadEditForm.contact} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, contact: e.target.value }))} />
+                <LabeledField label="Client Contact" fieldName="contact" error={leadEditErrors.contact}>
+                  <PhoneInput name="contact" className={fieldClass(Boolean(leadEditErrors.contact))} value={leadEditForm.contact} onValueChange={(value) => setLeadEditForm((prev) => ({ ...prev, contact: value }))} />
                 </LabeledField>
-                <LabeledField label="Client Email">
-                  <input type="email" className={fieldClass()} value={leadEditForm.email} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, email: e.target.value }))} />
+                <LabeledField label="Client Email" fieldName="email" error={leadEditErrors.email}>
+                  <input name="email" type="email" className={fieldClass(Boolean(leadEditErrors.email))} value={leadEditForm.email} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, email: e.target.value }))} />
                 </LabeledField>
-                <LabeledField label="Client Address">
-                  <textarea className={fieldClass()} rows={3} value={leadEditForm.address} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, address: e.target.value }))} />
+                <LabeledField label="Client Address" fieldName="address" error={leadEditErrors.address}>
+                  <textarea name="address" className={fieldClass(Boolean(leadEditErrors.address))} rows={3} value={leadEditForm.address} onChange={(e) => setLeadEditForm((prev) => ({ ...prev, address: e.target.value }))} />
                 </LabeledField>
               </FieldGroup>
               <div className="flex justify-end gap-2">
@@ -1851,14 +1951,14 @@ export function LeadsManagerPage({ roleBase = "owner", canCreateLead = false }) 
 
           {followUpFormOpen ? (
             <form onSubmit={saveFollowUp} className="grid gap-3 rounded-[20px] border border-[color:var(--acm-border)] p-4">
-              <LabeledField label="Follow-up Note">
-                <textarea required className={fieldClass()} rows={3} value={followUpForm.note} onChange={(e) => setFollowUpForm((prev) => ({ ...prev, note: e.target.value }))} />
+              <LabeledField label="Follow-up Note" fieldName="note" error={followUpFormErrors.note}>
+                <textarea name="note" required className={fieldClass(Boolean(followUpFormErrors.note))} rows={3} value={followUpForm.note} onChange={(e) => setFollowUpForm((prev) => ({ ...prev, note: e.target.value }))} />
               </LabeledField>
-              <LabeledField label="Next Follow-up Date">
-                <input type="date" className={fieldClass()} value={followUpForm.nextFollowUpDate} onChange={(e) => setFollowUpForm((prev) => ({ ...prev, nextFollowUpDate: e.target.value }))} />
+              <LabeledField label="Next Follow-up Date" fieldName="nextFollowUpDate" error={followUpFormErrors.nextFollowUpDate}>
+                <input name="nextFollowUpDate" type="date" className={fieldClass(Boolean(followUpFormErrors.nextFollowUpDate))} value={followUpForm.nextFollowUpDate} onChange={(e) => setFollowUpForm((prev) => ({ ...prev, nextFollowUpDate: e.target.value }))} />
               </LabeledField>
-              <LabeledField label="Status">
-                <select className={fieldClass()} value={followUpForm.status} onChange={(e) => setFollowUpForm((prev) => ({ ...prev, status: e.target.value }))}>
+              <LabeledField label="Status" fieldName="status" error={followUpFormErrors.status}>
+                <select name="status" className={fieldClass(Boolean(followUpFormErrors.status))} value={followUpForm.status} onChange={(e) => setFollowUpForm((prev) => ({ ...prev, status: e.target.value }))}>
                   <option value="pending">Pending</option>
                   <option value="done">Done</option>
                 </select>
@@ -1939,6 +2039,8 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [formBusy, setFormBusy] = useState(false);
+  const [formErrors, setFormErrors] = useState({});
+  const [editFormErrors, setEditFormErrors] = useState({});
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedClient, setSelectedClient] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
@@ -1959,6 +2061,7 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
   );
 
   function openCreate() {
+    setFormErrors({});
     setForm({
       name: "",
       address: "",
@@ -1974,9 +2077,16 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
   async function saveClient(e) {
     e.preventDefault();
     if (formBusy) return;
+    const nextErrors = getValidationErrors(clientFormSchema, form);
+    if (Object.keys(nextErrors).length) {
+      setFormErrors(nextErrors);
+      focusFirstInvalidField(nextErrors);
+      return;
+    }
 
     setError("");
     setMessage("");
+    setFormErrors({});
     setFormBusy(true);
 
     try {
@@ -1993,6 +2103,7 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
   }
 
   function openClientEdit(client) {
+    setEditFormErrors({});
     setSelectedClient(client);
     setForm({
       name: client.name || "",
@@ -2009,9 +2120,16 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
   async function updateClient(event) {
     event.preventDefault();
     if (!selectedClient || formBusy) return;
+    const nextErrors = getValidationErrors(clientEditSchema, form);
+    if (Object.keys(nextErrors).length) {
+      setEditFormErrors(nextErrors);
+      focusFirstInvalidField(nextErrors);
+      return;
+    }
 
     setError("");
     setMessage("");
+    setEditFormErrors({});
     setFormBusy(true);
 
     try {
@@ -2127,33 +2245,33 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
       <Modal open={open} title="Create Client" onClose={() => setOpen(false)}>
         <form onSubmit={saveClient} className="grid gap-3">
           <FieldGroup title="Client Info">
-            <LabeledField label="Client Name">
-              <input required className={fieldClass()} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+            <LabeledField label="Client Name" fieldName="name" error={formErrors.name}>
+              <input name="name" required className={fieldClass(Boolean(formErrors.name))} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
             </LabeledField>
-            <LabeledField label="Client Contact">
-              <input className={fieldClass()} value={form.contact} onChange={(e) => setForm((prev) => ({ ...prev, contact: e.target.value }))} />
+            <LabeledField label="Client Contact" fieldName="contact" error={formErrors.contact}>
+              <PhoneInput name="contact" className={fieldClass(Boolean(formErrors.contact))} value={form.contact} onValueChange={(value) => setForm((prev) => ({ ...prev, contact: value }))} />
             </LabeledField>
-            <LabeledField label="Client Email">
-              <input type="email" className={fieldClass()} value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
+            <LabeledField label="Client Email" fieldName="email" error={formErrors.email}>
+              <input name="email" type="email" className={fieldClass(Boolean(formErrors.email))} value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
             </LabeledField>
-            <LabeledField label="Client Address">
-              <textarea className={fieldClass()} rows={3} value={form.address} onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))} />
+            <LabeledField label="Client Address" fieldName="address" error={formErrors.address}>
+              <textarea name="address" className={fieldClass(Boolean(formErrors.address))} rows={3} value={form.address} onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))} />
             </LabeledField>
           </FieldGroup>
           <FieldGroup title="Create Follow-up">
             <div className="grid gap-3 md:grid-cols-2">
-              <LabeledField label="Follow-up Date">
-                <input className={fieldClass()} type="date" value={form.followUpDate} onChange={(e) => setForm((prev) => ({ ...prev, followUpDate: e.target.value }))} />
+              <LabeledField label="Follow-up Date" fieldName="followUpDate" error={formErrors.followUpDate}>
+                <input name="followUpDate" className={fieldClass(Boolean(formErrors.followUpDate))} type="date" value={form.followUpDate} onChange={(e) => setForm((prev) => ({ ...prev, followUpDate: e.target.value }))} />
               </LabeledField>
-              <LabeledField label="Status">
-                <select className={fieldClass()} value={form.followUpStatus} onChange={(e) => setForm((prev) => ({ ...prev, followUpStatus: e.target.value }))}>
+              <LabeledField label="Status" fieldName="followUpStatus" error={formErrors.followUpStatus}>
+                <select name="followUpStatus" className={fieldClass(Boolean(formErrors.followUpStatus))} value={form.followUpStatus} onChange={(e) => setForm((prev) => ({ ...prev, followUpStatus: e.target.value }))}>
                   <option value="pending">Pending</option>
                   <option value="done">Done</option>
                 </select>
               </LabeledField>
             </div>
-            <LabeledField label="Note">
-              <textarea className={fieldClass()} rows={3} value={form.followUpNote} onChange={(e) => setForm((prev) => ({ ...prev, followUpNote: e.target.value }))} />
+            <LabeledField label="Note" fieldName="followUpNote" error={formErrors.followUpNote}>
+              <textarea name="followUpNote" className={fieldClass(Boolean(formErrors.followUpNote))} rows={3} value={form.followUpNote} onChange={(e) => setForm((prev) => ({ ...prev, followUpNote: e.target.value }))} />
             </LabeledField>
           </FieldGroup>
           <BusyButton type="submit" busy={formBusy} className="acm-btn acm-btn-primary">
@@ -2217,17 +2335,17 @@ export function ClientsManagerPage({ roleBase, canCreateClient = false }) {
       <Modal open={editOpen} title="Edit Client" onClose={() => setEditOpen(false)}>
         <form onSubmit={updateClient} className="grid gap-3">
           <FieldGroup title="Client Info">
-            <LabeledField label="Client Name">
-              <input required className={fieldClass()} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+            <LabeledField label="Client Name" fieldName="name" error={editFormErrors.name}>
+              <input name="name" required className={fieldClass(Boolean(editFormErrors.name))} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
             </LabeledField>
-            <LabeledField label="Client Contact">
-              <input className={fieldClass()} value={form.contact} onChange={(e) => setForm((prev) => ({ ...prev, contact: e.target.value }))} />
+            <LabeledField label="Client Contact" fieldName="contact" error={editFormErrors.contact}>
+              <PhoneInput name="contact" className={fieldClass(Boolean(editFormErrors.contact))} value={form.contact} onValueChange={(value) => setForm((prev) => ({ ...prev, contact: value }))} />
             </LabeledField>
-            <LabeledField label="Client Email">
-              <input type="email" className={fieldClass()} value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
+            <LabeledField label="Client Email" fieldName="email" error={editFormErrors.email}>
+              <input name="email" type="email" className={fieldClass(Boolean(editFormErrors.email))} value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
             </LabeledField>
-            <LabeledField label="Client Address">
-              <textarea className={fieldClass()} rows={3} value={form.address} onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))} />
+            <LabeledField label="Client Address" fieldName="address" error={editFormErrors.address}>
+              <textarea name="address" className={fieldClass(Boolean(editFormErrors.address))} rows={3} value={form.address} onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))} />
             </LabeledField>
           </FieldGroup>
           <div className="flex justify-end gap-2">
@@ -2258,6 +2376,8 @@ export function ProjectDashboardView({ projectId, roleBase, ownerMode = false, s
   const [editError, setEditError] = useState("");
   const [projectBusy, setProjectBusy] = useState(false);
   const [clientBusy, setClientBusy] = useState(false);
+  const [projectFormErrors, setProjectFormErrors] = useState({});
+  const [clientFormErrors, setClientFormErrors] = useState({});
   const [projectForm, setProjectForm] = useState({
     id: "",
     name: "",
@@ -2305,6 +2425,7 @@ export function ProjectDashboardView({ projectId, roleBase, ownerMode = false, s
   const timelineProgress = totalTimelineDays ? (elapsedTimelineDays / totalTimelineDays) * 100 : 0;
 
   function openEditProject() {
+    setProjectFormErrors({});
     setProjectForm({
       id: project.id,
       name: project.name || "",
@@ -2317,6 +2438,7 @@ export function ProjectDashboardView({ projectId, roleBase, ownerMode = false, s
   }
 
   function openEditClient() {
+    setClientFormErrors({});
     setClientForm({
       id: project.id,
       clientName: project.client?.name || "",
@@ -2330,8 +2452,15 @@ export function ProjectDashboardView({ projectId, roleBase, ownerMode = false, s
   async function saveClientChanges(e) {
     e.preventDefault();
     if (clientBusy) return;
+    const nextErrors = getValidationErrors(projectClientEditSchema, clientForm);
+    if (Object.keys(nextErrors).length) {
+      setClientFormErrors(nextErrors);
+      focusFirstInvalidField(nextErrors);
+      return;
+    }
     setEditError("");
     setEditMessage("");
+    setClientFormErrors({});
     setClientBusy(true);
     const res = await fetch("/api/project", {
       method: "PUT",
@@ -2366,8 +2495,15 @@ export function ProjectDashboardView({ projectId, roleBase, ownerMode = false, s
   async function saveProjectChanges(e) {
     e.preventDefault();
     if (projectBusy) return;
+    const nextErrors = getValidationErrors(projectInfoEditSchema, projectForm);
+    if (Object.keys(nextErrors).length) {
+      setProjectFormErrors(nextErrors);
+      focusFirstInvalidField(nextErrors);
+      return;
+    }
     setEditError("");
     setEditMessage("");
+    setProjectFormErrors({});
     setProjectBusy(true);
     const res = await fetch("/api/project", {
       method: "PUT",
@@ -2637,20 +2773,20 @@ export function ProjectDashboardView({ projectId, roleBase, ownerMode = false, s
 
      <Modal open={editClientOpen} title="Edit Client Info" onClose={() => setEditClientOpen(false)}>
   <form onSubmit={saveClientChanges} className="grid gap-3">
-    <LabeledField label="Client Name">
-      <input className={fieldClass()} value={clientForm.clientName} onChange={(e) => setClientForm(p => ({ ...p, clientName: e.target.value }))} />
+    <LabeledField label="Client Name" fieldName="clientName" error={clientFormErrors.clientName}>
+      <input name="clientName" className={fieldClass(Boolean(clientFormErrors.clientName))} value={clientForm.clientName} onChange={(e) => setClientForm(p => ({ ...p, clientName: e.target.value }))} />
     </LabeledField>
 
-    <LabeledField label="Contact">
-      <input className={fieldClass()} value={clientForm.clientContact} onChange={(e) => setClientForm(p => ({ ...p, clientContact: e.target.value }))} />
+    <LabeledField label="Contact" fieldName="clientContact" error={clientFormErrors.clientContact}>
+      <PhoneInput name="clientContact" className={fieldClass(Boolean(clientFormErrors.clientContact))} value={clientForm.clientContact} onValueChange={(value) => setClientForm((p) => ({ ...p, clientContact: value }))} />
     </LabeledField>
 
-    <LabeledField label="Email">
-      <input type="email" className={fieldClass()} value={clientForm.clientEmail} onChange={(e) => setClientForm(p => ({ ...p, clientEmail: e.target.value }))} />
+    <LabeledField label="Email" fieldName="clientEmail" error={clientFormErrors.clientEmail}>
+      <input name="clientEmail" type="email" className={fieldClass(Boolean(clientFormErrors.clientEmail))} value={clientForm.clientEmail} onChange={(e) => setClientForm(p => ({ ...p, clientEmail: e.target.value }))} />
     </LabeledField>
 
-    <LabeledField label="Address">
-      <textarea className={fieldClass()} value={clientForm.clientAddress} onChange={(e) => setClientForm(p => ({ ...p, clientAddress: e.target.value }))} />
+    <LabeledField label="Address" fieldName="clientAddress" error={clientFormErrors.clientAddress}>
+      <textarea name="clientAddress" className={fieldClass(Boolean(clientFormErrors.clientAddress))} value={clientForm.clientAddress} onChange={(e) => setClientForm(p => ({ ...p, clientAddress: e.target.value }))} />
     </LabeledField>
 
     <BusyButton type="submit" busy={clientBusy} className="acm-btn acm-btn-primary">Save</BusyButton>
@@ -2658,24 +2794,24 @@ export function ProjectDashboardView({ projectId, roleBase, ownerMode = false, s
 </Modal>
 <Modal open={editProjectOpen} title="Edit Project Info" onClose={() => setEditProjectOpen(false)}>
   <form onSubmit={saveProjectChanges} className="grid gap-3">
-    <LabeledField label="Project Name">
-      <input className={fieldClass()} value={projectForm.name} onChange={(e) => setProjectForm(p => ({ ...p, name: e.target.value }))} />
+    <LabeledField label="Project Name" fieldName="name" error={projectFormErrors.name}>
+      <input name="name" className={fieldClass(Boolean(projectFormErrors.name))} value={projectForm.name} onChange={(e) => setProjectForm(p => ({ ...p, name: e.target.value }))} />
     </LabeledField>
 
-    <LabeledField label="Location">
-      <input className={fieldClass()} value={projectForm.location} onChange={(e) => setProjectForm(p => ({ ...p, location: e.target.value }))} />
+    <LabeledField label="Location" fieldName="location" error={projectFormErrors.location}>
+      <input name="location" className={fieldClass(Boolean(projectFormErrors.location))} value={projectForm.location} onChange={(e) => setProjectForm(p => ({ ...p, location: e.target.value }))} />
     </LabeledField>
 
-    <LabeledField label="Start Date">
-      <input type="date" className={fieldClass()} value={projectForm.startDate} onChange={(e) => setProjectForm(p => ({ ...p, startDate: e.target.value }))} />
+    <LabeledField label="Start Date" fieldName="startDate" error={projectFormErrors.startDate}>
+      <input name="startDate" type="date" className={fieldClass(Boolean(projectFormErrors.startDate))} value={projectForm.startDate} onChange={(e) => setProjectForm(p => ({ ...p, startDate: e.target.value }))} />
     </LabeledField>
 
-    <LabeledField label="End Date">
-      <input type="date" className={fieldClass()} value={projectForm.endDate} onChange={(e) => setProjectForm(p => ({ ...p, endDate: e.target.value }))} />
+    <LabeledField label="End Date" fieldName="endDate" error={projectFormErrors.endDate}>
+      <input name="endDate" type="date" className={fieldClass(Boolean(projectFormErrors.endDate))} value={projectForm.endDate} onChange={(e) => setProjectForm(p => ({ ...p, endDate: e.target.value }))} />
     </LabeledField>
 
-    <LabeledField label="Budget">
-      <input className={fieldClass()} value={projectForm.contractValue} onChange={(e) => setProjectForm(p => ({ ...p, contractValue: e.target.value }))} />
+    <LabeledField label="Budget" fieldName="contractValue" error={projectFormErrors.contractValue}>
+      <input name="contractValue" className={fieldClass(Boolean(projectFormErrors.contractValue))} value={projectForm.contractValue} onChange={(e) => setProjectForm(p => ({ ...p, contractValue: e.target.value }))} />
     </LabeledField>
 
     <BusyButton type="submit" busy={projectBusy} className="acm-btn acm-btn-primary">Save</BusyButton>
@@ -2708,6 +2844,8 @@ export function StaffManagerPage({
   const [editingStaff, setEditingStaff] = useState(null);
   const [createBusy, setCreateBusy] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
+  const [createErrors, setCreateErrors] = useState({});
+  const [editErrors, setEditErrors] = useState({});
   const [deleteUserId, setDeleteUserId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [generatedPassword, setGeneratedPassword] = useState(() => generatePasswordPreview());
@@ -2764,6 +2902,7 @@ export function StaffManagerPage({
   }
 
   function openCreateStaffModal() {
+    setCreateErrors({});
     setGeneratedPassword(generatePasswordPreview());
     setForm({
       name: "",
@@ -2781,8 +2920,15 @@ export function StaffManagerPage({
   async function createStaff(e) {
     e.preventDefault();
     if (createBusy) return;
+    const nextErrors = getValidationErrors(staffCreateSchema, form);
+    if (Object.keys(nextErrors).length) {
+      setCreateErrors(nextErrors);
+      focusFirstInvalidField(nextErrors);
+      return;
+    }
     setError("");
     setMessage("");
+    setCreateErrors({});
     setCreateBusy(true);
     try {
       const json = await sendJson("/api/staff", {
@@ -2814,8 +2960,15 @@ export function StaffManagerPage({
     e.preventDefault();
     if (!editingStaff) return;
     if (editBusy) return;
+    const nextErrors = getValidationErrors(staffEditSchema, editingStaff);
+    if (Object.keys(nextErrors).length) {
+      setEditErrors(nextErrors);
+      focusFirstInvalidField(nextErrors);
+      return;
+    }
     setError("");
     setMessage("");
+    setEditErrors({});
     setEditBusy(true);
     try {
       await sendJson("/api/staff", {
@@ -2882,6 +3035,7 @@ export function StaffManagerPage({
   }
 
   function openEditStaff(item) {
+    setEditErrors({});
     setEditingStaff({ ...item, module_access: normalizeModuleAccess(item.module_access, item.role) });
     setEditOpen(true);
   }
@@ -3047,28 +3201,28 @@ export function StaffManagerPage({
       <Modal open={open} title="Create Staff" onClose={() => setOpen(false)}>
         <form onSubmit={createStaff} className="grid gap-3">
           <FieldGroup title="Profile">
-            <LabeledField label="Name">
-              <input className={fieldClass()} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+            <LabeledField label="Name" fieldName="name" error={createErrors.name}>
+              <input name="name" className={fieldClass(Boolean(createErrors.name))} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
             </LabeledField>
-            <LabeledField label="Role">
-              <select className={fieldClass()} value={form.role} onChange={(e) => setForm((prev) => ({ ...prev, role: e.target.value }))}>
+            <LabeledField label="Role" fieldName="role" error={createErrors.role}>
+              <select name="role" className={fieldClass(Boolean(createErrors.role))} value={form.role} onChange={(e) => setForm((prev) => ({ ...prev, role: e.target.value }))}>
                 {allowManagerCreation ? <option value="manager">Manager</option> : null}
                 <option value="employee">Employee</option>
                 <option value="subcontractor">Subcontractor</option>
               </select>
             </LabeledField>
-            <LabeledField label="Email">
-              <input className={fieldClass()} value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
+            <LabeledField label="Email" fieldName="email" error={createErrors.email}>
+              <input name="email" className={fieldClass(Boolean(createErrors.email))} value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
             </LabeledField>
-            <LabeledField label="Mobile">
-              <input className={fieldClass()} value={form.mobile} onChange={(e) => setForm((prev) => ({ ...prev, mobile: e.target.value }))} />
+            <LabeledField label="Mobile" fieldName="mobile" error={createErrors.mobile}>
+              <PhoneInput name="mobile" className={fieldClass(Boolean(createErrors.mobile))} value={form.mobile} onValueChange={(value) => setForm((prev) => ({ ...prev, mobile: value }))} />
             </LabeledField>
-            <LabeledField label="Hourly Rate">
-              <input className={fieldClass()} inputMode="decimal" value={form.hourlyRate} onChange={(e) => setForm((prev) => ({ ...prev, hourlyRate: e.target.value }))} />
+            <LabeledField label="Hourly Rate" fieldName="hourlyRate" error={createErrors.hourlyRate}>
+              <input name="hourlyRate" className={fieldClass(Boolean(createErrors.hourlyRate))} inputMode="decimal" value={form.hourlyRate} onChange={(e) => setForm((prev) => ({ ...prev, hourlyRate: e.target.value }))} />
             </LabeledField>
             {form.role === "subcontractor" ? (
-              <LabeledField label="Craft">
-                <input className={fieldClass()} value={form.craft} onChange={(e) => setForm((prev) => ({ ...prev, craft: e.target.value }))} />
+              <LabeledField label="Craft" fieldName="craft" error={createErrors.craft}>
+                <input name="craft" className={fieldClass(Boolean(createErrors.craft))} value={form.craft} onChange={(e) => setForm((prev) => ({ ...prev, craft: e.target.value }))} />
               </LabeledField>
             ) : null}
             {fixedProjectId ? (
@@ -3100,8 +3254,8 @@ export function StaffManagerPage({
             </div>
           </FieldGroup>
           <FieldGroup title="Credentials">
-            <LabeledField label="User Name">
-              <input className={fieldClass()} value={form.userName} onChange={(e) => setForm((prev) => ({ ...prev, userName: e.target.value }))} />
+            <LabeledField label="User Name" fieldName="userName" error={createErrors.userName}>
+              <input name="userName" className={fieldClass(Boolean(createErrors.userName))} value={form.userName} onChange={(e) => setForm((prev) => ({ ...prev, userName: e.target.value }))} />
             </LabeledField>
             <LabeledField label="Generated User ID">
               <input className={fieldClass()} value={staffPreview.data?.preview?.userCode || "Generating..."} disabled />
@@ -3122,21 +3276,21 @@ export function StaffManagerPage({
       <Modal open={editOpen} title="Edit Staff" onClose={() => setEditOpen(false)}>
         <form onSubmit={updateStaff} className="grid gap-3">
           <FieldGroup title="Profile">
-            <LabeledField label="Name">
-              <input className={fieldClass()} value={editingStaff?.name || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, name: e.target.value }))} />
+            <LabeledField label="Name" fieldName="name" error={editErrors.name}>
+              <input name="name" className={fieldClass(Boolean(editErrors.name))} value={editingStaff?.name || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, name: e.target.value }))} />
             </LabeledField>
-            <LabeledField label="Email">
-              <input className={fieldClass()} value={editingStaff?.email || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, email: e.target.value }))} />
+            <LabeledField label="Email" fieldName="email" error={editErrors.email}>
+              <input name="email" className={fieldClass(Boolean(editErrors.email))} value={editingStaff?.email || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, email: e.target.value }))} />
             </LabeledField>
-            <LabeledField label="Mobile">
-              <input className={fieldClass()} value={editingStaff?.mobile || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, mobile: e.target.value }))} />
+            <LabeledField label="Mobile" fieldName="mobile" error={editErrors.mobile}>
+              <PhoneInput name="mobile" className={fieldClass(Boolean(editErrors.mobile))} value={editingStaff?.mobile || ""} onValueChange={(value) => setEditingStaff((prev) => ({ ...prev, mobile: value }))} />
             </LabeledField>
-            <LabeledField label="Hourly Rate">
-              <input className={fieldClass()} inputMode="decimal" value={editingStaff?.hourly_rate || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, hourly_rate: e.target.value }))} />
+            <LabeledField label="Hourly Rate" fieldName="hourly_rate" error={editErrors.hourly_rate}>
+              <input name="hourly_rate" className={fieldClass(Boolean(editErrors.hourly_rate))} inputMode="decimal" value={editingStaff?.hourly_rate || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, hourly_rate: e.target.value }))} />
             </LabeledField>
             {editingStaff?.role === "subcontractor" ? (
-              <LabeledField label="Craft">
-                <input className={fieldClass()} value={editingStaff?.craft || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, craft: e.target.value }))} />
+              <LabeledField label="Craft" fieldName="craft" error={editErrors.craft}>
+                <input name="craft" className={fieldClass(Boolean(editErrors.craft))} value={editingStaff?.craft || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, craft: e.target.value }))} />
               </LabeledField>
             ) : null}
           </FieldGroup>
@@ -3163,14 +3317,14 @@ export function StaffManagerPage({
             </div>
           </FieldGroup>
           <FieldGroup title="Credentials">
-            <LabeledField label="User Name">
-              <input className={fieldClass()} value={editingStaff?.user_name || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, user_name: e.target.value }))} />
+            <LabeledField label="User Name" fieldName="user_name" error={editErrors.user_name}>
+              <input name="user_name" className={fieldClass(Boolean(editErrors.user_name))} value={editingStaff?.user_name || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, user_name: e.target.value }))} />
             </LabeledField>
             <LabeledField label="User ID">
               <input className={fieldClass()} value={editingStaff?.user_code || ""} disabled />
             </LabeledField>
-            <LabeledField label="Password">
-              <PasswordInput className={fieldClass()} placeholder="New password (optional)" value={editingStaff?.password || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, password: e.target.value }))} />
+            <LabeledField label="Password" fieldName="password" error={editErrors.password}>
+              <PasswordInput className={fieldClass(Boolean(editErrors.password))} placeholder="New password (optional)" value={editingStaff?.password || ""} onChange={(e) => setEditingStaff((prev) => ({ ...prev, password: e.target.value }))} />
             </LabeledField>
           </FieldGroup>
           <BusyButton type="submit" busy={editBusy} className="acm-btn acm-btn-primary">Save</BusyButton>
@@ -3308,6 +3462,9 @@ export function SettingsPage() {
   const [profileBusy, setProfileBusy] = useState(false);
   const [companyBusy, setCompanyBusy] = useState(false);
   const [passwordBusy, setPasswordBusy] = useState(false);
+  const [profileErrors, setProfileErrors] = useState({});
+  const [companyErrors, setCompanyErrors] = useState({});
+  const [passwordErrors, setPasswordErrors] = useState({});
   const [sectionState, setSectionState] = useState({
     personal: true,
     company: true,
@@ -3419,7 +3576,14 @@ export function SettingsPage() {
   async function saveProfile(e) {
     e.preventDefault();
     if (profileBusy) return;
+    const nextErrors = getValidationErrors(settingsProfileSchema, resolvedProfileForm);
+    if (Object.keys(nextErrors).length) {
+      setProfileErrors(nextErrors);
+      focusFirstInvalidField(nextErrors);
+      return;
+    }
     setProfileBusy(true);
+    setProfileErrors({});
     try {
       await updateSettings({ ...resolvedProfileForm }, "Personal details updated.");
     } catch {}
@@ -3431,7 +3595,14 @@ export function SettingsPage() {
   async function saveCompany(e) {
     e.preventDefault();
     if (companyBusy || !isOwner) return;
+    const nextErrors = getValidationErrors(settingsCompanySchema, resolvedCompanyForm);
+    if (Object.keys(nextErrors).length) {
+      setCompanyErrors(nextErrors);
+      focusFirstInvalidField(nextErrors);
+      return;
+    }
     setCompanyBusy(true);
+    setCompanyErrors({});
     try {
       await updateSettings(
         {
@@ -3451,17 +3622,14 @@ export function SettingsPage() {
     if (passwordBusy) return;
     setError("");
     setMessage("");
+    const nextErrors = getValidationErrors(passwordChangeSchema, passwordForm);
+    if (Object.keys(nextErrors).length) {
+      setPasswordErrors(nextErrors);
+      focusFirstInvalidField(nextErrors);
+      return;
+    }
+    setPasswordErrors({});
     setPasswordBusy(true);
-    if (!passwordForm.password || passwordForm.password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      setPasswordBusy(false);
-      return;
-    }
-    if (passwordForm.password !== passwordForm.confirmPassword) {
-      setError("Passwords do not match.");
-      setPasswordBusy(false);
-      return;
-    }
 
     try {
       await updateSettings(
@@ -3494,23 +3662,23 @@ export function SettingsPage() {
         >
           <form onSubmit={saveProfile} className="grid gap-4">
             <div className="grid gap-4 md:grid-cols-2">
-              <LabeledField label="Name">
-                <input className={fieldClass()} value={resolvedProfileForm.name} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), name: e.target.value }))} />
+              <LabeledField label="Name" fieldName="name" error={profileErrors.name}>
+                <input name="name" className={fieldClass(Boolean(profileErrors.name))} value={resolvedProfileForm.name} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), name: e.target.value }))} />
               </LabeledField>
               <LabeledField label="User ID">
                 <input className={fieldClass()} value={resolvedProfileForm.userCode} readOnly />
               </LabeledField>
-              <LabeledField label="User Name">
-                <input className={fieldClass()} value={resolvedProfileForm.userName} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), userName: e.target.value }))} />
+              <LabeledField label="User Name" fieldName="userName" error={profileErrors.userName}>
+                <input name="userName" className={fieldClass(Boolean(profileErrors.userName))} value={resolvedProfileForm.userName} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), userName: e.target.value }))} />
               </LabeledField>
-              <LabeledField label="Email">
-                <input className={fieldClass()} type="email" value={resolvedProfileForm.email} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), email: e.target.value }))} />
+              <LabeledField label="Email" fieldName="email" error={profileErrors.email}>
+                <input name="email" className={fieldClass(Boolean(profileErrors.email))} type="email" value={resolvedProfileForm.email} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), email: e.target.value }))} />
               </LabeledField>
-              <LabeledField label="Mobile">
-                <input className={fieldClass()} value={resolvedProfileForm.mobile} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), mobile: e.target.value }))} />
+              <LabeledField label="Mobile" fieldName="mobile" error={profileErrors.mobile}>
+                <PhoneInput name="mobile" className={fieldClass(Boolean(profileErrors.mobile))} value={resolvedProfileForm.mobile} onValueChange={(value) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), mobile: value }))} />
               </LabeledField>
-              <LabeledField label="Address">
-                <textarea className={fieldClass()} rows={4} value={resolvedProfileForm.address} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), address: e.target.value }))} />
+              <LabeledField label="Address" fieldName="address" error={profileErrors.address}>
+                <textarea name="address" className={fieldClass(Boolean(profileErrors.address))} rows={4} value={resolvedProfileForm.address} onChange={(e) => setProfileForm((prev) => ({ ...(prev ?? resolvedProfileForm), address: e.target.value }))} />
               </LabeledField>
             </div>
             <BusyButton type="submit" busy={profileBusy} className="acm-btn acm-btn-primary w-fit px-5">Save Details</BusyButton>
@@ -3527,21 +3695,21 @@ export function SettingsPage() {
             <form onSubmit={saveCompany} className="grid gap-4">
               <div className="grid gap-4">
                 <div className="grid gap-4 md:grid-cols-2">
-                  <LabeledField label="Company Name">
-                    <input className={fieldClass()} value={resolvedCompanyForm.name} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), name: e.target.value, stampLabel: e.target.value || (prev ?? resolvedCompanyForm).stampLabel }))} />
+                  <LabeledField label="Company Name" fieldName="name" error={companyErrors.name}>
+                    <input name="name" className={fieldClass(Boolean(companyErrors.name))} value={resolvedCompanyForm.name} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), name: e.target.value, stampLabel: e.target.value || (prev ?? resolvedCompanyForm).stampLabel }))} />
                   </LabeledField>
                   <LabeledField label="Company Code">
                     <input className={fieldClass()} value={resolvedCompanyForm.code} readOnly />
                   </LabeledField>
-                  <LabeledField label="Company Email">
-                    <input className={fieldClass()} type="email" value={resolvedCompanyForm.email} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), email: e.target.value }))} />
+                  <LabeledField label="Company Email" fieldName="email" error={companyErrors.email}>
+                    <input name="email" className={fieldClass(Boolean(companyErrors.email))} type="email" value={resolvedCompanyForm.email} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), email: e.target.value }))} />
                   </LabeledField>
-                  <LabeledField label="Company Contact">
-                    <input className={fieldClass()} value={resolvedCompanyForm.contact} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), contact: e.target.value }))} />
+                  <LabeledField label="Company Contact" fieldName="contact" error={companyErrors.contact}>
+                    <PhoneInput name="contact" className={fieldClass(Boolean(companyErrors.contact))} value={resolvedCompanyForm.contact} onValueChange={(value) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), contact: value }))} />
                   </LabeledField>
                 </div>
-                <LabeledField label="Company Address">
-                  <textarea className={fieldClass()} rows={4} value={resolvedCompanyForm.address} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), address: e.target.value }))} />
+                <LabeledField label="Company Address" fieldName="address" error={companyErrors.address}>
+                  <textarea name="address" className={fieldClass(Boolean(companyErrors.address))} rows={4} value={resolvedCompanyForm.address} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), address: e.target.value }))} />
                 </LabeledField>
 
                 <div className="grid gap-4 md:grid-cols-3">
@@ -3556,8 +3724,8 @@ export function SettingsPage() {
                       <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Signature</div>
                       <button type="button" onClick={() => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), signatureDataUrl: buildSignatureDataUrl((prev ?? resolvedCompanyForm).signatureName || resolvedProfileForm.name) }))} className="acm-btn acm-btn-secondary h-9 px-3">Generate</button>
                     </div>
-                    <LabeledField label="Owner Name">
-                      <input className={fieldClass()} value={resolvedCompanyForm.signatureName} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), signatureName: e.target.value }))} />
+                    <LabeledField label="Owner Name" fieldName="signatureName" error={companyErrors.signatureName}>
+                      <input name="signatureName" className={fieldClass(Boolean(companyErrors.signatureName))} value={resolvedCompanyForm.signatureName} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), signatureName: e.target.value }))} />
                     </LabeledField>
                     {resolvedCompanyForm.signatureDataUrl ? <img src={resolvedCompanyForm.signatureDataUrl} alt="Owner signature" className="mt-3 h-28 w-full rounded-[16px] object-contain bg-white p-2" /> : null}
                     <AssetUploadField label="Upload Signature" helper={resolvedCompanyForm.signatureDataUrl ? "Signature ready." : "Choose a signature image or generate one."} onChange={(e) => handleAssetUpload("signatureDataUrl", e.target.files?.[0])} />
@@ -3568,8 +3736,8 @@ export function SettingsPage() {
                       <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Stamp</div>
                       <button type="button" onClick={() => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), stampDataUrl: buildStampDataUrl((prev ?? resolvedCompanyForm).stampLabel || (prev ?? resolvedCompanyForm).name) }))} className="acm-btn acm-btn-secondary h-9 px-3">Generate</button>
                     </div>
-                    <LabeledField label="Stamp Label">
-                      <input className={fieldClass()} value={resolvedCompanyForm.stampLabel} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), stampLabel: e.target.value }))} />
+                    <LabeledField label="Stamp Label" fieldName="stampLabel" error={companyErrors.stampLabel}>
+                      <input name="stampLabel" className={fieldClass(Boolean(companyErrors.stampLabel))} value={resolvedCompanyForm.stampLabel} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), stampLabel: e.target.value }))} />
                     </LabeledField>
                     {resolvedCompanyForm.stampDataUrl ? <img src={resolvedCompanyForm.stampDataUrl} alt="Company stamp" className="mt-3 h-28 w-full rounded-[16px] object-contain bg-white p-2" /> : null}
                     <AssetUploadField label="Upload Stamp" helper={resolvedCompanyForm.stampDataUrl ? "Stamp ready." : "Choose a stamp image or generate one."} onChange={(e) => handleAssetUpload("stampDataUrl", e.target.files?.[0])} />
@@ -3588,11 +3756,11 @@ export function SettingsPage() {
           onToggle={() => setSectionState((current) => ({ ...current, credentials: !current.credentials }))}
         >
           <form onSubmit={changePassword} className="grid gap-3 md:grid-cols-2">
-            <LabeledField label="New Password">
-              <PasswordInput className={fieldClass()} value={passwordForm.password} onChange={(e) => setPasswordForm((prev) => ({ ...prev, password: e.target.value }))} />
+            <LabeledField label="New Password" fieldName="password" error={passwordErrors.password}>
+              <PasswordInput className={fieldClass(Boolean(passwordErrors.password))} value={passwordForm.password} onChange={(e) => setPasswordForm((prev) => ({ ...prev, password: e.target.value }))} />
             </LabeledField>
-            <LabeledField label="Confirm Password">
-              <PasswordInput className={fieldClass()} value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))} />
+            <LabeledField label="Confirm Password" fieldName="confirmPassword" error={passwordErrors.confirmPassword}>
+              <PasswordInput className={fieldClass(Boolean(passwordErrors.confirmPassword))} value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))} />
             </LabeledField>
             <BusyButton type="submit" busy={passwordBusy} className="acm-btn acm-btn-primary w-fit">Update Credentials</BusyButton>
           </form>

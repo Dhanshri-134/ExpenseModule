@@ -36,7 +36,10 @@ function ExpenseDetailsContentComponent({ expense, formatCurrency, formatDate })
 
 function ExpenseRegisterSectionComponent({
   expenses,
+  canEdit,
   openCreate,
+  openEdit,
+  deleteExpense,
   exportPdf,
   formatCurrency,
   formatDate,
@@ -73,12 +76,13 @@ function ExpenseRegisterSectionComponent({
               <th className="px-4 py-3 font-semibold">Status</th>
               <th className="px-4 py-3 font-semibold">Reference</th>
               <th className="px-4 py-3 font-semibold">Entered By</th>
+              <th className="px-4 py-3 font-semibold">Actions</th>
             </tr>
           </thead>
           <tbody>
             {!expenses.length ? (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-[color:var(--acm-muted-fg)]">
+                <td colSpan={9} className="px-4 py-8 text-center text-[color:var(--acm-muted-fg)]">
                   No expenses match the current filters.
                 </td>
               </tr>
@@ -93,6 +97,20 @@ function ExpenseRegisterSectionComponent({
                 <td className="px-4 py-3">{expense.status || "-"}</td>
                 <td className="px-4 py-3">{expense.reference_number || "-"}</td>
                 <td className="px-4 py-3">{expense.created_by?.name || expense.created_by?.user_name || expense.created_by?.user_code || "-"}</td>
+                <td className="px-4 py-3">
+                  {canEdit?.(expense) ? (
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => openEdit?.(expense)} className="acm-btn acm-btn-secondary h-8 px-3 text-xs">
+                        Edit
+                      </button>
+                      <button type="button" onClick={() => deleteExpense?.(expense)} className="acm-btn acm-btn-secondary h-8 px-3 text-xs">
+                        Delete
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-[color:var(--acm-muted-fg)]">-</span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

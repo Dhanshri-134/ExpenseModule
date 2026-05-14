@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { BellIcon, MenuIcon } from "@/components/dashboard/icons";
 import Modal from "@/components/dashboard/Modal";
 import LogoutButton from "@/components/dashboard/LogoutButton";
+import RefreshButton from "@/components/RefreshButton";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 import styles from "@/styles/DashboardShell.module.css";
 
@@ -68,6 +69,7 @@ export default function DashboardHeader({
           </div>
 
           <div className={styles.headerActions}>
+            <RefreshButton className="inline-flex items-center gap-2 rounded-xl border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-1)] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[color:var(--acm-surface-12)] disabled:opacity-60" />
             <ThemeToggle />
             <button
               type="button"
