@@ -61,6 +61,10 @@ function toPercent(value) {
   return Math.abs(parsed) > 1 ? parsed / 100 : parsed;
 }
 
+function roundCurrency(value) {
+  return Math.round((toNumber(value) + Number.EPSILON) * 10000) / 10000;
+}
+
 function formatDecimalInput(value) {
   const numeric = toNumber(value);
   if (!Number.isFinite(numeric)) return "";
@@ -234,7 +238,7 @@ function createCostLine(index = 1) {
     subcontractorEntries: [createSubcontractorEntry()],
     materialEntries: [createMaterialEntry()],
     equipmentEntries: [createEquipmentEntry()],
-    overheadEntries: [createOverheadEntry()],
+    overheadEntries: [],
   };
 }
 
@@ -375,11 +379,11 @@ function emptyEstimateForm(clientId = "", templateId = "") {
 
 function calculateLabor(entry) {
   const targetWage = toNumber(entry.targetWage);
-  const stHours = toNumber(entry.straightTimePersons) * 8 * toNumber(entry.straightTimeDays);
-  const otHours = toNumber(entry.overtimePersons) * 10 * toNumber(entry.overtimeDays);
-  const stRate = targetWage * 1.55;
-  const otRate = targetWage * 2.24;
-  const totalAmount = stHours * stRate + otHours * otRate;
+  const stHours = roundCurrency(toNumber(entry.straightTimePersons) * 8 * toNumber(entry.straightTimeDays));
+  const otHours = roundCurrency(toNumber(entry.overtimePersons) * 10 * toNumber(entry.overtimeDays));
+  const stRate = roundCurrency(targetWage * 1.55);
+  const otRate = roundCurrency(targetWage * 2.24);
+  const totalAmount = roundCurrency(stHours * stRate + otHours * otRate);
 
   return {
     stHours,
@@ -387,7 +391,7 @@ function calculateLabor(entry) {
     otHours,
     otRate,
     total: totalAmount,
-    targetPay: stHours * targetWage,
+    targetPay: roundCurrency(stHours * targetWage),
     taxAmount: 0,
   };
 }
@@ -419,12 +423,12 @@ function applyRowMarkup(baseTotal, entry) {
 
 function calculateMaterial(entry) {
   const quantity = toNumber(entry.quantity);
-  const wasteQty = quantity + quantity * toPercent(entry.wastePercent);
+  const wasteQty = roundCurrency(quantity * (1 + toPercent(entry.wastePercent)));
   const unitRate = toNumber(entry.unitRate);
-  const cost = quantity * unitRate;
+  const cost = roundCurrency(wasteQty * unitRate);
   const freight = toNumber(entry.freight);
-  const costWithFreight = cost + freight;
-  const taxAmount = costWithFreight * toPercent(entry.taxPercent);
+  const costWithFreight = roundCurrency(cost + freight);
+  const taxAmount = roundCurrency(costWithFreight * toPercent(entry.taxPercent));
   return {
     wasteQty,
     unitRate,
@@ -433,7 +437,7 @@ function calculateMaterial(entry) {
     costWithFreight,
     subtotal: costWithFreight,
     taxAmount,
-    total: costWithFreight + taxAmount,
+    total: roundCurrency(costWithFreight + taxAmount),
   };
 }
 
@@ -441,12 +445,12 @@ function calculateEquipment(entry) {
   const quantity = toNumber(entry.quantity);
   const rentalDays = Math.max(toNumber(entry.rentalDays), 0);
   const unitRate = toNumber(entry.unitRate);
-  const cost = quantity * unitRate;
+  const cost = roundCurrency(quantity * rentalDays * unitRate);
   const freight = toNumber(entry.freight);
-  const fuel = (cost + freight) * toPercent(entry.fuelPercent);
-  const costWithFreight = cost + freight;
-  const costWithFuel = costWithFreight + fuel;
-  const taxAmount = costWithFuel * toPercent(entry.taxPercent);
+  const costWithFreight = roundCurrency(cost + freight);
+  const fuel = roundCurrency(costWithFreight * toPercent(entry.fuelPercent));
+  const costWithFuel = roundCurrency(costWithFreight + fuel);
+  const taxAmount = roundCurrency(costWithFuel * toPercent(entry.taxPercent));
   return {
     quantity,
     rentalDays,
@@ -458,7 +462,7 @@ function calculateEquipment(entry) {
     costWithFuel,
     subtotal: costWithFuel,
     taxAmount,
-    total: costWithFuel + taxAmount,
+    total: roundCurrency(costWithFuel + taxAmount),
   };
 }
 
@@ -552,34 +556,24 @@ function flattenEstimateCostLines(costCodes = []) {
       });
     });
 
-    (line.overheadEntries ?? []).forEach((entry) => {
-      costLine.overheadEntries.push({
-        id: entry.id || createId("overhead"),
-        code: entry.metadata?.code || line.costCode?.code || "",
-        description: entry.description || "",
-        quantity: entry.qty ?? "",
-        uom: entry.metadata?.uom || "",
-        unitRate: entry.rate ?? "",
-        days: entry.days ?? "",
-        taxPercent: toNumber(entry.taxPercent) * 100,
-      });
-    });
-
     if (!costLine.laborEntries.length) costLine.laborEntries = [createLaborEntry()];
     if (!costLine.subcontractorEntries.length) costLine.subcontractorEntries = [createSubcontractorEntry()];
     if (!costLine.materialEntries.length) costLine.materialEntries = [createMaterialEntry()];
     if (!costLine.equipmentEntries.length) costLine.equipmentEntries = [createEquipmentEntry()];
-    if (!costLine.overheadEntries.length) costLine.overheadEntries = [createOverheadEntry()];
     return costLine;
   });
 }
 
+function estimateDisplayTotal(estimate) {
+  return toNumber(estimate?.summary?.finalBid ?? estimate?.summary?.totalPrice ?? 0);
+}
+
 function calculateOverhead(entry) {
   const quantity = toNumber(entry.quantity);
-  const days = Math.max(toNumber(entry.days), 1);
+  const days = Math.max(toNumber(entry.days), 0);
   const unitRate = toNumber(entry.unitRate);
-  const cost = quantity * unitRate * days;
-  const taxAmount = cost * toPercent(entry.taxPercent);
+  const cost = roundCurrency(quantity * unitRate * days);
+  const taxAmount = roundCurrency(cost * toPercent(entry.taxPercent));
   return {
     quantity,
     days,
@@ -587,7 +581,7 @@ function calculateOverhead(entry) {
     cost,
     subtotal: cost,
     taxAmount,
-    total: cost + taxAmount,
+    total: roundCurrency(cost + taxAmount),
   };
 }
 
@@ -597,8 +591,7 @@ function computeUiTotals(form, previewSummary) {
     const subcontractorTax = (line.subcontractorEntries ?? []).reduce((acc, entry) => acc + calculateSubcontractor(entry).taxAmount, 0);
     const materialTax = (line.materialEntries ?? []).reduce((acc, entry) => acc + calculateMaterial(entry).taxAmount, 0);
     const equipmentTax = (line.equipmentEntries ?? []).reduce((acc, entry) => acc + calculateEquipment(entry).taxAmount, 0);
-    const overheadTax = (line.overheadEntries ?? []).reduce((acc, entry) => acc + calculateOverhead(entry).taxAmount, 0);
-    return sum + laborTax + subcontractorTax + materialTax + equipmentTax + overheadTax;
+    return sum + laborTax + subcontractorTax + materialTax + equipmentTax;
   }, 0);
 
   const subtotal = toNumber(previewSummary.finalBid || previewSummary.totalPrice || previewSummary.baseCost);
@@ -615,20 +608,38 @@ function computeUiTotals(form, previewSummary) {
   };
 }
 
-function computeCostLineSummary(line) {
-  const laborCost =
-    (line.laborEntries ?? []).reduce((sum, entry) => sum + calculateLabor(entry).total, 0) +
-    (line.subcontractorEntries ?? []).reduce((sum, entry) => sum + calculateSubcontractor(entry).total, 0);
-  const materialCost = (line.materialEntries ?? []).reduce((sum, entry) => sum + calculateMaterial(entry).total, 0);
-  const equipmentCost = (line.equipmentEntries ?? []).reduce((sum, entry) => sum + calculateEquipment(entry).total, 0);
-  const overheadCost = (line.overheadEntries ?? []).reduce((sum, entry) => sum + calculateOverhead(entry).total, 0);
-  const total = laborCost + materialCost + equipmentCost + overheadCost;
+function computeCostLineSummary(line, defaults = {}) {
+  const laborBase = (line.laborEntries ?? []).reduce((sum, entry) => sum + calculateLabor(entry).total, 0);
+  const subcontractorBase = (line.subcontractorEntries ?? []).reduce((sum, entry) => sum + calculateSubcontractor(entry).total, 0);
+  const materialBase = (line.materialEntries ?? []).reduce((sum, entry) => sum + calculateMaterial(entry).total, 0);
+  const equipmentBase = (line.equipmentEntries ?? []).reduce((sum, entry) => sum + calculateEquipment(entry).total, 0);
+  const directOverheadCost = 0;
+  const baseCost = roundCurrency(laborBase + subcontractorBase + materialBase + equipmentBase);
+  const overheadPercent = toPercent(defaults.overheadPercent);
+  const profitPercent = toPercent(defaults.profitPercent);
+  const markupOverhead = roundCurrency(baseCost * overheadPercent);
+  const profitAmount = roundCurrency((baseCost + markupOverhead) * profitPercent);
+  const commissionAmount = 0;
+  const laborCost = roundCurrency(laborBase);
+  const subcontractorCost = roundCurrency(subcontractorBase);
+  const materialCost = roundCurrency(materialBase);
+  const equipmentCost = roundCurrency(equipmentBase);
+  const overheadCost = roundCurrency(directOverheadCost);
+  const total = roundCurrency(baseCost + markupOverhead + profitAmount + commissionAmount);
 
   return {
     laborCost,
+    subcontractorCost,
     materialCost,
     equipmentCost,
     overheadCost,
+    baseCost,
+    overheadPercent,
+    markupOverhead,
+    profitPercent,
+    profitAmount,
+    commissionPercent: 0,
+    commissionAmount,
     total,
     laborCount: (line.laborEntries ?? []).length + (line.subcontractorEntries ?? []).length,
     materialCount: (line.materialEntries ?? []).length,
@@ -638,74 +649,79 @@ function computeCostLineSummary(line) {
 }
 
 function buildClientPreviewSummary(form) {
-  const lineSummaries = (form.costLines ?? []).map(computeCostLineSummary);
-  const laborBase = (form.costLines ?? []).reduce(
-    (sum, line) =>
-      sum +
-      (line.laborEntries ?? []).reduce((entrySum, entry) => entrySum + calculateLabor(entry).total, 0) +
-      (line.subcontractorEntries ?? []).reduce((entrySum, entry) => entrySum + calculateSubcontractor(entry).total, 0),
-    0
-  );
-  const materialBase = (form.costLines ?? []).reduce((sum, line) => sum + (line.materialEntries ?? []).reduce((entrySum, entry) => entrySum + calculateMaterial(entry).total, 0), 0);
-  const equipmentBase = (form.costLines ?? []).reduce((sum, line) => sum + (line.equipmentEntries ?? []).reduce((entrySum, entry) => entrySum + calculateEquipment(entry).total, 0), 0);
-  const laborMarkup = (form.costLines ?? []).reduce(
-    (sum, line) =>
-      sum +
-      (line.laborEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateLabor(entry).total, entry).overheadAmount, 0) +
-      (line.subcontractorEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateSubcontractor(entry).total, entry).overheadAmount, 0),
-    0
-  );
-  const materialMarkup = (form.costLines ?? []).reduce((sum, line) => sum + (line.materialEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateMaterial(entry).total, entry).overheadAmount, 0), 0);
-  const equipmentMarkup = (form.costLines ?? []).reduce((sum, line) => sum + (line.equipmentEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateEquipment(entry).total, entry).overheadAmount, 0), 0);
-  const laborProfit = (form.costLines ?? []).reduce(
-    (sum, line) =>
-      sum +
-      (line.laborEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateLabor(entry).total, entry).profitAmount, 0) +
-      (line.subcontractorEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateSubcontractor(entry).total, entry).profitAmount, 0),
-    0
-  );
-  const materialProfit = (form.costLines ?? []).reduce((sum, line) => sum + (line.materialEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateMaterial(entry).total, entry).profitAmount, 0), 0);
-  const equipmentProfit = (form.costLines ?? []).reduce((sum, line) => sum + (line.equipmentEntries ?? []).reduce((entrySum, entry) => entrySum + applyRowMarkup(calculateEquipment(entry).total, entry).profitAmount, 0), 0);
-  const baseCost = laborBase + materialBase + equipmentBase;
-  const overheadAmount = laborMarkup + materialMarkup + equipmentMarkup;
-  const profitAmount = laborProfit + materialProfit + equipmentProfit;
-  const totalPrice = baseCost + overheadAmount + profitAmount;
-  const overheadPercent = 0;
-  const profitPercent = 0;
-  const commissionPercent = toPercent(form.commissionPercent);
+  const lineSummaries = (form.costLines ?? []).map((line) => computeCostLineSummary(line, form));
+  const laborBase = roundCurrency(lineSummaries.reduce((sum, line) => sum + line.laborCost, 0));
+  const subcontractorBase = roundCurrency(lineSummaries.reduce((sum, line) => sum + line.subcontractorCost, 0));
+  const materialBase = roundCurrency(lineSummaries.reduce((sum, line) => sum + line.materialCost, 0));
+  const equipmentBase = roundCurrency(lineSummaries.reduce((sum, line) => sum + line.equipmentCost, 0));
+  const directOverheadBase = 0;
+  const baseCost = roundCurrency(lineSummaries.reduce((sum, line) => sum + line.baseCost, 0));
+  const overheadAmount = roundCurrency(lineSummaries.reduce((sum, line) => sum + line.markupOverhead, 0));
+  const profitAmount = roundCurrency(lineSummaries.reduce((sum, line) => sum + line.profitAmount, 0));
+  const commissionAmount = 0;
+  const overheadPercent = toPercent(form.overheadPercent);
+  const profitPercent = toPercent(form.profitPercent);
   const riskPercent = toPercent(form.riskPercent);
   const inflationRate = toPercent(form.inflationRate);
   const escalationYears = toNumber(form.escalationYears);
-  const commissionAmount = (baseCost + overheadAmount + profitAmount) * commissionPercent;
-  const contingencyAmount = (baseCost + overheadAmount + profitAmount + commissionAmount) * riskPercent;
-  const totalPriceWithAdjustments = totalPrice + commissionAmount + contingencyAmount;
-  const futureCost = totalPriceWithAdjustments * inflationRate * Math.max(escalationYears, 0);
+  const totalBeforeCommission = roundCurrency(baseCost + overheadAmount + profitAmount);
+  const contingencyAmount = roundCurrency(baseCost * riskPercent);
+  const totalPrice = totalBeforeCommission;
+  const finalBid = totalPrice;
+  const futureCost = roundCurrency(totalPrice * (1 + inflationRate) ** Math.max(escalationYears, 0));
 
   return {
     laborCost: laborBase,
+    subcontractorCost: subcontractorBase,
     materialCost: materialBase,
     equipmentCost: equipmentBase,
-    directOverheadCost: lineSummaries.reduce((sum, line) => sum + line.overheadCost, 0),
+    directOverheadCost: directOverheadBase,
     baseCost,
     totalCost: baseCost,
     overheadPercent,
     overheadAmount,
     profitPercent,
     profitAmount,
-    commissionPercent,
+    commissionPercent: 0,
     commissionAmount,
     riskPercent,
     contingencyAmount,
     inflationRate,
     escalationYears,
     futureCost,
-    totalPrice: totalPriceWithAdjustments,
-    finalBid: totalPriceWithAdjustments + futureCost,
+    totalPrice,
+    finalBid,
   };
 }
 
 function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
   const totals = computeUiTotals(form, previewSummary);
+  const formSnapshot = {
+    estimateNumber: form.estimateNumber,
+    estimateDate: form.estimateDate,
+    validUntil: form.validUntil,
+    status: form.status,
+    approvalStatus: form.approvalStatus,
+    invoiceStatus: form.invoiceStatus,
+    notes: form.notes,
+    terms: form.terms,
+    customerName: form.customerName,
+    customerAddress: form.customerAddress,
+    customerEmail: form.customerEmail,
+    customerPhone: form.customerPhone,
+    discountType: form.discountType,
+    discountValue: form.discountValue,
+    shippingCharge: form.shippingCharge,
+    additionalCharges: form.additionalCharges,
+    signatureLabel: form.signatureLabel,
+    overheadPercent: form.overheadPercent,
+    profitPercent: form.profitPercent,
+    commissionPercent: "0",
+    riskPercent: form.riskPercent,
+    inflationRate: form.inflationRate,
+    escalationYears: form.escalationYears,
+    costLines: (form.costLines ?? []).map((line) => ({ ...line, overheadEntries: [] })),
+  };
   const generatedTitle =
     String(form.customerName || "").trim()
       ? `${String(form.customerName || "").trim()} Estimate`
@@ -725,7 +741,7 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
     notes: form.notes,
     overheadPercent: form.overheadPercent,
     profitPercent: form.profitPercent,
-    commissionPercent: form.commissionPercent,
+    commissionPercent: "0",
     riskPercent: form.riskPercent,
     inflationRate: form.inflationRate,
     escalationYears: form.escalationYears,
@@ -758,6 +774,7 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
       shippingCharge: form.shippingCharge,
       additionalCharges: form.additionalCharges,
       totals,
+      formSnapshot,
     },
     costCodes: (form.costLines?.length ? form.costLines : [createCostLine(1)]).map((line, index) => ({
       id: isUuid(line.id) ? line.id : undefined,
@@ -789,14 +806,13 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
             profitPercent: toNumber(entry.profitPercent),
             overheadAmount: markup.overheadAmount,
             profitAmount: markup.profitAmount,
-            finalTotal: markup.finalTotal,
+            finalTotal: derived.total,
             targetPay: derived.targetPay,
           },
         };
       }).concat(
         (line.subcontractorEntries ?? []).map((entry) => {
           const derived = calculateSubcontractor(entry);
-          const markup = applyRowMarkup(derived.total, entry);
           return {
             description: entry.description,
             stHours: 1,
@@ -814,16 +830,15 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
               profitPercent: toNumber(entry.profitPercent),
               workersCompAmount: derived.workersCompAmount,
               liabilityAmount: derived.liabilityAmount,
-              overheadAmount: markup.overheadAmount,
-              profitAmount: markup.profitAmount,
-              finalTotal: markup.finalTotal,
+              overheadAmount: 0,
+              profitAmount: 0,
+              finalTotal: derived.total,
             },
           };
         })
       ),
       materialEntries: (line.materialEntries ?? []).map((entry) => {
   const derived = calculateMaterial(entry);
-  const markup = applyRowMarkup(derived.total, entry);
 
   return {
     description: entry.description,
@@ -842,16 +857,15 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
       total: derived.total,
       overheadPercent: toNumber(entry.overheadPercent),
       profitPercent: toNumber(entry.profitPercent),
-      overheadAmount: markup.overheadAmount,
-      profitAmount: markup.profitAmount,
-      finalTotal: markup.finalTotal,
+      overheadAmount: 0,
+      profitAmount: 0,
+      finalTotal: derived.total,
     },
   };
 }),
 
 equipmentEntries: (line.equipmentEntries ?? []).map((entry) => {
   const derived = calculateEquipment(entry);
-  const markup = applyRowMarkup(derived.total, entry);
 
   return {
     description: entry.description,
@@ -871,75 +885,69 @@ equipmentEntries: (line.equipmentEntries ?? []).map((entry) => {
       total: derived.total,
       overheadPercent: toNumber(entry.overheadPercent),
       profitPercent: toNumber(entry.profitPercent),
-      overheadAmount: markup.overheadAmount,
-      profitAmount: markup.profitAmount,
-      finalTotal: markup.finalTotal,
+      overheadAmount: 0,
+      profitAmount: 0,
+      finalTotal: derived.total,
     },
   };
 }),
-      overheadEntries: (line.overheadEntries ?? []).map((entry) => {
-        const derived = calculateOverhead(entry);
-        return {
-          description: entry.description,
-          qty: entry.quantity,
-          days: entry.days,
-          rate: entry.unitRate,
-          taxPercent: entry.taxPercent,
-          metadata: {
-            code: entry.code?.trim() || undefined,
-            uom: entry.uom,
-            cost: derived.cost,
-            taxAmount: derived.taxAmount,
-            total: derived.total,
-          },
-        };
-      }),
+      overheadEntries: [],
     })),
   };
 }
 
 function mapEstimateToForm(estimate, templates) {
   const meta = estimate?.summary?.documentMeta || {};
+  const formSnapshot = meta.formSnapshot && typeof meta.formSnapshot === "object" ? meta.formSnapshot : {};
   const customer = meta.customer || {};
   const company = meta.company || {};
   const templateId = estimate.template_id || "";
   const today = getLocalDateInputValue();
+  const overheadPercent = formSnapshot.overheadPercent ?? (toNumber(estimate.summary?.overheadPercent) * 100 || 10);
+  const profitPercent = formSnapshot.profitPercent ?? (toNumber(estimate.summary?.profitPercent) * 100 || 10);
+  const riskPercent = formSnapshot.riskPercent ?? (toNumber(estimate.summary?.riskPercent) * 100 || 0);
+  const inflationRate = formSnapshot.inflationRate ?? (toNumber(estimate.summary?.inflationRate) * 100 || 0);
+  const escalationYears = formSnapshot.escalationYears ?? (toNumber(estimate.summary?.escalationYears) || 0);
 
   return {
     ...emptyEstimateForm(estimate.client_id || "", templateId),
     id: estimate.id,
-    estimateNumber: String(estimate.estimate_number || ""),
+    estimateNumber: String(formSnapshot.estimateNumber ?? estimate.estimate_number ?? ""),
     clientId: estimate.client_id || "",
     templateId,
     title: estimate.title || "Estimate",
-    estimateDate: estimate.estimate_date || today,
-    validUntil: meta.validUntil || today,
-    status: estimate.status || "draft",
-    approvalStatus: estimate.approval_status || "draft",
-    invoiceStatus: estimate.invoice_status || "not_started",
-    notes: meta.notes || estimate.notes || "",
-    terms: meta.terms || "",
-    customerName: customer.name || estimate.client?.name || "",
-    customerAddress: customer.address || estimate.client?.address || "",
-    customerEmail: customer.email || estimate.client?.email || "",
-    customerPhone: customer.phone || estimate.client?.contact || "",
+    estimateDate: formSnapshot.estimateDate || estimate.estimate_date || today,
+    validUntil: formSnapshot.validUntil || meta.validUntil || today,
+    status: formSnapshot.status || estimate.status || "draft",
+    approvalStatus: formSnapshot.approvalStatus || estimate.approval_status || "draft",
+    invoiceStatus: formSnapshot.invoiceStatus || estimate.invoice_status || "not_started",
+    notes: formSnapshot.notes || meta.notes || estimate.notes || "",
+    terms: formSnapshot.terms || meta.terms || "",
+    customerName: formSnapshot.customerName || customer.name || estimate.client?.name || "",
+    customerAddress: formSnapshot.customerAddress || customer.address || estimate.client?.address || "",
+    customerEmail: formSnapshot.customerEmail || customer.email || estimate.client?.email || "",
+    customerPhone: formSnapshot.customerPhone || customer.phone || estimate.client?.contact || "",
     companyName: company.name || "",
     companyAddress: company.address || "",
     companyEmail: company.contactEmail || "",
     companyPhone: company.contactPhone || "",
     companyLogoText: company.logoText || "ACM",
-    discountType: meta.discountType || "percent",
-    discountValue: String(meta.discountValue || 0),
-    shippingCharge: String(meta.shippingCharge || 0),
-    additionalCharges: String(meta.additionalCharges || 0),
-    signatureLabel: meta.signatureLabel || "Accepted By",
-    overheadPercent: String(toNumber(estimate.summary?.overheadPercent) * 100 || 10),
-    profitPercent: String(toNumber(estimate.summary?.profitPercent) * 100 || 10),
-    commissionPercent: String(toNumber(estimate.summary?.commissionPercent) * 100 || 0),
-    riskPercent: String(toNumber(estimate.summary?.riskPercent) * 100 || 0),
-    inflationRate: String(toNumber(estimate.summary?.inflationRate) * 100 || 0),
-    escalationYears: String(toNumber(estimate.summary?.escalationYears) || 0),
-    costLines: (estimate.cost_codes ?? []).length ? flattenEstimateCostLines(estimate.cost_codes) : [createCostLine(1)],
+    discountType: formSnapshot.discountType || meta.discountType || "percent",
+    discountValue: String(formSnapshot.discountValue ?? meta.discountValue ?? 0),
+    shippingCharge: String(formSnapshot.shippingCharge ?? meta.shippingCharge ?? 0),
+    additionalCharges: String(formSnapshot.additionalCharges ?? meta.additionalCharges ?? 0),
+    signatureLabel: formSnapshot.signatureLabel || meta.signatureLabel || "Accepted By",
+    overheadPercent: String(overheadPercent),
+    profitPercent: String(profitPercent),
+    commissionPercent: "0",
+    riskPercent: String(riskPercent),
+    inflationRate: String(inflationRate),
+    escalationYears: String(escalationYears),
+    costLines: Array.isArray(formSnapshot.costLines) && formSnapshot.costLines.length
+      ? formSnapshot.costLines.map((line) => ({ ...line, overheadEntries: [] }))
+      : (estimate.cost_codes ?? []).length
+        ? flattenEstimateCostLines(estimate.cost_codes)
+        : [createCostLine(1)],
   };
 }
 
@@ -1206,7 +1214,7 @@ const EstimateRecordsPanel = memo(function EstimateRecordsPanel({
             tertiary={
               <DetailStack
                 lines={[
-                  formatCurrency(estimate.summary?.finalBid || estimate.summary?.totalPrice),
+                  formatCurrency(estimateDisplayTotal(estimate)),
                 ]}
               />
             }
@@ -1245,6 +1253,7 @@ const EstimateTotalsTable = memo(function EstimateTotalsTable({ previewSummary }
         <thead>
           <tr className="text-left text-xs uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
             <th className="py-2">Labor</th>
+            <th className="py-2">Subcontractor</th>
             <th className="py-2">Material</th>
             <th className="py-2">Equipment</th>
             <th className="py-2">Overhead</th>
@@ -1255,6 +1264,7 @@ const EstimateTotalsTable = memo(function EstimateTotalsTable({ previewSummary }
         <tbody>
           <tr className="text-sm font-semibold text-[color:var(--acm-fg)]">
             <td className="py-2">{formatCurrency(previewSummary.laborCost)}</td>
+            <td className="py-2">{formatCurrency(previewSummary.subcontractorCost)}</td>
             <td className="py-2">{formatCurrency(previewSummary.materialCost)}</td>
             <td className="py-2">{formatCurrency(previewSummary.equipmentCost)}</td>
             <td className="py-2">{formatCurrency(previewSummary.overheadAmount)}</td>
@@ -1661,11 +1671,14 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     [selectedTemplateConfig]
   );
   const laborSummaryColumns = useMemo(
-    () => [{ key: "targetPay", label: "Target Pay", render: (row, derived) => formatCurrency(derived.targetPay) }],
+    () => [
+      { key: "targetPay", label: "Target Pay", render: (row, derived) => formatCurrency(derived.targetPay) },
+      { key: "total", label: "Total", render: (row, derived) => formatCurrency(derived.total) },
+    ],
     []
   );
-  const markedUpTotalSummaryColumns = useMemo(
-    () => [{ key: "finalTotal", label: "Total", render: (row, derived) => formatCurrency(applyRowMarkup(derived.total, row).finalTotal) }],
+  const baseTotalSummaryColumns = useMemo(
+    () => [{ key: "total", label: "Total", render: (row, derived) => formatCurrency(derived.total) }],
     []
   );
 
@@ -2474,7 +2487,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   return (
     <div className="space-y-6">
       <section>
-        <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className={`flex flex-wrap items-center gap-4 ${standalone ? "justify-end" : "justify-between"}`}>
           {/* <div>
             <div className="text-lg font-bold text-[color:var(--acm-fg)]">{standalone ? "Estimate" : "Estimate Records"}</div>
             <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">
@@ -2590,6 +2603,10 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
               <div className="space-y-8">
                 {form.costLines.map((line, index) => (
                   <div key={line.id} className="  ">
+                    {(() => {
+                      const lineSummary = computeCostLineSummary(line, form);
+                      return (
+                        <Fragment>
                     <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
                       <div className="grid flex-1 gap-3 md:grid-cols-[minmax(0,140px)_minmax(280px,1fr)] md:items-center">
                         <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Cost Code</div>
@@ -2639,7 +2656,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                         sectionKey="subcontractorEntries"
                         rows={line.subcontractorEntries ?? []}
                         columns={subcontractorColumns}
-                        summaryColumns={markedUpTotalSummaryColumns}
+                        summaryColumns={baseTotalSummaryColumns}
                         onChange={(rowId, key, value) => updateEntry(line.id, "subcontractorEntries", rowId, key, value)}
                         onAdd={() => addEntry(line.id, "subcontractorEntries")}
                         onRemove={(rowId) => removeEntry(line.id, "subcontractorEntries", rowId)}
@@ -2654,7 +2671,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                         sectionKey="materialEntries"
                         rows={line.materialEntries ?? []}
                         columns={materialColumns}
-                        summaryColumns={markedUpTotalSummaryColumns}
+                        summaryColumns={baseTotalSummaryColumns}
                         onChange={(rowId, key, value) => updateEntry(line.id, "materialEntries", rowId, key, value)}
                         onAdd={() => addEntry(line.id, "materialEntries")}
                         onRemove={(rowId) => removeEntry(line.id, "materialEntries", rowId)}
@@ -2669,7 +2686,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                         sectionKey="equipmentEntries"
                         rows={line.equipmentEntries ?? []}
                         columns={equipmentColumns}
-                        summaryColumns={markedUpTotalSummaryColumns}
+                        summaryColumns={baseTotalSummaryColumns}
                         onChange={(rowId, key, value) => updateEntry(line.id, "equipmentEntries", rowId, key, value)}
                         onAdd={() => addEntry(line.id, "equipmentEntries")}
                         onRemove={(rowId) => removeEntry(line.id, "equipmentEntries", rowId)}
@@ -2677,7 +2694,20 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                         collapsed={collapsedSections[`${line.id}:equipmentEntries`]}
                         onToggle={() => toggleSection(line.id, "equipmentEntries")}
                       />
+
+                      <div className="grid gap-3 rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-xs text-[color:var(--acm-muted-fg)] md:grid-cols-7">
+                        <div><span className="font-semibold text-[color:var(--acm-fg)]">Labor</span><div>{formatCurrency(lineSummary.laborCost)}</div></div>
+                        <div><span className="font-semibold text-[color:var(--acm-fg)]">Subcontractor</span><div>{formatCurrency(lineSummary.subcontractorCost)}</div></div>
+                        <div><span className="font-semibold text-[color:var(--acm-fg)]">Material</span><div>{formatCurrency(lineSummary.materialCost)}</div></div>
+                        <div><span className="font-semibold text-[color:var(--acm-fg)]">Equipment</span><div>{formatCurrency(lineSummary.equipmentCost)}</div></div>
+                        <div><span className="font-semibold text-[color:var(--acm-fg)]">Overhead</span><div>{formatCurrency(lineSummary.markupOverhead)}</div></div>
+                        <div><span className="font-semibold text-[color:var(--acm-fg)]">Profit</span><div>{formatCurrency(lineSummary.profitAmount)}</div></div>
+                        <div><span className="font-semibold text-[color:var(--acm-fg)]">Total</span><div>{formatCurrency(lineSummary.total)}</div></div>
+                      </div>
                     </div>
+                        </Fragment>
+                      );
+                    })()}
                   </div>
                 ))}
 

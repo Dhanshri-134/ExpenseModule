@@ -3,10 +3,6 @@
 import { memo } from "react";
 import { CompactListRow } from "@/components/dashboard/DashboardUi";
 
-function cardClass(extra = "") {
-  return `rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.08)] ${extra}`.trim();
-}
-
 function FieldReportsArchivePanelComponent({
   searchQuery,
   onSearchChange,
@@ -20,14 +16,15 @@ function FieldReportsArchivePanelComponent({
   formatDate,
 }) {
   return (
-    <div className={cardClass()}>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <input className="acm-input mt-0" value={searchQuery} onChange={(event) => onSearchChange(event.target.value)} placeholder="Search reports by location, weather, date, creator, or notes" />
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="text-lg font-bold text-[color:var(--acm-fg)]">Daily Inspection Archive</div>
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="min-w-[260px] flex-1 md:max-w-md">
+          <input className="acm-input mt-0 h-10" value={searchQuery} onChange={(event) => onSearchChange(event.target.value)} placeholder="Search reports by project, location, weather, date, creator, or notes" />
+        </div>
+        <div className="flex flex-wrap justify-end gap-2">
           {canCreateReports ? (
             <button type="button" onClick={onCreate} className="acm-btn acm-btn-primary h-10 px-4">
-              New Report
+              Add Report
             </button>
           ) : null}
         </div>
@@ -46,6 +43,8 @@ function FieldReportsArchivePanelComponent({
               primary={formatDate(report.report_date)}
               secondary={(
                 <>
+                  {report.project?.name || "Project pending"}
+                  <br />
                   {report.location || "Site report"}
                   <br />
                   {report.report_time || "Time pending"}
@@ -91,7 +90,7 @@ function FieldReportsArchivePanelComponent({
           </div>
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 

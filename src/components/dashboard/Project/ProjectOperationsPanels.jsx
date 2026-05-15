@@ -49,12 +49,15 @@ function LabeledField({ label, fieldName = "", error = "", children }) {
   );
 }
 
-function FieldGroup({ title, children }) {
+function FieldGroup({ title, subtitle = "", children, className = "" }) {
   return (
-    <fieldset className="rounded-[20px] border border-[color:var(--acm-border)] p-4">
-      <legend className="px-2 text-sm font-semibold text-[color:var(--acm-muted-fg)]">{title}</legend>
+    <section className={`space-y-3 ${className}`.trim()}>
+      <div>
+        <div className="text-base font-semibold text-[color:var(--acm-fg)]">{title}</div>
+        {subtitle ? <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{subtitle}</div> : null}
+      </div>
       <div className="grid gap-3">{children}</div>
-    </fieldset>
+    </section>
   );
 }
 
@@ -169,8 +172,8 @@ export function ProjectEstimatesPage({ projectId, canManage = false }) {
   return <ProjectEstimatesWorkspace projectId={projectId} canManage={canManage} />;
 }
 
-export function ProjectFieldReportsPage({ projectId, roleBase = "employee", currentUserId = "" }) {
-  const reportsQuery = useApiQuery(projectId ? `/api/field-reports?projectId=${projectId}` : null);
+export function ProjectFieldReportsPage({ projectId = "", projectList = [], roleBase = "employee", currentUserId = "" }) {
+  const reportsQuery = useApiQuery(projectId ? `/api/field-reports?projectId=${projectId}` : "/api/field-reports");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -182,6 +185,11 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
   const [formErrors, setFormErrors] = useState({});
 
   const reports = reportsQuery.data?.reports ?? [];
+  const availableProjects = projectList.length
+    ? projectList
+    : projectId
+      ? [{ id: projectId, name: reports[0]?.project?.name || "Current Project" }]
+      : [];
   const filteredReports = reports.filter((report) =>
     matchesSearchQuery(
       deferredSearchQuery,
@@ -193,12 +201,14 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
       report.comments,
       report.created_by?.name,
       report.created_by?.user_name,
-      report.work_activities?.map((entry) => entry.text)
+      report.work_activities?.map((entry) => entry.text),
+      report.project?.name,
+      report.project?.job_number
     )
   );
   const canManageReports = roleBase === "manager" || roleBase === "owner";
   const useDetailedInspectionForm = canManageReports;
-  const canCreateReports = Boolean(projectId);
+  const canCreateReports = Boolean(projectId || availableProjects.length);
 
   function canEdit(report) {
     if (!report) return false;
@@ -208,7 +218,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
 
   function openCreate() {
     setFormErrors({});
-    setForm(createFieldReportForm(projectId));
+    setForm(createFieldReportForm(projectId || availableProjects[0]?.id || ""));
     setError("");
     setMessage("");
     setOpen(true);
@@ -218,7 +228,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
     setFormErrors({});
     setForm({
       id: report.id,
-      projectId,
+      projectId: report.project_id || report.project?.id || "",
       reportDate: report.report_date || getLocalDateInputValue(),
       reportTime: report.report_time || "",
       location: report.location || "",
@@ -354,7 +364,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
 
       setMessage(form.id ? "Field report updated." : "Field report created.");
       setOpen(false);
-      invalidateApiQuery(`/api/field-reports?projectId=${projectId}`, { refetchType: "none" });
+      invalidateApiQuery(projectId ? `/api/field-reports?projectId=${projectId}` : "/api/field-reports", { refetchType: "none" });
       await reportsQuery.refresh();
     } catch (requestError) {
       setError(formatApiError(requestError.payload, "field_report_save_failed"));
@@ -370,11 +380,11 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
     try {
       await sendJson("/api/field-reports", {
         method: "DELETE",
-        body: { id: report.id, projectId },
+        body: { id: report.id, projectId: report.project_id },
       });
       setMessage("Field report deleted.");
       if (selectedReport?.id === report.id) setSelectedReport(null);
-      invalidateApiQuery(`/api/field-reports?projectId=${projectId}`, { refetchType: "none" });
+      invalidateApiQuery(projectId ? `/api/field-reports?projectId=${projectId}` : "/api/field-reports", { refetchType: "none" });
       await reportsQuery.refresh();
     } catch (requestError) {
       setError(formatApiError(requestError.payload, "field_report_delete_failed"));
@@ -400,11 +410,26 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
         formatDate={formatDate}
       />
 
-      <Modal open={open} title={form.id ? "Edit Field Report" : "Create Field Report"} onClose={() => setOpen(false)}>
-        <form onSubmit={saveReport} className="grid gap-4">
-          <FieldGroup title="Report Details">
+      <Modal open={open} title={form.id ? "Edit Field Report" : "Create Field Report"} onClose={() => setOpen(false)} maxWidth="max-w-6xl">
+        <form onSubmit={saveReport} className="grid gap-6">
+          <FieldGroup title="Report Details" subtitle="Set the project, report timing, site conditions, and weather summary.">
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <LabeledField label="Project Date" fieldName="reportDate" error={formErrors.reportDate}>
+              <LabeledField label="Project" fieldName="projectId" error={formErrors.projectId}>
+                <select
+                  name="projectId"
+                  className={fieldClass(Boolean(formErrors.projectId))}
+                  value={form.projectId}
+                  onChange={(event) => setForm((current) => ({ ...current, projectId: event.target.value }))}
+                >
+                  <option value="">Select project</option>
+                  {availableProjects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              </LabeledField>
+              <LabeledField label="Report Date" fieldName="reportDate" error={formErrors.reportDate}>
                 <input name="reportDate" type="date" className={fieldClass(Boolean(formErrors.reportDate))} value={form.reportDate} onChange={(event) => setForm((current) => ({ ...current, reportDate: event.target.value }))} />
               </LabeledField>
               <LabeledField label="Time">
@@ -441,7 +466,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
 
           {useDetailedInspectionForm ? (
             <>
-          <FieldGroup title="Communications With Public">
+          <FieldGroup title="Communications With Public" subtitle="Record who was contacted, their phone number, and any site-related notes.">
             <div className="space-y-3">
               {form.publicCommunications.map((entry, index) => (
                 <div key={`public-${index}`} className="rounded-[18px] border border-[color:var(--acm-border)] p-4">
@@ -472,7 +497,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
             </button>
           </FieldGroup>
 
-          <FieldGroup title="Contractor Labor Force">
+          <FieldGroup title="Contractor Labor Force" subtitle="List crew classifications and the personnel on site for the day.">
             <div className="space-y-3">
               {form.contractorLaborForce.map((entry, index) => (
                 <div key={`labor-${index}`} className="grid gap-3 rounded-[18px] border border-[color:var(--acm-border)] p-4 md:grid-cols-[1fr_1.6fr_auto] md:items-start">
@@ -497,7 +522,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
             </button>
           </FieldGroup>
 
-          <FieldGroup title="Subcontractors Onsite">
+          <FieldGroup title="Subcontractors Onsite" subtitle="Capture each subcontractor team, supervisor, and total headcount.">
             <div className="space-y-3">
               {form.subcontractorsOnsite.map((entry, index) => (
                 <div key={`subcontractor-${index}`} className="rounded-[18px] border border-[color:var(--acm-border)] p-4">
@@ -525,7 +550,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
             </button>
           </FieldGroup>
 
-          <FieldGroup title="Equipment Used Today">
+          <FieldGroup title="Equipment Used Today" subtitle="Track the equipment used, model details, work type, and time in use.">
             <div className="space-y-3">
               {form.equipmentUsed.map((entry, index) => (
                 <div key={`equipment-${index}`} className="rounded-[18px] border border-[color:var(--acm-border)] p-4">
@@ -556,7 +581,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
             </button>
           </FieldGroup>
 
-          <FieldGroup title="Materials Used Today">
+          <FieldGroup title="Materials Used Today" subtitle="Summarize materials consumed on site and what remains available.">
             <div className="space-y-3">
               {form.materialsUsed.map((entry, index) => (
                 <div key={`materials-${index}`} className="rounded-[18px] border border-[color:var(--acm-border)] p-4">
@@ -586,7 +611,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
             </>
           ) : null}
 
-          <FieldGroup title="Work Activity Logs">
+          <FieldGroup title="Work Activity Logs" subtitle="Describe the work completed and major progress updates from the field.">
             {form.workActivities.map((entry, index) => (
               <div key={`work-${index}`} className="flex items-start gap-2">
                 <LabeledField label={`Activity ${index + 1}`}>
@@ -604,7 +629,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
             </button>
           </FieldGroup>
 
-          <FieldGroup title="Coordination Logs">
+          <FieldGroup title="Coordination Logs" subtitle="Note coordination items, dependencies, and follow-ups with the team.">
             {form.coordinationLogs.map((entry, index) => (
               <div key={`coordination-${index}`} className="flex items-start gap-2">
                 <LabeledField label={`Coordination ${index + 1}`}>
@@ -622,7 +647,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
             </button>
           </FieldGroup>
 
-          <FieldGroup title="Comments And Signoff">
+          <FieldGroup title="Comments And Signoff" subtitle="Add final remarks and confirm who is signing off on the report.">
             <LabeledField label="Comments">
               <textarea className={fieldClass()} value={form.comments} onChange={(event) => setForm((current) => ({ ...current, comments: event.target.value }))} />
             </LabeledField>
@@ -636,7 +661,7 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
             </div>
           </FieldGroup>
 
-          <FieldGroup title="Site Pictures">
+          <FieldGroup title="Site Pictures" subtitle="Upload photos that document field progress, conditions, and observations.">
             <LabeledField label="Upload Pictures">
               <input type="file" accept="image/*" multiple className={fieldClass()} onChange={onPicturesChange} />
             </LabeledField>
@@ -684,30 +709,11 @@ export function ProjectFieldReportsPage({ projectId, roleBase = "employee", curr
 export function FieldReportsWorkspacePage({ roleBase = "owner", currentUserId = "" }) {
   const projectsQuery = useApiQuery("/api/projects");
   const projectList = useMemo(() => projectsQuery.data?.projects ?? [], [projectsQuery.data?.projects]);
-  const [projectId, setProjectId] = useState("");
-  const activeProjectId = projectId || projectList[0]?.id || "";
 
   return (
     <div className="space-y-4">
-      <div className={cardClass()}>
-        <div className="grid gap-3 md:grid-cols-[220px_1fr] md:items-end">
-          <LabeledField label="Project">
-            <select className={fieldClass()} value={activeProjectId} onChange={(event) => setProjectId(event.target.value)}>
-              {projectList.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </LabeledField>
-          {/* <div className="text-sm text-[color:var(--acm-muted-fg)]">
-            Select a project to view and manage its field reports from the main dashboard.
-          </div> */}
-        </div>
-      </div>
-
-      {activeProjectId ? (
-        <ProjectFieldReportsPage projectId={activeProjectId} roleBase={roleBase} currentUserId={currentUserId} />
+      {projectList.length ? (
+        <ProjectFieldReportsPage projectList={projectList} roleBase={roleBase} currentUserId={currentUserId} />
       ) : (
         <div className={cardClass()}>No projects available yet.</div>
       )}

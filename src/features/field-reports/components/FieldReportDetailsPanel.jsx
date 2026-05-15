@@ -36,6 +36,7 @@ function FieldReportDetailsPanelComponent({
         ) : null}
       </div>
       <div className="space-y-2">
+        <DetailRow label="Project" value={selectedReport.project?.name || selectedReport.project?.job_number || "-"} />
         <DetailRow label="Date" value={formatDate(selectedReport.report_date)} />
         <DetailRow label="Time" value={selectedReport.report_time || "-"} />
         <DetailRow label="Location" value={selectedReport.location || "-"} />

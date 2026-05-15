@@ -33,7 +33,6 @@ function buildLegacyCostCodes(lineItems = []) {
     const laborCost = Math.max(toNumber(item.laborCost, 0), 0);
     const materialCost = Math.max(toNumber(item.materialCost, 0), 0);
     const equipmentCost = Math.max(toNumber(item.equipmentCost, 0), 0);
-    const directOverheadCost = Math.max(toNumber(item.directOverheadCost, 0), 0);
     const description = normalizeText(item.description) || normalizeText(item.scope) || `Line ${index + 1}`;
 
     if (laborCost || laborHours) {
@@ -70,15 +69,6 @@ function buildLegacyCostCodes(lineItems = []) {
       });
     }
 
-    if (directOverheadCost) {
-      group.overheadEntries.push({
-        description,
-        qty: quantity || 1,
-        days: 1,
-        rate: directOverheadCost / (quantity || 1),
-        taxPercent: 0,
-      });
-    }
   });
 
   return [...groups.values()];
@@ -168,7 +158,7 @@ export function buildEstimateComputation(payload = {}) {
     const processedLabor = processLaborEntries(costCode.laborEntries ?? []);
     const materialEntries = processMaterialEntries(costCode.materialEntries ?? []);
     const equipmentEntries = processEquipmentEntries(costCode.equipmentEntries ?? []);
-    const overheadEntries = processOverheadEntries(costCode.overheadEntries ?? []);
+    const overheadEntries = [];
 
     laborRates.push(...processedLabor.laborRates);
     processedCostCodes.push({
@@ -184,7 +174,7 @@ export function buildEstimateComputation(payload = {}) {
       overheadEntries,
       overheadPercent: costCode.overheadPercent ?? payload.overheadPercent ?? 0,
       profitPercent: costCode.profitPercent ?? payload.profitPercent ?? 0,
-      commissionPercent: costCode.commissionPercent ?? payload.commissionPercent ?? 0,
+      commissionPercent: 0,
       riskPercent: costCode.riskPercent ?? payload.riskPercent ?? 0,
       inflationRate: costCode.inflationRate ?? payload.inflationRate ?? 0,
       escalationYears: costCode.escalationYears ?? payload.escalationYears ?? 0,
@@ -197,7 +187,7 @@ export function buildEstimateComputation(payload = {}) {
     defaults: {
       overheadPercent: payload.overheadPercent ?? 0,
       profitPercent: payload.profitPercent ?? 0,
-      commissionPercent: payload.commissionPercent ?? 0,
+      commissionPercent: 0,
       riskPercent: payload.riskPercent ?? 0,
       inflationRate: payload.inflationRate ?? 0,
       escalationYears: payload.escalationYears ?? 0,
@@ -211,15 +201,15 @@ export function buildEstimateComputation(payload = {}) {
       laborCost: projectSummary.laborCost,
       materialCost: projectSummary.materialCost,
       equipmentCost: projectSummary.equipmentCost,
-      directOverheadCost: projectSummary.directOverheadCost,
+      directOverheadCost: 0,
       baseCost: projectSummary.totalCost,
       totalCost: projectSummary.totalCost,
       overheadPercent: toPercent(payload.overheadPercent ?? 0),
       overheadAmount: projectSummary.overhead,
       profitPercent: toPercent(payload.profitPercent ?? 0),
       profitAmount: projectSummary.profit,
-      commissionPercent: toPercent(payload.commissionPercent ?? 0),
-      commissionAmount: projectSummary.commission,
+      commissionPercent: 0,
+      commissionAmount: 0,
       riskPercent: toPercent(payload.riskPercent ?? 0),
       contingencyAmount: projectSummary.contingency,
       inflationRate: toPercent(payload.inflationRate ?? 0),
@@ -339,14 +329,14 @@ export async function persistEstimateGraph(admin, ctx, estimate, computed) {
         labor_cost: row.laborCost,
         material_cost: row.materialCost,
         equipment_cost: row.equipmentCost,
-        direct_overhead: row.directOverhead,
+        direct_overhead: 0,
         total_cost: row.totalCost,
         overhead_percent: row.overheadPercent,
         overhead: row.overhead,
         profit_percent: row.profitPercent,
         profit: row.profit,
-        commission_percent: row.commissionPercent,
-        commission: row.commission,
+        commission_percent: 0,
+        commission: 0,
         risk_percent: row.riskPercent,
         contingency: row.contingency,
         inflation_rate: row.inflationRate,
@@ -435,27 +425,6 @@ export async function persistEstimateGraph(admin, ctx, estimate, computed) {
       if (error) throw new Error(error.message || "estimate_equipment_insert_failed");
     }
 
-    if (row.overheadEntries.length) {
-      const { error } = await admin.from("estimate_direct_overhead_entries").insert(
-        row.overheadEntries.map((entry) => ({
-          estimate_id: estimate.id,
-          company_id: ctx.company.id,
-          project_id: estimate.project_id,
-          cost_code_id: costCode.id,
-          cost_code_item_id: itemRow.id,
-          description: entry.description || null,
-          qty: entry.qty,
-          days: entry.days,
-          rate: entry.rate,
-          base: entry.base,
-          tax_percent: entry.taxPercent,
-          total_cost: entry.totalCost,
-          metadata: entry.metadata ?? {},
-        }))
-      );
-
-      if (error) throw new Error(error.message || "estimate_overhead_insert_failed");
-    }
   }
 }
 
@@ -473,7 +442,7 @@ function buildLegacyLineItemsFromCostCodes(costCodes = []) {
     laborCost: row.laborCost,
     materialCost: row.materialCost,
     equipmentCost: row.equipmentCost,
-    directOverheadCost: row.directOverhead,
+    directOverheadCost: 0,
     totalCost: row.totalCost,
     notes: "",
   }));
@@ -637,18 +606,18 @@ export async function loadEstimateGraph(admin, estimateIds = []) {
       subcontractorEntries: splitEntries.subcontractorEntries,
       materialEntries: byCostCodeItemId.material.get(row.id) ?? [],
       equipmentEntries: byCostCodeItemId.equipment.get(row.id) ?? [],
-      overheadEntries: byCostCodeItemId.overhead.get(row.id) ?? [],
+      overheadEntries: [],
       laborCost: toNumber(row.labor_cost),
       materialCost: toNumber(row.material_cost),
       equipmentCost: toNumber(row.equipment_cost),
-      directOverhead: toNumber(row.direct_overhead),
+      directOverhead: 0,
       totalCost: toNumber(row.total_cost),
       overheadPercent: toNumber(row.overhead_percent),
       overhead: toNumber(row.overhead),
       profitPercent: toNumber(row.profit_percent),
       profit: toNumber(row.profit),
-      commissionPercent: toNumber(row.commission_percent),
-      commission: toNumber(row.commission),
+      commissionPercent: 0,
+      commission: 0,
       riskPercent: toNumber(row.risk_percent),
       contingency: toNumber(row.contingency),
       inflationRate: toNumber(row.inflation_rate),
@@ -669,7 +638,7 @@ export function composeEstimateRecord(estimate, costCodes = []) {
           projectId: estimate.project_id,
           overheadPercent: estimate.overhead_percent,
           profitPercent: estimate.profit_percent,
-          commissionPercent: estimate.commission_percent,
+          commissionPercent: 0,
           riskPercent: estimate.risk_percent,
           inflationRate: estimate.inflation_rate,
           escalationYears: estimate.escalation_years,
