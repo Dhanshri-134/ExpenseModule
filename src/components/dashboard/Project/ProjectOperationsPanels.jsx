@@ -54,7 +54,7 @@ function FieldGroup({ title, subtitle = "", children, className = "" }) {
     <section className={`space-y-3 ${className}`.trim()}>
       <div>
         <div className="text-base font-semibold text-[color:var(--acm-fg)]">{title}</div>
-        {subtitle ? <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{subtitle}</div> : null}
+        {/* {subtitle ? <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">{subtitle}</div> : null} */}
       </div>
       <div className="grid gap-3">{children}</div>
     </section>
