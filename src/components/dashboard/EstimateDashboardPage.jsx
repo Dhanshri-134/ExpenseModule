@@ -384,6 +384,7 @@ function calculateLabor(entry) {
   const stRate = roundCurrency(targetWage * 1.55);
   const otRate = roundCurrency(targetWage * 2.24);
   const totalAmount = roundCurrency(stHours * stRate + otHours * otRate);
+  const markup = applyRowMarkup(totalAmount, entry);
 
   return {
     stHours,
@@ -391,6 +392,9 @@ function calculateLabor(entry) {
     otHours,
     otRate,
     total: totalAmount,
+    overheadAmount: roundCurrency(markup.overheadAmount),
+    profitAmount: roundCurrency(markup.profitAmount),
+    finalTotal: roundCurrency(markup.finalTotal),
     targetPay: roundCurrency(stHours * targetWage),
     taxAmount: 0,
   };
@@ -398,15 +402,19 @@ function calculateLabor(entry) {
 
 function calculateSubcontractor(entry) {
   const cost = toNumber(entry.cost);
-  const workersCompAmount = cost * toPercent(entry.workersCompPercent);
-  const liabilityAmount = cost * toPercent(entry.liabilityPercent);
-  const total = cost + workersCompAmount + liabilityAmount;
+  const workersCompAmount = roundCurrency(cost * toPercent(entry.workersCompPercent));
+  const liabilityAmount = roundCurrency(cost * toPercent(entry.liabilityPercent));
+  const total = roundCurrency(cost + workersCompAmount + liabilityAmount);
+  const markup = applyRowMarkup(total, entry);
 
   return {
     cost,
     workersCompAmount,
     liabilityAmount,
     total,
+    overheadAmount: roundCurrency(markup.overheadAmount),
+    profitAmount: roundCurrency(markup.profitAmount),
+    finalTotal: roundCurrency(markup.finalTotal),
     taxAmount: 0,
   };
 }
@@ -429,6 +437,8 @@ function calculateMaterial(entry) {
   const freight = toNumber(entry.freight);
   const costWithFreight = roundCurrency(cost + freight);
   const taxAmount = roundCurrency(costWithFreight * toPercent(entry.taxPercent));
+  const total = roundCurrency(costWithFreight + taxAmount);
+  const markup = applyRowMarkup(total, entry);
   return {
     wasteQty,
     unitRate,
@@ -437,7 +447,10 @@ function calculateMaterial(entry) {
     costWithFreight,
     subtotal: costWithFreight,
     taxAmount,
-    total: roundCurrency(costWithFreight + taxAmount),
+    total,
+    overheadAmount: roundCurrency(markup.overheadAmount),
+    profitAmount: roundCurrency(markup.profitAmount),
+    finalTotal: roundCurrency(markup.finalTotal),
   };
 }
 
@@ -451,6 +464,8 @@ function calculateEquipment(entry) {
   const fuel = roundCurrency(costWithFreight * toPercent(entry.fuelPercent));
   const costWithFuel = roundCurrency(costWithFreight + fuel);
   const taxAmount = roundCurrency(costWithFuel * toPercent(entry.taxPercent));
+  const total = roundCurrency(costWithFuel + taxAmount);
+  const markup = applyRowMarkup(total, entry);
   return {
     quantity,
     rentalDays,
@@ -462,7 +477,10 @@ function calculateEquipment(entry) {
     costWithFuel,
     subtotal: costWithFuel,
     taxAmount,
-    total: roundCurrency(costWithFuel + taxAmount),
+    total,
+    overheadAmount: roundCurrency(markup.overheadAmount),
+    profitAmount: roundCurrency(markup.profitAmount),
+    finalTotal: roundCurrency(markup.finalTotal),
   };
 }
 
@@ -609,10 +627,10 @@ function computeUiTotals(form, previewSummary) {
 }
 
 function computeCostLineSummary(line, defaults = {}) {
-  const laborBase = (line.laborEntries ?? []).reduce((sum, entry) => sum + calculateLabor(entry).total, 0);
-  const subcontractorBase = (line.subcontractorEntries ?? []).reduce((sum, entry) => sum + calculateSubcontractor(entry).total, 0);
-  const materialBase = (line.materialEntries ?? []).reduce((sum, entry) => sum + calculateMaterial(entry).total, 0);
-  const equipmentBase = (line.equipmentEntries ?? []).reduce((sum, entry) => sum + calculateEquipment(entry).total, 0);
+  const laborBase = (line.laborEntries ?? []).reduce((sum, entry) => sum + calculateLabor(entry).finalTotal, 0);
+  const subcontractorBase = (line.subcontractorEntries ?? []).reduce((sum, entry) => sum + calculateSubcontractor(entry).finalTotal, 0);
+  const materialBase = (line.materialEntries ?? []).reduce((sum, entry) => sum + calculateMaterial(entry).finalTotal, 0);
+  const equipmentBase = (line.equipmentEntries ?? []).reduce((sum, entry) => sum + calculateEquipment(entry).finalTotal, 0);
   const directOverheadCost = 0;
   const baseCost = roundCurrency(laborBase + subcontractorBase + materialBase + equipmentBase);
   const overheadPercent = toPercent(defaults.overheadPercent);
@@ -661,14 +679,9 @@ function buildClientPreviewSummary(form) {
   const commissionAmount = 0;
   const overheadPercent = toPercent(form.overheadPercent);
   const profitPercent = toPercent(form.profitPercent);
-  const riskPercent = toPercent(form.riskPercent);
-  const inflationRate = toPercent(form.inflationRate);
-  const escalationYears = toNumber(form.escalationYears);
   const totalBeforeCommission = roundCurrency(baseCost + overheadAmount + profitAmount);
-  const contingencyAmount = roundCurrency(baseCost * riskPercent);
   const totalPrice = totalBeforeCommission;
   const finalBid = totalPrice;
-  const futureCost = roundCurrency(totalPrice * (1 + inflationRate) ** Math.max(escalationYears, 0));
 
   return {
     laborCost: laborBase,
@@ -684,11 +697,6 @@ function buildClientPreviewSummary(form) {
     profitAmount,
     commissionPercent: 0,
     commissionAmount,
-    riskPercent,
-    contingencyAmount,
-    inflationRate,
-    escalationYears,
-    futureCost,
     totalPrice,
     finalBid,
   };
@@ -717,10 +725,7 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
     overheadPercent: form.overheadPercent,
     profitPercent: form.profitPercent,
     commissionPercent: "0",
-    riskPercent: form.riskPercent,
-    inflationRate: form.inflationRate,
-    escalationYears: form.escalationYears,
-    costLines: (form.costLines ?? []).map((line) => ({ ...line, overheadEntries: [] })),
+    costLines: form.costLines ?? [],
   };
   const generatedTitle =
     String(form.customerName || "").trim()
@@ -742,9 +747,6 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
     overheadPercent: form.overheadPercent,
     profitPercent: form.profitPercent,
     commissionPercent: "0",
-    riskPercent: form.riskPercent,
-    inflationRate: form.inflationRate,
-    escalationYears: form.escalationYears,
     documentMeta: {
       validUntil: form.validUntil,
       customer: {
@@ -806,19 +808,17 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
             profitPercent: toNumber(entry.profitPercent),
             overheadAmount: markup.overheadAmount,
             profitAmount: markup.profitAmount,
-            finalTotal: derived.total,
+            finalTotal: markup.finalTotal,
             targetPay: derived.targetPay,
           },
         };
       }).concat(
         (line.subcontractorEntries ?? []).map((entry) => {
           const derived = calculateSubcontractor(entry);
+          const markup = applyRowMarkup(derived.total, entry);
           return {
             description: entry.description,
-            stHours: 1,
-            stRate: derived.total,
-            otHours: 0,
-            otRate: 0,
+            amount: derived.cost,
             metadata: {
               kind: "subcontractor",
               code: entry.code?.trim() || undefined,
@@ -830,9 +830,9 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
               profitPercent: toNumber(entry.profitPercent),
               workersCompAmount: derived.workersCompAmount,
               liabilityAmount: derived.liabilityAmount,
-              overheadAmount: 0,
-              profitAmount: 0,
-              finalTotal: derived.total,
+              overheadAmount: markup.overheadAmount,
+              profitAmount: markup.profitAmount,
+              finalTotal: markup.finalTotal,
             },
           };
         })
@@ -857,9 +857,9 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
       total: derived.total,
       overheadPercent: toNumber(entry.overheadPercent),
       profitPercent: toNumber(entry.profitPercent),
-      overheadAmount: 0,
-      profitAmount: 0,
-      finalTotal: derived.total,
+      overheadAmount: derived.overheadAmount,
+      profitAmount: derived.profitAmount,
+      finalTotal: derived.finalTotal,
     },
   };
 }),
@@ -885,9 +885,9 @@ equipmentEntries: (line.equipmentEntries ?? []).map((entry) => {
       total: derived.total,
       overheadPercent: toNumber(entry.overheadPercent),
       profitPercent: toNumber(entry.profitPercent),
-      overheadAmount: 0,
-      profitAmount: 0,
-      finalTotal: derived.total,
+      overheadAmount: derived.overheadAmount,
+      profitAmount: derived.profitAmount,
+      finalTotal: derived.finalTotal,
     },
   };
 }),
@@ -905,9 +905,6 @@ function mapEstimateToForm(estimate, templates) {
   const today = getLocalDateInputValue();
   const overheadPercent = formSnapshot.overheadPercent ?? (toNumber(estimate.summary?.overheadPercent) * 100 || 10);
   const profitPercent = formSnapshot.profitPercent ?? (toNumber(estimate.summary?.profitPercent) * 100 || 10);
-  const riskPercent = formSnapshot.riskPercent ?? (toNumber(estimate.summary?.riskPercent) * 100 || 0);
-  const inflationRate = formSnapshot.inflationRate ?? (toNumber(estimate.summary?.inflationRate) * 100 || 0);
-  const escalationYears = formSnapshot.escalationYears ?? (toNumber(estimate.summary?.escalationYears) || 0);
 
   return {
     ...emptyEstimateForm(estimate.client_id || "", templateId),
@@ -940,11 +937,11 @@ function mapEstimateToForm(estimate, templates) {
     overheadPercent: String(overheadPercent),
     profitPercent: String(profitPercent),
     commissionPercent: "0",
-    riskPercent: String(riskPercent),
-    inflationRate: String(inflationRate),
-    escalationYears: String(escalationYears),
+    riskPercent: "0",
+    inflationRate: "0",
+    escalationYears: "0",
     costLines: Array.isArray(formSnapshot.costLines) && formSnapshot.costLines.length
-      ? formSnapshot.costLines.map((line) => ({ ...line, overheadEntries: [] }))
+      ? formSnapshot.costLines
       : (estimate.cost_codes ?? []).length
         ? flattenEstimateCostLines(estimate.cost_codes)
         : [createCostLine(1)],
@@ -1246,7 +1243,7 @@ const EstimateRecordsPanel = memo(function EstimateRecordsPanel({
   );
 });
 
-const EstimateTotalsTable = memo(function EstimateTotalsTable({ previewSummary }) {
+const EstimateTotalsTable = memo(function EstimateTotalsTable({ previewSummary, uiTotals }) {
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full">
@@ -1256,6 +1253,7 @@ const EstimateTotalsTable = memo(function EstimateTotalsTable({ previewSummary }
             <th className="py-2">Subcontractor</th>
             <th className="py-2">Material</th>
             <th className="py-2">Equipment</th>
+            <th className="py-2">Tax</th>
             <th className="py-2">Overhead</th>
             <th className="py-2">Profit</th>
             <th className="py-2">Total Estimate</th>
@@ -1267,6 +1265,7 @@ const EstimateTotalsTable = memo(function EstimateTotalsTable({ previewSummary }
             <td className="py-2">{formatCurrency(previewSummary.subcontractorCost)}</td>
             <td className="py-2">{formatCurrency(previewSummary.materialCost)}</td>
             <td className="py-2">{formatCurrency(previewSummary.equipmentCost)}</td>
+            <td className="py-2">{formatCurrency(uiTotals.taxAmount)}</td>
             <td className="py-2">{formatCurrency(previewSummary.overheadAmount)}</td>
             <td className="py-2">{formatCurrency(previewSummary.profitAmount)}</td>
             <td className="py-2">{formatCurrency(previewSummary.totalPrice)}</td>
@@ -1625,14 +1624,9 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const activeCostLine = activeLineIndex >= 0 ? form.costLines[activeLineIndex] : null;
   const canAutoPersist = useMemo(() => {
     return Boolean(
-      form.clientId &&
-        form.title.trim() &&
+      form.title.trim() &&
         form.estimateDate &&
         form.validUntil &&
-        form.customerName.trim() &&
-        form.customerAddress.trim() &&
-        isValidEmail(form.customerEmail) &&
-        form.customerPhone.trim() &&
         companyDetails.name.trim() &&
         companyDetails.address.trim() &&
         isValidEmail(companyDetails.email) &&
@@ -1644,11 +1638,6 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     companyDetails.email,
     companyDetails.name,
     companyDetails.phone,
-    form.clientId,
-    form.customerAddress,
-    form.customerEmail,
-    form.customerName,
-    form.customerPhone,
     form.estimateDate,
     form.title,
     form.validUntil,
@@ -1673,12 +1662,12 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const laborSummaryColumns = useMemo(
     () => [
       { key: "targetPay", label: "Target Pay", render: (row, derived) => formatCurrency(derived.targetPay) },
-      { key: "total", label: "Total", render: (row, derived) => formatCurrency(derived.total) },
+      { key: "total", label: "Total", render: (row, derived) => formatCurrency(derived.finalTotal ?? derived.total) },
     ],
     []
   );
   const baseTotalSummaryColumns = useMemo(
-    () => [{ key: "total", label: "Total", render: (row, derived) => formatCurrency(derived.total) }],
+    () => [{ key: "total", label: "Total", render: (row, derived) => formatCurrency(derived.finalTotal ?? derived.total) }],
     []
   );
 
@@ -2357,11 +2346,6 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   }
 
   const validateEstimate = useCallback(() => {
-    if (!form.clientId) return "Select a customer.";
-    if (!form.customerName.trim()) return "Customer name is required.";
-    if (!form.customerAddress.trim()) return "Customer address is required.";
-    if (!isValidEmail(form.customerEmail)) return "Enter a valid customer email.";
-    if (!form.customerPhone.trim()) return "Customer phone is required.";
     if (!companyDetails.name.trim()) return "Company profile is missing a company name.";
     if (!companyDetails.address.trim()) return "Company profile is missing an address.";
     if (!isValidEmail(companyDetails.email)) return "Company profile is missing a valid email.";
@@ -2728,7 +2712,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                 {suggestionLibrary.equipment.map((option) => <option key={option.label} value={option.label} />)}
               </datalist>
 
-              <EstimateTotalsTable previewSummary={previewSummary} />
+              <EstimateTotalsTable previewSummary={previewSummary} uiTotals={uiTotals} />
           </div>
         </section>
       ) : null}

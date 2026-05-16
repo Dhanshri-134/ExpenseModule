@@ -144,7 +144,22 @@ const CostCodeInputSchema = z.object({
   materialEntries: z.array(MaterialEntrySchema).optional().default([]),
   equipmentEntries: z.array(EquipmentEntrySchema).optional().default([]),
   overheadEntries: z.array(DirectOverheadEntrySchema).optional().default([]),
+  subcontractorEntries: z.array(
+  z.object({
+    id: z.string().optional(),
+    vendorId: nullableUuid,
+    description: z.string().optional().nullable(),
+    amount: z.coerce.number().nonnegative().default(0),
+    workersCompPercent: z.coerce.number().nonnegative().default(0),
+    liabilityPercent: z.coerce.number().nonnegative().default(0),
+    overheadPercent: z.coerce.number().nonnegative().default(0),
+    profitPercent: z.coerce.number().nonnegative().default(0),
+    metadata: JsonRecordSchema,
+  })
+).optional().default([]),
 });
+
+
 
 const EstimatePayloadSchema = z.object({
   id: optionalUuid,
@@ -177,6 +192,7 @@ function normalizeEstimatePayload(payload) {
     const hasIdentity = Boolean(costCode?.costCodeId || String(costCode?.code || "").trim() || String(costCode?.name || "").trim());
     const hasEntries =
       (costCode?.laborEntries?.length ?? 0) > 0 ||
+      (costCode?.subcontractorEntries?.length ?? 0) > 0 ||
       (costCode?.materialEntries?.length ?? 0) > 0 ||
       (costCode?.equipmentEntries?.length ?? 0) > 0 ||
       (costCode?.overheadEntries?.length ?? 0) > 0;
@@ -249,7 +265,7 @@ async function seedCostCodeLibrary(admin, companyId, payload) {
 
 async function resolveClientId(ctx, payload) {
   if (payload.clientId) return payload.clientId;
-  if (!payload.projectId) throw new Error("client_required");
+  if (!payload.projectId) return null;
 
   const { data: project, error } = await ctx.admin
     .from("projects")
@@ -258,11 +274,9 @@ async function resolveClientId(ctx, payload) {
     .eq("id", payload.projectId)
     .maybeSingle();
 
-  if (error || !project?.client_id) {
-    throw new Error(error?.message || "project_client_not_found");
-  }
+  if (error) throw new Error(error.message || "project_client_lookup_failed");
 
-  return project.client_id;
+  return project?.client_id || null;
 }
 
 function canReadEstimateScope(ctx, estimate) {

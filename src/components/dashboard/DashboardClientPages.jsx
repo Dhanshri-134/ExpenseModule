@@ -3503,7 +3503,6 @@ export function SettingsPage() {
 
   useEffect(() => {
     if (!isOwner || !settings.data?.company) return;
-
     queueMicrotask(() => {
       setCompanyForm((current) => {
         if (current) return current;
@@ -3542,6 +3541,24 @@ export function SettingsPage() {
     } catch (uploadError) {
       setError(uploadError.message || "Unable to read file.");
     }
+  }
+
+  function generateSignatureAsset() {
+    const base = companyForm ?? resolvedCompanyForm;
+    const signatureDataUrl = buildSignatureDataUrl(base.signatureName || resolvedProfileForm.name);
+    setCompanyForm({
+      ...base,
+      signatureDataUrl,
+    });
+  }
+
+  function generateStampAsset() {
+    const base = companyForm ?? resolvedCompanyForm;
+    const stampDataUrl = buildStampDataUrl(base.stampLabel || base.name);
+    setCompanyForm({
+      ...base,
+      stampDataUrl,
+    });
   }
 
   function getPersistedProfilePayload() {
@@ -3722,7 +3739,7 @@ export function SettingsPage() {
                   <div className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Signature</div>
-                      <button type="button" onClick={() => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), signatureDataUrl: buildSignatureDataUrl((prev ?? resolvedCompanyForm).signatureName || resolvedProfileForm.name) }))} className="acm-btn acm-btn-secondary h-9 px-3">Generate</button>
+                      <button type="button" onClick={generateSignatureAsset} className="acm-btn acm-btn-secondary h-9 px-3">Generate</button>
                     </div>
                     <LabeledField label="Owner Name" fieldName="signatureName" error={companyErrors.signatureName}>
                       <input name="signatureName" className={fieldClass(Boolean(companyErrors.signatureName))} value={resolvedCompanyForm.signatureName} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), signatureName: e.target.value }))} />
@@ -3734,7 +3751,7 @@ export function SettingsPage() {
                   <div className="rounded-[20px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-4">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Stamp</div>
-                      <button type="button" onClick={() => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), stampDataUrl: buildStampDataUrl((prev ?? resolvedCompanyForm).stampLabel || (prev ?? resolvedCompanyForm).name) }))} className="acm-btn acm-btn-secondary h-9 px-3">Generate</button>
+                      <button type="button" onClick={generateStampAsset} className="acm-btn acm-btn-secondary h-9 px-3">Generate</button>
                     </div>
                     <LabeledField label="Stamp Label" fieldName="stampLabel" error={companyErrors.stampLabel}>
                       <input name="stampLabel" className={fieldClass(Boolean(companyErrors.stampLabel))} value={resolvedCompanyForm.stampLabel} onChange={(e) => setCompanyForm((prev) => ({ ...(prev ?? resolvedCompanyForm), stampLabel: e.target.value }))} />

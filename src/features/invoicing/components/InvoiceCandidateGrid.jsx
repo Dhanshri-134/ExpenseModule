@@ -7,6 +7,8 @@ function InvoiceCandidateGridComponent({
   estimates,
   roleBase,
   router,
+  selectedEstimateId,
+  onSelectEstimate,
   formatDate,
   formatCurrency,
   getInvoiceAmount,
@@ -27,12 +29,27 @@ function InvoiceCandidateGridComponent({
       primary={estimate.title || `Estimate #${estimate.estimate_number}`}
       secondary={`${estimate.client?.name || "Client"} | ${formatDate(estimate.estimate_date)}`}
       tertiary={`${formatCurrency(getInvoiceAmount(estimate))} | Ref: ${estimate.invoice_reference || "Pending"}`}
-      onClick={() => router.push(`/${roleBase}/invoicing/${estimate.id}`)}
+      onClick={() => onSelectEstimate?.(estimate.id)}
       actions={(
         <div className="flex items-center gap-2">
           <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${getInvoiceTone(estimate.invoice_status)}`}>
             {getInvoiceLabel(estimate.invoice_status)}
           </span>
+          {selectedEstimateId === estimate.id ? (
+            <span className="rounded-full border border-[color:var(--acm-accent)] px-3 py-1 text-xs font-semibold text-[color:var(--acm-accent)]">
+              Selected
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              router.push(`/${roleBase}/invoicing/${estimate.id}`);
+            }}
+            className="rounded-full border border-[color:var(--acm-border)] px-3 py-1 text-xs font-semibold text-[color:var(--acm-fg)]"
+          >
+            Open
+          </button>
         </div>
       )}
     />

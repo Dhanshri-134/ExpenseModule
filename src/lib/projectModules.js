@@ -322,7 +322,7 @@ function buildCostLineDetailSections(estimate) {
     const code = costCode.costCode?.code || "";
     const percent = (value) => (value || value === 0 ? `${normalizeNumber(value).toFixed(1)}%` : "-");
     const subcontractorTotal = (entry) => {
-      const baseCost = normalizeNumber(entry.cost);
+      const baseCost = normalizeNumber(entry.amount ?? entry.cost);
       const workersCompAmount = baseCost * normalizePercent(entry.workersCompPercent);
       const liabilityAmount = baseCost * normalizePercent(entry.liabilityPercent);
       const subtotal = baseCost + workersCompAmount + liabilityAmount;
@@ -366,7 +366,7 @@ function buildCostLineDetailSections(estimate) {
           detailLabel: "Scope Of Work",
           rows: (costCode.subcontractorEntries ?? []).map((entry) => ({
             cells: [
-              formatPdfCurrency(entry.cost || 0),
+              formatPdfCurrency(entry.amount ?? entry.cost ?? 0),
               percent(entry.metadata?.workersCompPercent ?? entry.workersCompPercent),
               percent(entry.metadata?.liabilityPercent ?? entry.liabilityPercent),
               percent(entry.metadata?.overheadPercent ?? entry.overheadPercent),
@@ -500,14 +500,16 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
   const rows = flattenEstimateRows(estimate);
   const summary = estimate?.summary || {};
   const validUntil = meta.validUntil || "";
-  const totalValue = totals.grandTotal ?? summary.finalBid ?? summary.totalPrice ?? 0;
+  const totalValue = summary.finalBid ?? summary.totalPrice ?? totals.grandTotal ?? 0;
   const pages = [];
 
-  const customerName = customer.name || estimate?.client?.name || "Client";
+  const rawCustomerName = customer.name || estimate?.client?.name || "";
+  const customerName = rawCustomerName || "";
   const customerAddress = customer.address || estimate?.client?.address || "";
   const customerContact = customer.contact || estimate?.client?.contact || "";
   const customerEmail = customer.email || estimate?.client?.email || "";
   const customerPhone = customer.phone || estimate?.client?.phone || "";
+  const hasCustomerDetails = Boolean(rawCustomerName || customerAddress || customerContact || customerEmail || customerPhone);
   const ownerName = company.signatureName || company.ownerName || "";
   const titleText = estimate?.title || meta.title || estimate?.estimate_number || "Estimate";
   const companyLines = [
@@ -550,17 +552,21 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
 
   const gap = 12;
   const availableWidth = page.width - page.margin * 2;
-  const columnWidth = (availableWidth - gap) / 2;
+  const columnWidth = hasCustomerDetails ? (availableWidth - gap) / 2 : availableWidth;
   const boxTop = y;
-  const customerAddressLines = wrapPdfLine(
-    `Address: ${String(customerAddress || "-").replace(/\r?\n+/g, ", ").replace(/\s+/g, " ").trim() || "-"}`,
-    42
-  ).slice(0, 3);
-  const customerContacts = [
-    `Contact: ${customerContact || "-"}`,
-    `Phone: ${customerPhone || "-"}`,
-    `Email: ${customerEmail || "-"}`,
-  ];
+  const customerAddressLines = hasCustomerDetails
+    ? wrapPdfLine(
+        `Address: ${String(customerAddress || "-").replace(/\r?\n+/g, ", ").replace(/\s+/g, " ").trim() || "-"}`,
+        42
+      ).slice(0, 3)
+    : [];
+  const customerContacts = hasCustomerDetails
+    ? [
+        `Contact: ${customerContact || "-"}`,
+        `Phone: ${customerPhone || "-"}`,
+        `Email: ${customerEmail || "-"}`,
+      ]
+    : [];
   const detailsLines = [
     `Title: ${titleText || "-"}`,
     `Estimate No: ${estimate?.estimate_number || "-"}`,
@@ -568,27 +574,33 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
     `Valid Till: ${formatPdfDate(validUntil)}`,
     `Prepared By: ${ownerName || "-"}`,
   ];
-  const boxLineCount = Math.max(customerContacts.length + customerAddressLines.length + 1, detailsLines.length);
+  const boxLineCount = hasCustomerDetails
+    ? Math.max(customerContacts.length + customerAddressLines.length + 1, detailsLines.length)
+    : detailsLines.length;
   const boxHeight = 22 + boxLineCount * 12;
 
-  drawText(commands, "Customer Details", page.margin, boxTop, 11, accent);
-  drawText(commands, detailsTitle, page.margin + columnWidth + gap, boxTop, 11, accent);
-  drawRect(commands, page.margin, boxTop - 14 - boxHeight, columnWidth, boxHeight, null, line, 1);
-  drawRect(commands, page.margin + columnWidth + gap, boxTop - 14 - boxHeight, columnWidth, boxHeight, null, line, 1);
+  if (hasCustomerDetails) {
+    drawText(commands, "Customer Details", page.margin, boxTop, 11, accent);
+    drawRect(commands, page.margin, boxTop - 14 - boxHeight, columnWidth, boxHeight, null, line, 1);
+  }
+  drawText(commands, detailsTitle, hasCustomerDetails ? page.margin + columnWidth + gap : page.margin, boxTop, 11, accent);
+  drawRect(commands, hasCustomerDetails ? page.margin + columnWidth + gap : page.margin, boxTop - 14 - boxHeight, columnWidth, boxHeight, null, line, 1);
 
   const customerX = page.margin + 10;
-  const detailsX = page.margin + columnWidth + gap + 10;
-  let customerLineY = boxTop - 30;
-  drawText(commands, `Customer: ${customerName || "-"}`, customerX, customerLineY, 8.5, ink);
-  customerLineY -= 14;
-  customerContacts.forEach((lineText) => {
-    drawText(commands, lineText, customerX, customerLineY, 8.3, ink);
-    customerLineY -= 12;
-  });
-  customerAddressLines.forEach((lineText) => {
-    drawText(commands, lineText, customerX, customerLineY, 8.1, ink);
-    customerLineY -= 11;
-  });
+  const detailsX = (hasCustomerDetails ? page.margin + columnWidth + gap : page.margin) + 10;
+  if (hasCustomerDetails) {
+    let customerLineY = boxTop - 30;
+    drawText(commands, `Customer: ${customerName || "-"}`, customerX, customerLineY, 8.5, ink);
+    customerLineY -= 14;
+    customerContacts.forEach((lineText) => {
+      drawText(commands, lineText, customerX, customerLineY, 8.3, ink);
+      customerLineY -= 12;
+    });
+    customerAddressLines.forEach((lineText) => {
+      drawText(commands, lineText, customerX, customerLineY, 8.1, ink);
+      customerLineY -= 11;
+    });
+  }
 
   let detailsLineY = boxTop - 30;
   detailsLines.forEach((lineText) => {
@@ -606,12 +618,17 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
 
   drawRect(commands, tableX, y - headerHeight, labelWidth, headerHeight, null, line, 0.8);
   drawRect(commands, tableX + labelWidth, y - headerHeight, totalWidth, headerHeight, null, line, 0.8);
-  drawText(commands, "Cost Code / Category", tableX + 10, y - 16, 9, ink);
-  drawText(commands, "Total", tableX + labelWidth + 10, y - 16, 9, ink);
+  drawText(commands, "Scope of Work", tableX + 10, y - 16, 9, ink);
+  drawRightAlignedText(commands, "Total", tableX + tableWidth - 10, y - 16, 9, ink);
   y -= headerHeight;
 
   rows.forEach((row) => {
-    const rowLabel = [row.code, row.label].filter(Boolean).join(" - ") || row.label || row.code || "-";
+    const normalizedCode = String(row.code || "").trim();
+    const normalizedLabel = String(row.label || "").trim();
+    const rowLabel =
+      normalizedCode && normalizedLabel && normalizedCode.toLowerCase() !== normalizedLabel.toLowerCase()
+        ? `${normalizedCode} - ${normalizedLabel}`
+        : normalizedLabel || normalizedCode || "-";
     const scopeLines = wrapPdfLine(rowLabel, 48);
     const rowHeight = Math.max(26, scopeLines.length * 10 + 10);
     drawRect(commands, tableX, y - rowHeight, labelWidth, rowHeight, null, line, 0.8);

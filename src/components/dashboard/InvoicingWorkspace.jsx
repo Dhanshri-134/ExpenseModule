@@ -209,6 +209,7 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
   const [searchQuery, setSearchQuery] = useState("");
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const [dirty, setDirty] = useState(false);
+  const [selectedEstimateId, setSelectedEstimateId] = useState(initialEstimateId);
 
   const rows = useMemo(() => estimatesQuery.data?.estimates || [], [estimatesQuery.data?.estimates]);
   const company = settingsQuery.data?.company || null;
@@ -245,11 +246,27 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
     return filteredInvoiceCandidates[0] || null;
   }, [filteredInvoiceCandidates, initialEstimateId, rows, standalone]);
 
+  const selectedEstimate = useMemo(() => {
+    if (standalone) return activeEstimate;
+    return filteredInvoiceCandidates.find((estimate) => estimate.id === selectedEstimateId) || filteredInvoiceCandidates[0] || null;
+  }, [activeEstimate, filteredInvoiceCandidates, selectedEstimateId, standalone]);
+
   useEffect(() => {
     if (!activeEstimate || !company) return;
     setForm(buildInvoiceForm(activeEstimate, company));
     setDirty(false);
   }, [activeEstimate, company]);
+
+  useEffect(() => {
+    if (standalone) return;
+    if (!filteredInvoiceCandidates.length) {
+      setSelectedEstimateId("");
+      return;
+    }
+    if (!selectedEstimateId || !filteredInvoiceCandidates.some((estimate) => estimate.id === selectedEstimateId)) {
+      setSelectedEstimateId(filteredInvoiceCandidates[0].id);
+    }
+  }, [filteredInvoiceCandidates, selectedEstimateId, standalone]);
 
 
   useEffect(() => {
@@ -479,40 +496,12 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
             <button
               type="button"
               onClick={() => {
-  setActiveInvoice(null);
-
-  setForm({
-    title: "",
-    invoiceReference: "",
-    estimateDate: "",
-    validUntil: "",
-
-    companyName: "",
-    companyAddress: "",
-    companyPhone: "",
-    companyEmail: "",
-
-    customerName: "",
-    customerAddress: "",
-    customerPhone: "",
-    customerEmail: "",
-
-    clientMode: "existing",
-    clientId: "",
-
-    invoiceEntries: [
-      {
-        id: crypto.randomUUID(),
-        scope: "",
-        total: "",
-      },
-    ],
-  });
-
-  setInvoiceModalOpen(true);
-}}
+                const target = selectedEstimate;
+                if (!target) return;
+                router.push(`/${roleBase}/invoicing/${target.id}`);
+              }}
               className="acm-btn acm-btn-primary h-9 px-4"
-              disabled={!filteredInvoiceCandidates.length}
+              disabled={!selectedEstimate}
             >
               Create
             </button>
@@ -522,6 +511,8 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
               estimates={filteredInvoiceCandidates}
               roleBase={roleBase}
               router={router}
+              selectedEstimateId={selectedEstimate?.id || ""}
+              onSelectEstimate={setSelectedEstimateId}
               formatDate={formatDate}
               formatCurrency={formatCurrency}
               getInvoiceAmount={getInvoiceAmount}

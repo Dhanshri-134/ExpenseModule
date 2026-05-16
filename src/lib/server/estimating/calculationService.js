@@ -8,7 +8,15 @@ export const CalculationService = {
     const otRate = toNumber(entry.otRate);
     const stCost = roundCurrency(stHours * stRate);
     const otCost = roundCurrency(otHours * otRate);
-    const totalCost = roundCurrency(stCost + otCost);
+    const baseCost = roundCurrency(stCost + otCost);
+
+    const overheadPercent = toPercent(entry.metadata?.overheadPercent ?? entry.overheadPercent);
+    const profitPercent = toPercent(entry.metadata?.profitPercent ?? entry.profitPercent);
+
+    const overhead = roundCurrency(baseCost * overheadPercent);
+    const subtotal = roundCurrency(baseCost + overhead);
+    const profit = roundCurrency(subtotal * profitPercent);
+    const totalCost = roundCurrency(subtotal + profit);
 
     return {
       ...entry,
@@ -18,6 +26,10 @@ export const CalculationService = {
       otHours,
       otRate,
       otCost,
+      baseCost,
+      overhead,
+      subtotal,
+      profit,
       totalCost,
     };
   },
@@ -29,9 +41,17 @@ export const CalculationService = {
     const freight = toNumber(entry.freight);
     const taxPercent = toPercent(entry.taxPercent);
     const adjustedQty = roundCurrency(quantity * (1 + wastePercent));
-    const baseCost = roundCurrency(adjustedQty * unitRate);
-    const costWithFreight = roundCurrency(baseCost + freight);
-    const totalCost = roundCurrency(costWithFreight * (1 + taxPercent));
+    const materialBase = roundCurrency(adjustedQty * unitRate);
+    const costWithFreight = roundCurrency(materialBase + freight);
+    const baseCost = roundCurrency(costWithFreight * (1 + taxPercent));
+
+    const overheadPercent = toPercent(entry.metadata?.overheadPercent ?? entry.overheadPercent);
+    const profitPercent = toPercent(entry.metadata?.profitPercent ?? entry.profitPercent);
+
+    const overhead = roundCurrency(baseCost * overheadPercent);
+    const subtotal = roundCurrency(baseCost + overhead);
+    const profit = roundCurrency(subtotal * profitPercent);
+    const totalCost = roundCurrency(subtotal + profit);
 
     return {
       ...entry,
@@ -43,6 +63,9 @@ export const CalculationService = {
       freight,
       costWithFreight,
       taxPercent,
+      overhead,
+      subtotal,
+      profit,
       totalCost,
     };
   },
@@ -55,8 +78,16 @@ export const CalculationService = {
     const fuel = toNumber(entry.fuel);
     const taxPercent = toPercent(entry.taxPercent);
     const base = roundCurrency(qty * days * rate);
-    const subtotal = roundCurrency(base + freight + fuel);
-    const totalCost = roundCurrency(subtotal * (1 + taxPercent));
+    const subtotalWithFreight = roundCurrency(base + freight + fuel);
+    const baseCost = roundCurrency(subtotalWithFreight * (1 + taxPercent));
+
+    const overheadPercent = toPercent(entry.metadata?.overheadPercent ?? entry.overheadPercent);
+    const profitPercent = toPercent(entry.metadata?.profitPercent ?? entry.profitPercent);
+
+    const overhead = roundCurrency(baseCost * overheadPercent);
+    const subtotal = roundCurrency(baseCost + overhead);
+    const profit = roundCurrency(subtotal * profitPercent);
+    const totalCost = roundCurrency(subtotal + profit);
 
     return {
       ...entry,
@@ -66,8 +97,11 @@ export const CalculationService = {
       base,
       freight,
       fuel,
-      subtotal,
+      baseCost,
       taxPercent,
+      overhead,
+      subtotal,
+      profit,
       totalCost,
     };
   },
@@ -98,4 +132,26 @@ export const CalculationService = {
   computeEscalation(presentCost, inflationRate, years) {
     return roundCurrency(toNumber(presentCost) * (1 + toPercent(inflationRate)) ** toNumber(years));
   },
+
+  computeSubcontractor(entry = {}) {
+    const amount = toNumber(entry.amount);
+    const workersComp = roundCurrency(amount * toPercent(entry.workersCompPercent));
+    const liability = roundCurrency(amount * toPercent(entry.liabilityPercent));
+    const baseSubtotal = roundCurrency(amount + workersComp + liability);
+    const overhead = roundCurrency(baseSubtotal * toPercent(entry.overheadPercent));
+    const subtotal = roundCurrency(baseSubtotal + overhead);
+    const profit = roundCurrency(subtotal * toPercent(entry.profitPercent));
+    const totalCost = roundCurrency(subtotal + profit);
+
+    return {
+      ...entry,
+      amount,
+      workersComp,
+      liability,
+      overhead,
+      subtotal,
+      profit,
+      totalCost,
+    };
+  }
 };

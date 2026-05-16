@@ -8,6 +8,21 @@ function normalizeText(value) {
   return String(value ?? "").trim();
 }
 
+function processSubcontractorEntries(entries = []) {
+  return (entries ?? []).map((entry) =>
+    CalculationService.computeSubcontractor({
+      description: normalizeText(entry.description),
+      vendorId: entry.vendorId || null,
+      amount: entry.amount,
+      workersCompPercent: entry.workersCompPercent,
+      liabilityPercent: entry.liabilityPercent,
+      overheadPercent: entry.overheadPercent,
+      profitPercent: entry.profitPercent,
+      metadata: entry.metadata ?? {},
+    })
+  );
+}
+
 function buildLegacyCostCodes(lineItems = []) {
   const groups = new Map();
 
@@ -155,7 +170,18 @@ export function buildEstimateComputation(payload = {}) {
   const laborRates = [];
 
   normalizedCostCodes.forEach((costCode, index) => {
-    const processedLabor = processLaborEntries(costCode.laborEntries ?? []);
+    const splitEntries = splitSubcontractorLaborEntries(costCode.laborEntries ?? []);
+    const processedLabor = processLaborEntries(splitEntries.laborEntries);
+    const subcontractorEntries = processSubcontractorEntries(
+      splitEntries.subcontractorEntries.map((entry) => ({
+        ...entry,
+        amount: entry.amount ?? entry.cost ?? entry.metadata?.cost,
+        workersCompPercent: entry.workersCompPercent ?? entry.metadata?.workersCompPercent,
+        liabilityPercent: entry.liabilityPercent ?? entry.metadata?.liabilityPercent,
+        overheadPercent: entry.overheadPercent ?? entry.metadata?.overheadPercent,
+        profitPercent: entry.profitPercent ?? entry.metadata?.profitPercent,
+      }))
+    );
     const materialEntries = processMaterialEntries(costCode.materialEntries ?? []);
     const equipmentEntries = processEquipmentEntries(costCode.equipmentEntries ?? []);
     const overheadEntries = [];
@@ -169,15 +195,16 @@ export function buildEstimateComputation(payload = {}) {
       name: normalizeText(costCode.name || costCode.costCode?.name) || `Cost Code ${index + 1}`,
       description: normalizeText(costCode.description || costCode.costCode?.description),
       laborEntries: processedLabor.laborEntries,
+      subcontractorEntries,
       materialEntries,
       equipmentEntries,
       overheadEntries,
       overheadPercent: costCode.overheadPercent ?? payload.overheadPercent ?? 0,
       profitPercent: costCode.profitPercent ?? payload.profitPercent ?? 0,
       commissionPercent: 0,
-      riskPercent: costCode.riskPercent ?? payload.riskPercent ?? 0,
-      inflationRate: costCode.inflationRate ?? payload.inflationRate ?? 0,
-      escalationYears: costCode.escalationYears ?? payload.escalationYears ?? 0,
+      riskPercent: 0,
+      inflationRate: 0,
+      escalationYears: 0,
     });
   });
 
@@ -188,9 +215,9 @@ export function buildEstimateComputation(payload = {}) {
       overheadPercent: payload.overheadPercent ?? 0,
       profitPercent: payload.profitPercent ?? 0,
       commissionPercent: 0,
-      riskPercent: payload.riskPercent ?? 0,
-      inflationRate: payload.inflationRate ?? 0,
-      escalationYears: payload.escalationYears ?? 0,
+      riskPercent: 0,
+      inflationRate: 0,
+      escalationYears: 0,
     },
   });
 
@@ -199,6 +226,7 @@ export function buildEstimateComputation(payload = {}) {
     costCodes: projectSummary.costCodes,
     summary: {
       laborCost: projectSummary.laborCost,
+      subcontractorCost: projectSummary.subcontractorCost,
       materialCost: projectSummary.materialCost,
       equipmentCost: projectSummary.equipmentCost,
       directOverheadCost: 0,
@@ -210,11 +238,11 @@ export function buildEstimateComputation(payload = {}) {
       profitAmount: projectSummary.profit,
       commissionPercent: 0,
       commissionAmount: 0,
-      riskPercent: toPercent(payload.riskPercent ?? 0),
-      contingencyAmount: projectSummary.contingency,
-      inflationRate: toPercent(payload.inflationRate ?? 0),
-      escalationYears: toNumber(payload.escalationYears ?? 0),
-      futureCost: projectSummary.futureCost,
+      riskPercent: 0,
+      contingencyAmount: 0,
+      inflationRate: 0,
+      escalationYears: 0,
+      futureCost: 0,
       totalPrice: projectSummary.totalPrice,
       finalBid: projectSummary.finalBid,
     },
@@ -267,6 +295,10 @@ export async function resolveOrCreateCostCode(admin, companyId, item) {
 async function replaceEstimateChildren(admin, estimateId) {
   await admin.from("estimate_labor_entries").delete().eq("estimate_id", estimateId);
   await admin.from("estimate_material_entries").delete().eq("estimate_id", estimateId);
+  await admin
+  .from("estimate_subcontractor_entries")
+  .delete()
+  .eq("estimate_id", estimateId);
   await admin.from("estimate_equipment_entries").delete().eq("estimate_id", estimateId);
   await admin.from("estimate_direct_overhead_entries").delete().eq("estimate_id", estimateId);
   await admin.from("estimate_labor_rates").delete().eq("estimate_id", estimateId);
@@ -399,6 +431,34 @@ export async function persistEstimateGraph(admin, ctx, estimate, computed) {
       if (error) throw new Error(error.message || "estimate_material_insert_failed");
     }
 
+    if (row.subcontractorEntries.length) {
+      const { error } = await admin.from("estimate_subcontractor_entries").insert(
+        row.subcontractorEntries.map((entry) => ({
+          estimate_id: estimate.id,
+          company_id: ctx.company.id,
+          project_id: estimate.project_id,
+          cost_code_id: costCode.id,
+          cost_code_item_id: itemRow.id,
+          vendor_id: entry.vendorId || null,
+          description: entry.description || null,
+          amount: roundCurrency(entry.amount),
+          workers_comp_percent: toPercent(entry.workersCompPercent),
+          workers_comp: roundCurrency(entry.workersComp),
+          liability_percent: toPercent(entry.liabilityPercent),
+          liability: roundCurrency(entry.liability),
+          overhead_percent: toPercent(entry.overheadPercent),
+          overhead: roundCurrency(entry.overhead),
+          subtotal: roundCurrency(entry.subtotal),
+          profit_percent: toPercent(entry.profitPercent),
+          profit: roundCurrency(entry.profit),
+          total_cost: roundCurrency(entry.totalCost),
+          metadata: entry.metadata ?? {},
+        }))
+      );
+
+      if (error) throw new Error(error.message || "estimate_subcontractor_insert_failed");
+    }
+
     if (row.equipmentEntries.length) {
       const { error } = await admin.from("estimate_equipment_entries").insert(
         row.equipmentEntries.map((entry) => ({
@@ -477,6 +537,7 @@ export async function loadEstimateGraph(admin, estimateIds = []) {
     { data: costCodeItems, error: ccError },
     { data: laborRates, error: lrError },
     { data: laborEntries, error: leError },
+    { data: subcontractorEntries, error: seError },
     { data: materialEntries, error: meError },
     { data: equipmentEntries, error: eeError },
     { data: overheadEntries, error: oeError },
@@ -488,18 +549,31 @@ export async function loadEstimateGraph(admin, estimateIds = []) {
       .order("display_order", { ascending: true }),
     admin.from("estimate_labor_rates").select("*").in("estimate_id", estimateIds),
     admin.from("estimate_labor_entries").select("*").in("estimate_id", estimateIds),
+    admin
+      .from("estimate_subcontractor_entries")
+      .select("*")
+      .in("estimate_id", estimateIds),
     admin.from("estimate_material_entries").select("*").in("estimate_id", estimateIds),
     admin.from("estimate_equipment_entries").select("*").in("estimate_id", estimateIds),
     admin.from("estimate_direct_overhead_entries").select("*").in("estimate_id", estimateIds),
   ]);
 
-  if (ccError || lrError || leError || meError || eeError || oeError) {
+  if (
+  ccError ||
+  lrError ||
+  leError ||
+  meError ||
+  eeError ||
+  seError ||
+  oeError
+){
     throw new Error(
       ccError?.message ||
         lrError?.message ||
         leError?.message ||
         meError?.message ||
         eeError?.message ||
+        seError?.message ||
         oeError?.message ||
         "estimate_graph_load_failed"
     );
@@ -508,6 +582,7 @@ export async function loadEstimateGraph(admin, estimateIds = []) {
   const rateMap = new Map((laborRates ?? []).map((rate) => [rate.id, rate]));
   const byCostCodeItemId = {
     labor: new Map(),
+    subcontractor: new Map(),
     material: new Map(),
     equipment: new Map(),
     overhead: new Map(),
@@ -572,6 +647,64 @@ export async function loadEstimateGraph(admin, estimateIds = []) {
     byCostCodeItemId.equipment.set(entry.cost_code_item_id, list);
   }
 
+  for (const entry of subcontractorEntries ?? []) {
+  const list =
+    byCostCodeItemId.subcontractor.get(
+      entry.cost_code_item_id
+    ) ?? [];
+
+  list.push({
+    id: entry.id,
+    description: entry.description || "",
+    vendorId: entry.vendor_id,
+
+    amount: toNumber(entry.amount),
+
+    workersCompPercent: toNumber(
+      entry.workers_comp_percent
+    ),
+    workersComp: toNumber(
+      entry.workers_comp
+    ),
+
+    liabilityPercent: toNumber(
+      entry.liability_percent
+    ),
+    liability: toNumber(
+      entry.liability
+    ),
+
+    overheadPercent: toNumber(
+      entry.overhead_percent
+    ),
+    overhead: toNumber(
+      entry.overhead
+    ),
+
+    subtotal: toNumber(
+      entry.subtotal
+    ),
+
+    profitPercent: toNumber(
+      entry.profit_percent
+    ),
+    profit: toNumber(
+      entry.profit
+    ),
+
+    totalCost: toNumber(
+      entry.total_cost
+    ),
+
+    metadata: entry.metadata ?? {},
+  });
+
+  byCostCodeItemId.subcontractor.set(
+    entry.cost_code_item_id,
+    list
+  );
+}
+
   for (const entry of overheadEntries ?? []) {
     const list = byCostCodeItemId.overhead.get(entry.cost_code_item_id) ?? [];
     list.push({
@@ -603,14 +736,15 @@ export async function loadEstimateGraph(admin, estimateIds = []) {
       },
       description: row.description || "",
       laborEntries: splitEntries.laborEntries,
-      subcontractorEntries: splitEntries.subcontractorEntries,
+      subcontractorEntries: byCostCodeItemId.subcontractor.get(row.id) ?? [],
       materialEntries: byCostCodeItemId.material.get(row.id) ?? [],
       equipmentEntries: byCostCodeItemId.equipment.get(row.id) ?? [],
-      overheadEntries: [],
+      overheadEntries: byCostCodeItemId.overhead.get(row.id) ?? [],
       laborCost: toNumber(row.labor_cost),
+      subcontractorCost: sumBy(byCostCodeItemId.subcontractor.get(row.id) ?? [], (entry) => entry.totalCost),
       materialCost: toNumber(row.material_cost),
       equipmentCost: toNumber(row.equipment_cost),
-      directOverhead: 0,
+      directOverhead: toNumber(row.direct_overhead),
       totalCost: toNumber(row.total_cost),
       overheadPercent: toNumber(row.overhead_percent),
       overhead: toNumber(row.overhead),
@@ -630,6 +764,8 @@ export async function loadEstimateGraph(admin, estimateIds = []) {
 
   return graph;
 }
+
+
 
 export function composeEstimateRecord(estimate, costCodes = []) {
   const summaryBase =
