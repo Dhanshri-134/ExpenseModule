@@ -2773,21 +2773,20 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                               onToggle={() => toggleSection(line.id, "equipmentEntries")}
                               hideHeader={true}
                             />
+                            {!costCodeShownLocal ? (
+                              <div className="grid gap-3 rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-xs text-[color:var(--acm-muted-fg)] md:grid-cols-7">
+                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Labor</span><div>{formatCurrency(lineSummary.laborCost)}</div></div>
+                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Subcontractor</span><div>{formatCurrency(lineSummary.subcontractorCost)}</div></div>
+                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Material</span><div>{formatCurrency(lineSummary.materialCost)}</div></div>
+                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Equipment</span><div>{formatCurrency(lineSummary.equipmentCost)}</div></div>
+                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Overhead</span><div>{formatCurrency(lineSummary.markupOverhead)}</div></div>
+                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Profit</span><div>{formatCurrency(lineSummary.profitAmount)}</div></div>
+                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Total</span><div>{formatCurrency(lineSummary.total)}</div></div>
+                              </div>
+                            ) : null}
                           </>
                         );
                       })()}
-
-                      {!costCodeShownLocal ? (
-                        <div className="grid gap-3 rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-xs text-[color:var(--acm-muted-fg)] md:grid-cols-7">
-                        <div><span className="font-semibold text-[color:var(--acm-fg)]">Labor</span><div>{formatCurrency(lineSummary.laborCost)}</div></div>
-                        <div><span className="font-semibold text-[color:var(--acm-fg)]">Subcontractor</span><div>{formatCurrency(lineSummary.subcontractorCost)}</div></div>
-                        <div><span className="font-semibold text-[color:var(--acm-fg)]">Material</span><div>{formatCurrency(lineSummary.materialCost)}</div></div>
-                        <div><span className="font-semibold text-[color:var(--acm-fg)]">Equipment</span><div>{formatCurrency(lineSummary.equipmentCost)}</div></div>
-                        <div><span className="font-semibold text-[color:var(--acm-fg)]">Overhead</span><div>{formatCurrency(lineSummary.markupOverhead)}</div></div>
-                        <div><span className="font-semibold text-[color:var(--acm-fg)]">Profit</span><div>{formatCurrency(lineSummary.profitAmount)}</div></div>
-                        <div><span className="font-semibold text-[color:var(--acm-fg)]">Total</span><div>{formatCurrency(lineSummary.total)}</div></div>
-                        </div>
-                      ) : null}
                     </div>
                         </Fragment>
                       );
