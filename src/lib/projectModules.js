@@ -30,6 +30,10 @@ export function normalizeEstimateLineItems(items = []) {
       equipmentCost: normalizeNumber(item?.equipmentCost),
       directOverheadCost: normalizeNumber(item?.directOverheadCost),
       notes: String(item?.notes || "").trim(),
+      overheadPercent: normalizeNumber(item?.overheadPercent),
+      overheadAmount: normalizeNumber(item?.overheadAmount),
+      profitPercent: normalizeNumber(item?.profitPercent),
+      profitAmount: normalizeNumber(item?.profitAmount),
     }))
     .filter(
       (item) =>
@@ -86,12 +90,26 @@ export function computeEstimateSummary({
     }
   );
 
-  const overheadAmount = totals.baseCost * normalizedOverheadPercent;
-  const profitAmount = (totals.baseCost + overheadAmount) * normalizedProfitPercent;
-  const commissionAmount =
-    (totals.baseCost + overheadAmount + profitAmount) * normalizedCommissionPercent;
-  const totalPrice =
-    totals.baseCost + overheadAmount + profitAmount + commissionAmount;
+  // If individual line items provide overhead/profit amounts, prefer summing those
+  const perLineOverhead = normalizedLineItems.reduce((s, it) => s + normalizeNumber(it.overheadAmount), 0);
+  const perLineProfit = normalizedLineItems.reduce((s, it) => s + normalizeNumber(it.profitAmount), 0);
+
+  let overheadAmount = 0;
+  let profitAmount = 0;
+  let commissionAmount = 0;
+  let totalPrice = 0;
+
+  if (perLineOverhead > 0 || perLineProfit > 0) {
+    overheadAmount = perLineOverhead;
+    profitAmount = perLineProfit;
+    commissionAmount = (totals.baseCost + overheadAmount + profitAmount) * normalizedCommissionPercent;
+    totalPrice = totals.baseCost + overheadAmount + profitAmount + commissionAmount;
+  } else {
+    overheadAmount = totals.baseCost * normalizedOverheadPercent;
+    profitAmount = (totals.baseCost + overheadAmount) * normalizedProfitPercent;
+    commissionAmount = (totals.baseCost + overheadAmount + profitAmount) * normalizedCommissionPercent;
+    totalPrice = totals.baseCost + overheadAmount + profitAmount + commissionAmount;
+  }
 
   return {
     ...totals,

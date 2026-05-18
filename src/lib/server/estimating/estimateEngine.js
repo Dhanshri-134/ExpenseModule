@@ -53,8 +53,8 @@ function buildLegacyCostCodes(lineItems = []) {
     if (laborCost || laborHours) {
       group.laborEntries.push({
         description,
-        stHours: laborHours || (laborCost ? 1 : 0),
-        stRate: laborHours ? laborCost / laborHours : laborCost,
+        stHours: laborHours,
+        stRate: laborHours ? (laborCost / laborHours) : 0,
         otHours: 0,
         otRate: 0,
       });
@@ -504,6 +504,10 @@ function buildLegacyLineItemsFromCostCodes(costCodes = []) {
     equipmentCost: row.equipmentCost,
     directOverheadCost: 0,
     totalCost: row.totalCost,
+    overheadPercent: row.overheadPercent ?? 0,
+    overheadAmount: roundCurrency((row.totalCost || 0) * toPercent(row.overheadPercent ?? 0)),
+    profitPercent: row.profitPercent ?? 0,
+    profitAmount: roundCurrency(((row.totalCost || 0) + (row.overhead || 0)) * toPercent(row.profitPercent ?? 0)),
     notes: "",
   }));
 }

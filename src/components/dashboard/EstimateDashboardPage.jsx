@@ -381,17 +381,15 @@ function calculateLabor(entry) {
     ? toNumber(entry.targetWage)
     : toNumber(entry.targetWageBase) * (1 + toNumber(entry.targetWageMarkupPercent) / 100);
   const stHours = roundCurrency(
-    toNumber(entry.straightTimePersons) *
-      (toNumber(entry.straightTimeHours) || 8) *
-      toNumber(entry.straightTimeDays)
+    toNumber(entry.straightTimePersons) * (toNumber(entry.straightTimeHours) || 0) * toNumber(entry.straightTimeDays)
   );
   const otHours = roundCurrency(
     toNumber(entry.overtimePersons) *
-      (toNumber(entry.overtimeHours) || 10) *
+      (toNumber(entry.overtimeHours) || 0) *
       toNumber(entry.overtimeDays)
   );
-  const stRatePercent = toNumber(entry.stRatePercent) || 155;
-  const otRatePercent = toNumber(entry.otRatePercent) || 224;
+  const stRatePercent = toNumber(entry.stRatePercent);
+  const otRatePercent = toNumber(entry.otRatePercent);
   const stRate = roundCurrency(targetWage * toPercent(stRatePercent));
   const otRate = roundCurrency(targetWage * toPercent(otRatePercent));
   const totalAmount = roundCurrency(stHours * stRate + otHours * otRate);
@@ -646,6 +644,12 @@ function computeCostLineSummary(line, defaults = {}) {
   const subcontractorBase = (line.subcontractorEntries ?? []).reduce((sum, entry) => sum + calculateSubcontractor(entry).finalTotal, 0);
   const materialBase = (line.materialEntries ?? []).reduce((sum, entry) => sum + calculateMaterial(entry).finalTotal, 0);
   const equipmentBase = (line.equipmentEntries ?? []).reduce((sum, entry) => sum + calculateEquipment(entry).finalTotal, 0);
+  const taxAmount = roundCurrency(
+    (line.laborEntries ?? []).reduce((s, e) => s + calculateLabor(e).taxAmount, 0) +
+    (line.subcontractorEntries ?? []).reduce((s, e) => s + calculateSubcontractor(e).taxAmount, 0) +
+    (line.materialEntries ?? []).reduce((s, e) => s + calculateMaterial(e).taxAmount, 0) +
+    (line.equipmentEntries ?? []).reduce((s, e) => s + calculateEquipment(e).taxAmount, 0)
+  );
   const directOverheadCost = 0;
   const baseCost = roundCurrency(laborBase + subcontractorBase + materialBase + equipmentBase);
   const overheadPercent = toPercent(defaults.overheadPercent);
@@ -665,6 +669,7 @@ function computeCostLineSummary(line, defaults = {}) {
     subcontractorCost,
     materialCost,
     equipmentCost,
+    taxAmount,
     overheadCost,
     baseCost,
     overheadPercent,
@@ -1275,8 +1280,6 @@ const EstimateTotalsTable = memo(function EstimateTotalsTable({ previewSummary, 
             <th className="py-2">Material</th>
             <th className="py-2">Equipment</th>
             <th className="py-2">Tax</th>
-            <th className="py-2">Overhead</th>
-            <th className="py-2">Profit</th>
             <th className="py-2">Total Estimate</th>
           </tr>
         </thead>
@@ -1287,8 +1290,6 @@ const EstimateTotalsTable = memo(function EstimateTotalsTable({ previewSummary, 
             <td className="py-2">{formatCurrency(previewSummary.materialCost)}</td>
             <td className="py-2">{formatCurrency(previewSummary.equipmentCost)}</td>
             <td className="py-2">{formatCurrency(uiTotals.taxAmount)}</td>
-            <td className="py-2">{formatCurrency(previewSummary.overheadAmount)}</td>
-            <td className="py-2">{formatCurrency(previewSummary.profitAmount)}</td>
             <td className="py-2">{formatCurrency(previewSummary.totalPrice)}</td>
           </tr>
         </tbody>
@@ -1394,6 +1395,17 @@ const SectionTable = memo(function SectionTable({
             ? calculateEquipment(row)
             : calculateOverhead(row)
   ), [rows, sectionKey]);
+  const summaryTotals = useMemo(() => {
+    const totals = {};
+    (derivedRows || []).forEach((d) => {
+      if (!d || typeof d !== "object") return;
+      Object.keys(d).forEach((k) => {
+        const v = d[k];
+        if (typeof v === "number") totals[k] = (totals[k] || 0) + v;
+      });
+    });
+    return totals;
+  }, [derivedRows]);
   return (
     <div className="space-y-3">
       {!hideHeader ? (
@@ -1701,7 +1713,9 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     []
   );
   const baseTotalSummaryColumns = useMemo(
-    () => [{ key: "total", label: "Total", render: (row, derived) => formatCurrency(derived.finalTotal ?? derived.total) }],
+    () => [
+      { key: "total", label: "Total", render: (row, derived) => formatCurrency(derived.finalTotal ?? derived.total) },
+    ],
     []
   );
 
@@ -1937,20 +1951,16 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     targetWageDialogBaseWage * (1 + targetWageDialogMarkupPercent / 100)
   );
   const targetWageDialogStRate = roundCurrency(
-    targetWageDialogTargetWage * toPercent(toNumber(targetWageDialog.stRatePercent) || 155)
+    targetWageDialogTargetWage * toPercent(toNumber(targetWageDialog.stRatePercent))
   );
   const targetWageDialogOtRate = roundCurrency(
-    targetWageDialogTargetWage * toPercent(toNumber(targetWageDialog.otRatePercent) || 224)
+    targetWageDialogTargetWage * toPercent(toNumber(targetWageDialog.otRatePercent))
   );
   const targetWageDialogStHours = roundCurrency(
-    toNumber(targetWageDialog.straightTimePersons) *
-      (toNumber(targetWageDialog.straightTimeHours) || 8) *
-      toNumber(targetWageDialog.straightTimeDays)
+    toNumber(targetWageDialog.straightTimePersons) * (toNumber(targetWageDialog.straightTimeHours) || 0) * toNumber(targetWageDialog.straightTimeDays)
   );
   const targetWageDialogOtHours = roundCurrency(
-    toNumber(targetWageDialog.overtimePersons) *
-      (toNumber(targetWageDialog.overtimeHours) || 10) *
-      toNumber(targetWageDialog.overtimeDays)
+    toNumber(targetWageDialog.overtimePersons) * (toNumber(targetWageDialog.overtimeHours) || 0) * toNumber(targetWageDialog.overtimeDays)
   );
   const targetWageDialogTotalAmount = roundCurrency(
     targetWageDialogStHours * targetWageDialogStRate +
@@ -2596,7 +2606,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
         >
           {formatCurrency(derived?.stRate ?? 0)}
         </button>
-      ),
+      ), width: "w-32"
     },
     {
       key: "otHours",
@@ -2609,7 +2619,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
         >
           {formatCurrency(derived?.otHours ?? 0)}
         </button>
-      ),
+      ), width: "w-32"
     },
     {
       key: "otRate",
@@ -2622,7 +2632,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
         >
           {formatCurrency(derived?.otRate ?? 0)}
         </button>
-      ),
+      ), width: "w-32"
     },
     {
       key: "total",
@@ -3016,13 +3026,12 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                               hideHeader={true}
                             />
                             {!costCodeShownLocal ? (
-                              <div className="grid gap-3 rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-xs text-[color:var(--acm-muted-fg)] md:grid-cols-7">
+                              <div className="grid gap-3 rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-xs text-[color:var(--acm-muted-fg)] md:grid-cols-6">
                                 <div><span className="font-semibold text-[color:var(--acm-fg)]">Labor</span><div>{formatCurrency(lineSummary.laborCost)}</div></div>
                                 <div><span className="font-semibold text-[color:var(--acm-fg)]">Subcontractor</span><div>{formatCurrency(lineSummary.subcontractorCost)}</div></div>
                                 <div><span className="font-semibold text-[color:var(--acm-fg)]">Material</span><div>{formatCurrency(lineSummary.materialCost)}</div></div>
                                 <div><span className="font-semibold text-[color:var(--acm-fg)]">Equipment</span><div>{formatCurrency(lineSummary.equipmentCost)}</div></div>
-                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Overhead</span><div>{formatCurrency(lineSummary.markupOverhead)}</div></div>
-                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Profit</span><div>{formatCurrency(lineSummary.profitAmount)}</div></div>
+                                {/* Bottom line removed per request */}
                                 <div><span className="font-semibold text-[color:var(--acm-fg)]">Total</span><div>{formatCurrency(lineSummary.total)}</div></div>
                               </div>
                             ) : null}
@@ -3189,12 +3198,12 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     ...current,
                     [targetWageDialog.field === "stRate" ? "stRatePercent" : "otRatePercent"]: event.target.value
                   }))}
-                  placeholder={targetWageDialog.field === "stRate" ? "15" : "22"}
+                  placeholder={""}
                 />
               </LabeledInput>
               <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">{targetWageDialog.field === "stRate" ? "ST" : "OT"} Rate</div>
-                <div className="text-lg font-semibold">{formatCurrency(roundCurrency(toNumber(targetWageDialog.rowTargetWage) * toPercent(toNumber(targetWageDialog.field === "stRate" ? targetWageDialog.stRatePercent : targetWageDialog.otRatePercent) || (targetWageDialog.field === "stRate" ? 15 : 22))))}</div>
+                <div className="text-lg font-semibold">{formatCurrency(roundCurrency(toNumber(targetWageDialog.rowTargetWage) * toPercent(toNumber(targetWageDialog.field === "stRate" ? targetWageDialog.stRatePercent : targetWageDialog.otRatePercent))))}</div>
               </div>
             </>
           )}
@@ -3232,7 +3241,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
               </div>
               <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">ST Hours Total</div>
-                <div className="text-lg font-semibold">{formatCurrency(roundCurrency(toNumber(targetWageDialog.straightTimePersons) * (toNumber(targetWageDialog.straightTimeHours) || 8) * toNumber(targetWageDialog.straightTimeDays)))}</div>
+                <div className="text-lg font-semibold">{formatCurrency(roundCurrency(toNumber(targetWageDialog.straightTimePersons) * (toNumber(targetWageDialog.straightTimeHours) || 0) * toNumber(targetWageDialog.straightTimeDays)))}</div>
               </div>
             </>
           )}
@@ -3270,7 +3279,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
               </div>
               <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">OT Hours Total</div>
-                <div className="text-lg font-semibold">{formatCurrency(roundCurrency(toNumber(targetWageDialog.overtimePersons) * (toNumber(targetWageDialog.overtimeHours) || 10) * toNumber(targetWageDialog.overtimeDays)))}</div>
+                <div className="text-lg font-semibold">{formatCurrency(roundCurrency(toNumber(targetWageDialog.overtimePersons) * (toNumber(targetWageDialog.overtimeHours) || 0) * toNumber(targetWageDialog.overtimeDays)))}</div>
               </div>
             </>
           )}
