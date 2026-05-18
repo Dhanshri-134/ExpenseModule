@@ -27,7 +27,7 @@ function inputClass(extra = "") {
 }
 
 function sheetInputClass(extra = "") {
-  return `w-full border-0 border-b border-[color:var(--acm-border)] bg-white px-1 py-2 text-sm text-[color:var(--acm-fg)] outline-none focus:border-[color:var(--acm-accent)] focus:ring-0 ${extra}`.trim();
+  return `w-full border-0 border-b border-[color:var(--acm-border)] bg-white px-1 py-2 text-sm text-[color:var(--acm-fg)] outline outline-1 outline-[color:var(--acm-border)] focus:outline-[color:var(--acm-accent)] focus:outline-2 focus:ring-0 ${extra}`.trim();
 }
 
 function sheetSelectClass(extra = "") {
@@ -2517,7 +2517,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 bg-white">
       <section>
         <div className={`flex flex-wrap items-center gap-4 ${standalone ? "justify-end" : "justify-between"}`}>
           {/* <div>
@@ -2673,7 +2673,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     </div>
 
                     <div className="mb-4">
-                      <div className="flex gap-2 border-b pb-2">
+                      <div className="flex gap-2 pb-2">
                         {[
                           ["laborEntries", "Labor"],
                           ["subcontractorEntries", "Subcontractor"],
@@ -2689,7 +2689,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                               key={key}
                               type="button"
                               onClick={() => showOnlySection(line.id, key)}
-                              className={`px-3 py-1 text-sm font-semibold ${isActive ? "border-b-2 border-[color:var(--acm-accent)] text-[color:var(--acm-accent)]" : "text-[color:var(--acm-muted-fg)]"}`}
+                              className={`px-3 py-1 text-sm font-semibold rounded-md ${isActive ? "bg-yellow-100 text-yellow-800 border-b-2 border-yellow-400" : "text-[color:var(--acm-muted-fg)] hover:bg-yellow-50"}`}
                             >
                               {label}
                             </button>
@@ -2777,7 +2777,8 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                         );
                       })()}
 
-                      <div className="grid gap-3 rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-xs text-[color:var(--acm-muted-fg)] md:grid-cols-7">
+                      {!costCodeShownLocal ? (
+                        <div className="grid gap-3 rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-xs text-[color:var(--acm-muted-fg)] md:grid-cols-7">
                         <div><span className="font-semibold text-[color:var(--acm-fg)]">Labor</span><div>{formatCurrency(lineSummary.laborCost)}</div></div>
                         <div><span className="font-semibold text-[color:var(--acm-fg)]">Subcontractor</span><div>{formatCurrency(lineSummary.subcontractorCost)}</div></div>
                         <div><span className="font-semibold text-[color:var(--acm-fg)]">Material</span><div>{formatCurrency(lineSummary.materialCost)}</div></div>
@@ -2785,7 +2786,8 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                         <div><span className="font-semibold text-[color:var(--acm-fg)]">Overhead</span><div>{formatCurrency(lineSummary.markupOverhead)}</div></div>
                         <div><span className="font-semibold text-[color:var(--acm-fg)]">Profit</span><div>{formatCurrency(lineSummary.profitAmount)}</div></div>
                         <div><span className="font-semibold text-[color:var(--acm-fg)]">Total</span><div>{formatCurrency(lineSummary.total)}</div></div>
-                      </div>
+                        </div>
+                      ) : null}
                     </div>
                         </Fragment>
                       );
