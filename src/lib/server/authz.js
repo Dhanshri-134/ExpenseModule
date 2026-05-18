@@ -30,20 +30,25 @@ export async function getRequestContext(req, res) {
     return { ok: false, status: 500, error: "supabase_not_configured" };
   }
 
-  // Development-only auto-login fallback.
-  // When DEV_AUTOLOGIN=true and DEV_AUTOLOGIN_USER is set, bypass normal cookie auth
-  // and load the membership for that user_name or user_code. This is strictly
-  // for local development and never enabled in production.
-  if (process.env.NODE_ENV !== "production" && process.env.DEV_AUTOLOGIN === "true") {
-    const devUserKey = process.env.DEV_AUTOLOGIN_USER;
-    if (devUserKey) {
+  // Optional auto-login fallback for controlled environments.
+  // Local development can use DEV_AUTOLOGIN=true with DEV_AUTOLOGIN_USER.
+  // Production can opt in separately with PROD_AUTOLOGIN=true and PROD_AUTOLOGIN_USER.
+  const autoLoginEnabled =
+    (process.env.NODE_ENV !== "production" && process.env.DEV_AUTOLOGIN === "true") ||
+    (process.env.NODE_ENV === "production" && process.env.PROD_AUTOLOGIN === "true");
+  const autoLoginUserKey =
+    process.env.NODE_ENV === "production"
+      ? process.env.PROD_AUTOLOGIN_USER || process.env.DEV_AUTOLOGIN_USER
+      : process.env.DEV_AUTOLOGIN_USER;
+
+  if (autoLoginEnabled && autoLoginUserKey) {
       // try by user_name first, then user_code
       let devMembership = null;
       try {
         const byName = await admin
           .from("company_users")
           .select("company_id, role, user_code, user_name, role_number, mobile_no, hourly_rate, created_in_project_id, user_id")
-          .eq("user_name", devUserKey)
+          .eq("user_name", autoLoginUserKey)
           .limit(1)
           .maybeSingle();
         if (byName && byName.data) devMembership = byName.data;
@@ -51,7 +56,7 @@ export async function getRequestContext(req, res) {
           const byCode = await admin
             .from("company_users")
             .select("company_id, role, user_code, user_name, role_number, mobile_no, hourly_rate, created_in_project_id, user_id")
-            .eq("user_code", devUserKey)
+            .eq("user_code", autoLoginUserKey)
             .limit(1)
             .maybeSingle();
           if (byCode && byCode.data) devMembership = byCode.data;
@@ -116,7 +121,6 @@ export async function getRequestContext(req, res) {
           }),
         };
       }
-    }
   }
 
   const { data: userData, error: userError } = await supabase.auth.getUser();
