@@ -8,7 +8,7 @@ export default function HomePage() {
     id: "dev-matthew",
     name: "Matthew",
     email: "matthew@acm.local",
-    userName: "Matthew",
+    userName: "mmcgee",
     userCode: "ACM-O-001",
     role: "owner",
     moduleAccess: { estimates: true },

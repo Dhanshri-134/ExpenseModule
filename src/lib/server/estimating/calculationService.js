@@ -135,9 +135,9 @@ export const CalculationService = {
 
   computeSubcontractor(entry = {}) {
     const amount = toNumber(entry.amount);
-    const workersComp = roundCurrency(amount * toPercent(entry.workersCompPercent));
-    const liability = roundCurrency(amount * toPercent(entry.liabilityPercent));
-    const baseSubtotal = roundCurrency(amount + workersComp + liability);
+    const combinedPercent = entry.workersCompPercent ?? entry.liabilityPercent;
+    const calculatedAmount = roundCurrency(amount * toPercent(combinedPercent));
+    const baseSubtotal = roundCurrency(amount + calculatedAmount);
     const overhead = roundCurrency(baseSubtotal * toPercent(entry.overheadPercent));
     const subtotal = roundCurrency(baseSubtotal + overhead);
     const profit = roundCurrency(subtotal * toPercent(entry.profitPercent));
@@ -146,8 +146,9 @@ export const CalculationService = {
     return {
       ...entry,
       amount,
-      workersComp,
-      liability,
+      calculatedAmount,
+      workersComp: calculatedAmount,
+      liability: 0,
       overhead,
       subtotal,
       profit,
