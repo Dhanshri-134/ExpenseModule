@@ -650,28 +650,28 @@ function computeCostLineSummary(line, defaults = {}) {
 
   (line.laborEntries ?? []).forEach((entry) => {
     const d = calculateLabor(entry);
-    laborCost += d.total || 0;
+    laborCost += d.finalTotal || d.total || 0;
     taxAmount += d.taxAmount || 0;
     overheadAmount += d.overheadAmount || 0;
     profitAmount += d.profitAmount || 0;
   });
   (line.subcontractorEntries ?? []).forEach((entry) => {
     const d = calculateSubcontractor(entry);
-    subcontractorCost += d.total || 0;
+    subcontractorCost += d.finalTotal || d.total || 0;
     taxAmount += d.taxAmount || 0;
     overheadAmount += d.overheadAmount || 0;
     profitAmount += d.profitAmount || 0;
   });
   (line.materialEntries ?? []).forEach((entry) => {
     const d = calculateMaterial(entry);
-    materialCost += d.subtotal || 0;
+    materialCost += d.finalTotal || d.total || 0;
     taxAmount += d.taxAmount || 0;
     overheadAmount += d.overheadAmount || 0;
     profitAmount += d.profitAmount || 0;
   });
   (line.equipmentEntries ?? []).forEach((entry) => {
     const d = calculateEquipment(entry);
-    equipmentCost += d.subtotal || 0;
+    equipmentCost += d.finalTotal || d.total || 0;
     taxAmount += d.taxAmount || 0;
     overheadAmount += d.overheadAmount || 0;
     profitAmount += d.profitAmount || 0;
@@ -688,7 +688,7 @@ function computeCostLineSummary(line, defaults = {}) {
   const baseCost = roundCurrency(laborCost + subcontractorCost + materialCost + equipmentCost);
   const overheadPercent = toPercent(defaults.overheadPercent);
   const profitPercent = toPercent(defaults.profitPercent);
-  const total = roundCurrency(baseCost + taxAmount + overheadAmount + profitAmount);
+  const total = roundCurrency(laborCost + subcontractorCost + materialCost + equipmentCost);
 
   return {
     laborCost,
@@ -1634,6 +1634,32 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     clientAddress: "",
   });
   const initialDetailHydratedRef = useRef(false);
+
+  useEffect(() => {
+    setCollapsedSections((current) => {
+      const next = { ...current };
+      let changed = false;
+
+      (form.costLines ?? []).forEach((line) => {
+        const defaults = {
+          [`${line.id}:costCode`]: true,
+          [`${line.id}:laborEntries`]: false,
+          [`${line.id}:subcontractorEntries`]: true,
+          [`${line.id}:materialEntries`]: true,
+          [`${line.id}:equipmentEntries`]: true,
+        };
+
+        Object.entries(defaults).forEach(([key, value]) => {
+          if (!Object.prototype.hasOwnProperty.call(next, key)) {
+            next[key] = value;
+            changed = true;
+          }
+        });
+      });
+
+      return changed ? next : current;
+    });
+  }, [form.costLines]);
 
   const clients = useMemo(() => clientsQuery.data?.clients ?? [], [clientsQuery.data?.clients]);
   const profile = useMemo(() => settingsQuery.data?.profile ?? null, [settingsQuery.data?.profile]);
@@ -2924,11 +2950,10 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                         <Fragment>
                     <div className="mb-3 flex flex-wrap items-start justify-between gap-4">
                       <div className="flex-1">
-                        <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
                           <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Cost Code</div>
                           {/* <div className="text-xs text-[color:var(--acm-muted-fg)]">Section {index + 1}</div> */}
-                        </div>
-                        {!collapsedSections[`${line.id}:costCode`] ? (
+                        {/* {!collapsedSections[`${line.id}:costCode`] ? ( */}
                           <div className="mt-2 grid gap-3 md:grid-cols-[minmax(0,140px)_minmax(280px,1fr)] md:items-center">
                             <input
                               className={sheetInputClass()}
@@ -2937,7 +2962,8 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                               onChange={(event) => updateLine(line.id, "code", event.target.value)}
                             />
                           </div>
-                        ) : null}
+                        {/* ) : null} */}
+                        </div>
                       </div>
                       <div className="flex items-center gap-3">
                         <button type="button" onClick={() => toggleSection(line.id, "costCode")} className="text-sm font-semibold text-[color:var(--acm-accent)]">

@@ -1,11 +1,11 @@
 import DashboardShell from "@/components/dashboard/DashboardShell";
-import { DASHBOARD_NAVIGATION, filterNavigationByAccess } from "@/lib/dashboard";
+import { DASHBOARD_NAVIGATION, filterNavigationForViewer } from "@/lib/dashboard";
 
 export default function ManagerShell({ companyName, viewer, title, children }) {
   return (
     <DashboardShell
       companyName={companyName}
-      navigation={filterNavigationByAccess(DASHBOARD_NAVIGATION.manager, viewer?.moduleAccess)}
+      navigation={filterNavigationForViewer(DASHBOARD_NAVIGATION.manager, viewer)}
       viewer={viewer}
       title={title}
     >

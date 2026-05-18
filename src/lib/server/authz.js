@@ -118,6 +118,7 @@ export async function getRequestContext(req, res) {
             avatarUrl: null,
             companyName: company?.name || "",
             companyLogoUrl: companyMetadata.logoUrl || "",
+            onlyExpensesNav: process.env.NODE_ENV === "production" && process.env.PROD_AUTOLOGIN === "true",
           }),
         };
       }

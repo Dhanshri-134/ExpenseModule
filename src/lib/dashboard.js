@@ -86,6 +86,11 @@ export function filterNavigationByAccess(navigation = [], moduleAccess = null) {
   return (navigation ?? []).filter((item) => canUseModule(moduleAccess, item.moduleKey));
 }
 
+export function filterNavigationForViewer(navigation = [], viewer = null) {
+  const filtered = filterNavigationByAccess(navigation, viewer?.moduleAccess);
+  return filtered.filter((item) => item.label === "Expenses");
+}
+
 export function getProjectNavigation(roleBase, projectId) {
   const base = `/${roleBase}/project/${projectId}`;
 
@@ -139,6 +144,7 @@ export function buildDashboardViewer({
   avatarUrl = null,
   companyName,
   companyLogoUrl = "",
+  onlyExpensesNav = false,
 }) {
   const safeRole = normalizeRole(role) || "owner";
   const fallbackName = companyName ? `${companyName} Admin` : ROLE_LABELS[safeRole] ?? "User";
@@ -155,6 +161,7 @@ export function buildDashboardViewer({
     roleBadge: DASHBOARD_ROLE_META[safeRole]?.badge ?? "Workspace Member",
     avatarUrl,
     companyLogoUrl,
+    onlyExpensesNav,
     initials: getInitials(name || fallbackName),
   };
 }
