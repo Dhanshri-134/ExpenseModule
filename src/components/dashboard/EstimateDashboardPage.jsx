@@ -719,13 +719,13 @@ function buildClientPreviewSummary(form) {
   const equipmentBase = roundCurrency(lineSummaries.reduce((sum, line) => sum + line.equipmentCost, 0));
   const directOverheadBase = 0;
   const taxAmount = roundCurrency(lineSummaries.reduce((sum, line) => sum + (line.taxAmount || 0), 0));
-  const baseCost = roundCurrency(lineSummaries.reduce((sum, line) => sum + line.baseCost, 0));
+  const baseCost = roundCurrency(laborBase + subcontractorBase + materialBase + equipmentBase);
   const overheadAmount = roundCurrency(lineSummaries.reduce((sum, line) => sum + (line.overheadAmount || 0), 0));
   const profitAmount = roundCurrency(lineSummaries.reduce((sum, line) => sum + (line.profitAmount || 0), 0));
   const commissionAmount = 0;
   const overheadPercent = toPercent(form.overheadPercent);
   const profitPercent = toPercent(form.profitPercent);
-  const totalBeforeCommission = roundCurrency(baseCost + taxAmount + overheadAmount + profitAmount);
+  const totalBeforeCommission = roundCurrency(lineSummaries.reduce((sum, line) => sum + (line.total || 0), 0));
   const totalPrice = totalBeforeCommission;
   const finalBid = totalPrice;
 
@@ -3276,7 +3276,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     inputMode="decimal"
                     value={targetWageDialog.straightTimePersons}
                     onChange={(event) => setTargetWageDialog((current) => ({ ...current, straightTimePersons: event.target.value }))}
-                    placeholder="1"
+                    placeholder="0"
                   />
                 </LabeledInput>
                 <LabeledInput label="ST Hours">
@@ -3285,7 +3285,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     inputMode="decimal"
                     value={targetWageDialog.straightTimeHours}
                     onChange={(event) => setTargetWageDialog((current) => ({ ...current, straightTimeHours: event.target.value }))}
-                    placeholder="8"
+                    placeholder="0"
                   />
                 </LabeledInput>
                 <LabeledInput label="ST Days">
@@ -3294,7 +3294,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     inputMode="decimal"
                     value={targetWageDialog.straightTimeDays}
                     onChange={(event) => setTargetWageDialog((current) => ({ ...current, straightTimeDays: event.target.value }))}
-                    placeholder="1"
+                    placeholder="0"
                   />
                 </LabeledInput>
               </div>
@@ -3314,7 +3314,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     inputMode="decimal"
                     value={targetWageDialog.overtimePersons}
                     onChange={(event) => setTargetWageDialog((current) => ({ ...current, overtimePersons: event.target.value }))}
-                    placeholder="1"
+                    placeholder="0"
                   />
                 </LabeledInput>
                 <LabeledInput label="OT Hours">
@@ -3323,7 +3323,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     inputMode="decimal"
                     value={targetWageDialog.overtimeHours}
                     onChange={(event) => setTargetWageDialog((current) => ({ ...current, overtimeHours: event.target.value }))}
-                    placeholder="10"
+                    placeholder="0"
                   />
                 </LabeledInput>
                 <LabeledInput label="OT Days">
@@ -3332,7 +3332,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     inputMode="decimal"
                     value={targetWageDialog.overtimeDays}
                     onChange={(event) => setTargetWageDialog((current) => ({ ...current, overtimeDays: event.target.value }))}
-                    placeholder="1"
+                    placeholder="0"
                   />
                 </LabeledInput>
               </div>
@@ -3352,7 +3352,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     inputMode="decimal"
                     value={targetWageDialog.baseWage}
                     onChange={(event) => setTargetWageDialog((current) => ({ ...current, baseWage: event.target.value }))}
-                    placeholder="30"
+                    placeholder="00"
                   />
                 </LabeledInput>
                 <LabeledInput label="Markup %">
@@ -3361,7 +3361,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     inputMode="decimal"
                     value={targetWageDialog.markupPercent}
                     onChange={(event) => setTargetWageDialog((current) => ({ ...current, markupPercent: event.target.value }))}
-                    placeholder="20"
+                    placeholder="00"
                   />
                 </LabeledInput>
               </div>
@@ -3373,7 +3373,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     inputMode="decimal"
                     value={targetWageDialog.stRatePercent}
                     onChange={(event) => setTargetWageDialog((current) => ({ ...current, stRatePercent: event.target.value }))}
-                    placeholder="155"
+                    placeholder="000"
                   />
                 </LabeledInput>
                 <LabeledInput label="OT Rate %">
@@ -3382,7 +3382,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     inputMode="decimal"
                     value={targetWageDialog.otRatePercent}
                     onChange={(event) => setTargetWageDialog((current) => ({ ...current, otRatePercent: event.target.value }))}
-                    placeholder="224"
+                    placeholder="000"
                   />
                 </LabeledInput>
               </div>
@@ -3394,7 +3394,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     inputMode="decimal"
                     value={targetWageDialog.straightTimePersons}
                     onChange={(event) => setTargetWageDialog((current) => ({ ...current, straightTimePersons: event.target.value }))}
-                    placeholder="1"
+                    placeholder="0"
                   />
                 </LabeledInput>
                 <LabeledInput label="ST Hours">
@@ -3403,7 +3403,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     inputMode="decimal"
                     value={targetWageDialog.straightTimeHours}
                     onChange={(event) => setTargetWageDialog((current) => ({ ...current, straightTimeHours: event.target.value }))}
-                    placeholder="8"
+                    placeholder="0"
                   />
                 </LabeledInput>
                 <LabeledInput label="ST Days">
@@ -3412,7 +3412,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     inputMode="decimal"
                     value={targetWageDialog.straightTimeDays}
                     onChange={(event) => setTargetWageDialog((current) => ({ ...current, straightTimeDays: event.target.value }))}
-                    placeholder="1"
+                    placeholder="0"
                   />
                 </LabeledInput>
               </div>
@@ -3424,7 +3424,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     inputMode="decimal"
                     value={targetWageDialog.overtimePersons}
                     onChange={(event) => setTargetWageDialog((current) => ({ ...current, overtimePersons: event.target.value }))}
-                    placeholder="1"
+                    placeholder="0"
                   />
                 </LabeledInput>
                 <LabeledInput label="OT Hours">
@@ -3433,7 +3433,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     inputMode="decimal"
                     value={targetWageDialog.overtimeHours}
                     onChange={(event) => setTargetWageDialog((current) => ({ ...current, overtimeHours: event.target.value }))}
-                    placeholder="10"
+                    placeholder="0"
                   />
                 </LabeledInput>
                 <LabeledInput label="OT Days">
@@ -3442,7 +3442,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                     inputMode="decimal"
                     value={targetWageDialog.overtimeDays}
                     onChange={(event) => setTargetWageDialog((current) => ({ ...current, overtimeDays: event.target.value }))}
-                    placeholder="1"
+                    placeholder="0"
                   />
                 </LabeledInput>
               </div>
