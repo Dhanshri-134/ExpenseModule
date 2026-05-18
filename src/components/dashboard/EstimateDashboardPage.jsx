@@ -640,44 +640,68 @@ function computeUiTotals(form, previewSummary) {
 }
 
 function computeCostLineSummary(line, defaults = {}) {
-  const laborBase = (line.laborEntries ?? []).reduce((sum, entry) => sum + calculateLabor(entry).finalTotal, 0);
-  const subcontractorBase = (line.subcontractorEntries ?? []).reduce((sum, entry) => sum + calculateSubcontractor(entry).finalTotal, 0);
-  const materialBase = (line.materialEntries ?? []).reduce((sum, entry) => sum + calculateMaterial(entry).finalTotal, 0);
-  const equipmentBase = (line.equipmentEntries ?? []).reduce((sum, entry) => sum + calculateEquipment(entry).finalTotal, 0);
-  const taxAmount = roundCurrency(
-    (line.laborEntries ?? []).reduce((s, e) => s + calculateLabor(e).taxAmount, 0) +
-    (line.subcontractorEntries ?? []).reduce((s, e) => s + calculateSubcontractor(e).taxAmount, 0) +
-    (line.materialEntries ?? []).reduce((s, e) => s + calculateMaterial(e).taxAmount, 0) +
-    (line.equipmentEntries ?? []).reduce((s, e) => s + calculateEquipment(e).taxAmount, 0)
-  );
-  const directOverheadCost = 0;
+  // derive per-entry values so we can sum base (pre-markup), tax, overhead and profit separately
+  let laborBase = 0;
+  let subcontractorBase = 0;
+  let materialBase = 0;
+  let equipmentBase = 0;
+  let laborOverhead = 0;
+  let subcontractorOverhead = 0;
+  let materialOverhead = 0;
+  let equipmentOverhead = 0;
+  let laborProfit = 0;
+  let subcontractorProfit = 0;
+  let materialProfit = 0;
+  let equipmentProfit = 0;
+  let taxAmount = 0;
+
+  (line.laborEntries ?? []).forEach((entry) => {
+    const d = calculateLabor(entry);
+    laborBase += (d.subtotal ?? d.total) || 0;
+    laborOverhead += d.overheadAmount || 0;
+    laborProfit += d.profitAmount || 0;
+    taxAmount += d.taxAmount || 0;
+  });
+  (line.subcontractorEntries ?? []).forEach((entry) => {
+    const d = calculateSubcontractor(entry);
+    subcontractorBase += (d.subtotal ?? d.total) || 0;
+    subcontractorOverhead += d.overheadAmount || 0;
+    subcontractorProfit += d.profitAmount || 0;
+    taxAmount += d.taxAmount || 0;
+  });
+  (line.materialEntries ?? []).forEach((entry) => {
+    const d = calculateMaterial(entry);
+    materialBase += (d.subtotal ?? d.total) || 0;
+    materialOverhead += d.overheadAmount || 0;
+    materialProfit += d.profitAmount || 0;
+    taxAmount += d.taxAmount || 0;
+  });
+  (line.equipmentEntries ?? []).forEach((entry) => {
+    const d = calculateEquipment(entry);
+    equipmentBase += (d.subtotal ?? d.total) || 0;
+    equipmentOverhead += d.overheadAmount || 0;
+    equipmentProfit += d.profitAmount || 0;
+    taxAmount += d.taxAmount || 0;
+  });
+
   const baseCost = roundCurrency(laborBase + subcontractorBase + materialBase + equipmentBase);
-  const overheadPercent = toPercent(defaults.overheadPercent);
-  const profitPercent = toPercent(defaults.profitPercent);
-  const markupOverhead = roundCurrency(baseCost * overheadPercent);
-  const profitAmount = roundCurrency((baseCost + markupOverhead) * profitPercent);
-  const commissionAmount = 0;
-  const laborCost = roundCurrency(laborBase);
-  const subcontractorCost = roundCurrency(subcontractorBase);
-  const materialCost = roundCurrency(materialBase);
-  const equipmentCost = roundCurrency(equipmentBase);
-  const overheadCost = roundCurrency(directOverheadCost);
-  const total = roundCurrency(baseCost + markupOverhead + profitAmount + commissionAmount);
+  const overheadAmount = roundCurrency(laborOverhead + subcontractorOverhead + materialOverhead + equipmentOverhead);
+  const profitAmount = roundCurrency(laborProfit + subcontractorProfit + materialProfit + equipmentProfit);
+  const total = roundCurrency(baseCost + overheadAmount + profitAmount);
 
   return {
-    laborCost,
-    subcontractorCost,
-    materialCost,
-    equipmentCost,
-    taxAmount,
-    overheadCost,
+    laborCost: roundCurrency(laborBase),
+    subcontractorCost: roundCurrency(subcontractorBase),
+    materialCost: roundCurrency(materialBase),
+    equipmentCost: roundCurrency(equipmentBase),
+    taxAmount: roundCurrency(taxAmount),
+    overheadAmount,
     baseCost,
-    overheadPercent,
-    markupOverhead,
-    profitPercent,
+    overheadPercent: toPercent(defaults.overheadPercent),
+    profitPercent: toPercent(defaults.profitPercent),
     profitAmount,
     commissionPercent: 0,
-    commissionAmount,
+    commissionAmount: 0,
     total,
     laborCount: (line.laborEntries ?? []).length + (line.subcontractorEntries ?? []).length,
     materialCount: (line.materialEntries ?? []).length,
@@ -694,8 +718,8 @@ function buildClientPreviewSummary(form) {
   const equipmentBase = roundCurrency(lineSummaries.reduce((sum, line) => sum + line.equipmentCost, 0));
   const directOverheadBase = 0;
   const baseCost = roundCurrency(lineSummaries.reduce((sum, line) => sum + line.baseCost, 0));
-  const overheadAmount = roundCurrency(lineSummaries.reduce((sum, line) => sum + line.markupOverhead, 0));
-  const profitAmount = roundCurrency(lineSummaries.reduce((sum, line) => sum + line.profitAmount, 0));
+  const overheadAmount = roundCurrency(lineSummaries.reduce((sum, line) => sum + (line.overheadAmount || 0), 0));
+  const profitAmount = roundCurrency(lineSummaries.reduce((sum, line) => sum + (line.profitAmount || 0), 0));
   const commissionAmount = 0;
   const overheadPercent = toPercent(form.overheadPercent);
   const profitPercent = toPercent(form.profitPercent);
@@ -1280,6 +1304,8 @@ const EstimateTotalsTable = memo(function EstimateTotalsTable({ previewSummary, 
             <th className="py-2">Material</th>
             <th className="py-2">Equipment</th>
             <th className="py-2">Tax</th>
+            <th className="py-2">Overhead</th>
+            <th className="py-2">Profit</th>
             <th className="py-2">Total Estimate</th>
           </tr>
         </thead>
@@ -1290,7 +1316,9 @@ const EstimateTotalsTable = memo(function EstimateTotalsTable({ previewSummary, 
             <td className="py-2">{formatCurrency(previewSummary.materialCost)}</td>
             <td className="py-2">{formatCurrency(previewSummary.equipmentCost)}</td>
             <td className="py-2">{formatCurrency(uiTotals.taxAmount)}</td>
-            <td className="py-2">{formatCurrency(previewSummary.totalPrice)}</td>
+            <td className="py-2">{formatCurrency(previewSummary.overheadAmount)}</td>
+            <td className="py-2">{formatCurrency(previewSummary.profitAmount)}</td>
+            <td className="py-2">{formatCurrency((uiTotals.grandTotal || 0) + (uiTotals.taxAmount || 0))}</td>
           </tr>
         </tbody>
       </table>
@@ -3026,12 +3054,14 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                               hideHeader={true}
                             />
                             {!costCodeShownLocal ? (
-                              <div className="grid gap-3 rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-xs text-[color:var(--acm-muted-fg)] md:grid-cols-6">
+                              <div className="grid gap-3 rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-xs text-[color:var(--acm-muted-fg)] md:grid-cols-8">
                                 <div><span className="font-semibold text-[color:var(--acm-fg)]">Labor</span><div>{formatCurrency(lineSummary.laborCost)}</div></div>
                                 <div><span className="font-semibold text-[color:var(--acm-fg)]">Subcontractor</span><div>{formatCurrency(lineSummary.subcontractorCost)}</div></div>
                                 <div><span className="font-semibold text-[color:var(--acm-fg)]">Material</span><div>{formatCurrency(lineSummary.materialCost)}</div></div>
                                 <div><span className="font-semibold text-[color:var(--acm-fg)]">Equipment</span><div>{formatCurrency(lineSummary.equipmentCost)}</div></div>
-                                {/* Bottom line removed per request */}
+                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Tax</span><div>{formatCurrency(lineSummary.taxAmount || 0)}</div></div>
+                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Overhead</span><div>{formatCurrency(lineSummary.overheadAmount || 0)}</div></div>
+                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Profit</span><div>{formatCurrency(lineSummary.profitAmount || 0)}</div></div>
                                 <div><span className="font-semibold text-[color:var(--acm-fg)]">Total</span><div>{formatCurrency(lineSummary.total)}</div></div>
                               </div>
                             ) : null}
