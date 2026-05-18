@@ -1,17 +1,30 @@
-import AppNav from "@/components/AppNav";
-import LandingHero from "@/components/LandingHero";
-import MouseMotionContainer from "@/components/MouseMotionContainer";
+import DashboardShell from "@/components/dashboard/DashboardShell";
+import EstimateDashboardPage from "@/components/dashboard/EstimateDashboardPage";
+import { ExpenseIcon } from "@/components/dashboard/icons";
+import { buildDashboardViewer } from "@/lib/dashboard";
 
 export default function HomePage() {
+  const matthew = buildDashboardViewer({
+    id: "dev-matthew",
+    name: "Matthew",
+    email: "matthew@acm.local",
+    userName: "Matthew",
+    userCode: "ACM-O-001",
+    role: "owner",
+    moduleAccess: { estimates: true },
+    companyName: "ACM",
+  });
+
+  const navigation = [
+    { href: "/owner/estimates/", label: "Estimates", icon: ExpenseIcon, match: /^\/owner\/estimates$/, moduleKey: "estimates" },
+  ];
+
   return (
-    // <MouseMotionContainer>
-      <div className="relative min-h-screen">
-        <AppNav />
-        <main className="w-full pb-16 pt-12 sm:pt-16">
-          <LandingHero />
-        </main>
-      </div>
-    // </MouseMotionContainer>
+    <div className="relative min-h-screen">
+      <DashboardShell companyName="ACM" navigation={navigation} viewer={matthew} title="Estimates">
+        <EstimateDashboardPage roleBase="owner" />
+      </DashboardShell>
+    </div>
   );
 }
 

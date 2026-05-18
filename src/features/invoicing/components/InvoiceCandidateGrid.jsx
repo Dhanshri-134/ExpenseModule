@@ -7,6 +7,7 @@ function InvoiceCandidateGridComponent({
   estimates,
   roleBase,
   router,
+  onOpenEstimate,
   selectedEstimateId,
   onSelectEstimate,
   formatDate,
@@ -44,6 +45,10 @@ function InvoiceCandidateGridComponent({
             type="button"
             onClick={(event) => {
               event.stopPropagation();
+              if (onOpenEstimate) {
+                onOpenEstimate(estimate.id);
+                return;
+              }
               router.push(`/${roleBase}/invoicing/${estimate.id}`);
             }}
             className="rounded-full border border-[color:var(--acm-border)] px-3 py-1 text-xs font-semibold text-[color:var(--acm-fg)]"

@@ -35,10 +35,12 @@ function InvoiceEditorPanelComponent({
   activeEstimate,
   form,
   standalone,
+  editorVisible,
   busyAction,
   clients,
   totalAmount,
   confirmDiscardChanges,
+  onCloseEditor,
   getInvoiceTone,
   getInvoiceLabel,
   runInvoiceAction,
@@ -52,7 +54,7 @@ function InvoiceEditorPanelComponent({
   addInvoiceEntry,
   formatCurrency,
 }) {
-  if (!standalone) return null;
+  if (!editorVisible) return null;
 
   return (
     <section className={cardClass("space-y-4 p-4")}>
@@ -66,6 +68,10 @@ function InvoiceEditorPanelComponent({
             type="button"
             onClick={() => {
               if (!confirmDiscardChanges()) return;
+              if (!standalone) {
+                onCloseEditor?.();
+                return;
+              }
               router.push(`/${roleBase}/invoicing`);
             }}
             className="acm-btn acm-btn-secondary h-10 px-4"
@@ -114,7 +120,7 @@ function InvoiceEditorPanelComponent({
                 <div className="grid gap-2">
                   <div className="grid grid-cols-[296px_1fr] items-center gap-2">
                     <input className={sheetFieldClass("text-right")} value={form.invoiceReference} onChange={(event) => updateForm("invoiceReference", event.target.value)} placeholder="Invoice reference" />
-                    <input className={sheetFieldClass("text-right w-full")} value={`#${activeEstimate.estimate_number || "-"}`} readOnly />
+                    <input className={sheetFieldClass("text-right w-full")} value={form.estimateNumber || ""} onChange={(event) => updateForm("estimateNumber", event.target.value) } placeholder="Estimate number" />
                   </div>
                   <div className="grid grid-cols-[96px_1fr] items-center gap-2">
                     <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">Created At</span>
@@ -220,9 +226,13 @@ function InvoiceEditorPanelComponent({
             </div>
           </div>
         </>
-      ) : (
+      ) : form ? (
         <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-10 text-sm text-[color:var(--acm-muted-fg)]">
           Invoice record not found.
+        </div>
+      ) : (
+        <div className="rounded-[18px] border border-dashed border-[color:var(--acm-border)] px-4 py-10 text-sm text-[color:var(--acm-muted-fg)]">
+          Loading invoice form...
         </div>
       )}
     </section>

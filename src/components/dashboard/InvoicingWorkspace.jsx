@@ -1,38 +1,15 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
-import { BusyButton } from "@/components/dashboard/DashboardUi";
-import { sendJson } from "@/lib/client/apiClient";
 import { useApiQuery, invalidateApiQuery } from "@/lib/client/apiQuery";
+import { sendJson } from "@/lib/client/apiClient";
+import { InvoiceCandidateGrid } from "@/features/invoicing/components/InvoiceCandidateGrid";
+import { InvoiceEditorPanel } from "@/features/invoicing/components/InvoiceEditorPanel";
 import { getLocalDateInputValue } from "@/shared/utils/dateTime";
-import { PanelLoadingFallback } from "@/shared/ui/feedback/PanelLoadingFallback";
-
-const InvoiceCandidateGrid = dynamic(
-  () => import("@/features/invoicing/components/InvoiceCandidateGrid").then((mod) => mod.InvoiceCandidateGrid),
-  { loading: () => <PanelLoadingFallback message="Loading invoices..." /> }
-);
-
-const InvoiceEditorPanel = dynamic(
-  () => import("@/features/invoicing/components/InvoiceEditorPanel").then((mod) => mod.InvoiceEditorPanel),
-  { loading: () => <PanelLoadingFallback message="Loading invoice workspace..." /> }
-);
-
-function cardClass(extra = "") {
-  return `rounded-[22px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.08)] ${extra}`.trim();
-}
 
 function fieldClass(extra = "") {
   return `acm-input mt-0 h-9 text-[color:var(--acm-fg)] ${extra}`.trim();
-}
-
-function areaClass(extra = "") {
-  return `acm-input mt-0 min-h-[72px] py-2 text-[color:var(--acm-fg)] ${extra}`.trim();
-}
-
-function sheetFieldClass(extra = "") {
-  return `w-full border-0 border-b border-[color:var(--acm-border)] bg-transparent px-1 py-2 text-sm text-[color:var(--acm-fg)] outline-none focus:border-[color:var(--acm-accent)] focus:ring-0 ${extra}`.trim();
 }
 
 function formatCurrency(value) {
@@ -57,8 +34,8 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim());
 }
 
-function getInvoiceAmount(estimate) {
-  return Number(estimate?.summary?.finalBid || estimate?.summary?.totalPrice || 0);
+function getInvoiceAmount(invoice) {
+  return Number(invoice?.summary?.finalBid || invoice?.summary?.totalPrice || invoice?.totalAmount || 0);
 }
 
 function getInvoiceTone(status) {
@@ -71,14 +48,6 @@ function getInvoiceLabel(status) {
   if (status === "completed") return "Completed";
   if (status === "draft") return "Draft";
   return "Not Started";
-}
-
-function getInvoiceErrorMessage(error) {
-  if (!error) return "";
-  if (error === "estimate_not_found") return "This estimate could not be found anymore.";
-  if (error === "estimate_workflow_update_failed") return "Unable to update the invoice right now.";
-  if (error === "client_create_failed") return "Unable to create the client right now.";
-  return error;
 }
 
 function matchesSearchQuery(query, ...values) {
@@ -96,73 +65,6 @@ function matchesSearchQuery(query, ...values) {
     .includes(normalizedQuery);
 }
 
-function invoiceRowsFromEstimate(estimate) {
-  const storedEntries = estimate?.summary?.documentMeta?.invoice?.entries;
-  if (Array.isArray(storedEntries) && storedEntries.length) {
-    return storedEntries.map((row, index) => ({
-      id: row.id || `row-${index + 1}`,
-      label: row.scope || `Entry ${index + 1}`,
-      amount: Number(row.total || 0),
-    }));
-  }
-
-  const costCodeRows = (estimate?.cost_codes ?? []).map((row, index) => ({
-    id: row.id || `row-${index + 1}`,
-    label: row.costCode?.name || row.costCode?.code || row.description || `Cost Code ${index + 1}`,
-    amount: Number(row.totalPrice || row.totalCost || 0),
-  }));
-
-  if (costCodeRows.length) return costCodeRows;
-
-  const lineRows = (estimate?.line_items ?? []).map((row, index) => ({
-    id: row.id || `row-${index + 1}`,
-    label: row.costCode || row.scope || row.description || `Line ${index + 1}`,
-    amount: Number(row.totalCost || row.amount || row.laborCost || 0),
-  }));
-
-  if (lineRows.length) return lineRows;
-
-  return [
-    {
-      id: "total",
-      label: estimate?.title || "Invoice",
-      amount: getInvoiceAmount(estimate),
-    },
-  ];
-}
-
-function buildInvoiceForm(estimate, company) {
-  const meta = estimate?.summary?.documentMeta || {};
-  const customer = meta.customer || {};
-  const invoiceMeta = meta.invoice || {};
-  const companyMeta = meta.company || {};
-  const today = getLocalDateInputValue();
-
-  return {
-    clientMode: estimate?.client_id ? "existing" : "new",
-    clientId: estimate?.client_id || "",
-    title: estimate?.title || "Invoice",
-    estimateDate: estimate?.estimate_date || today,
-    validUntil: meta.validUntil || estimate?.estimate_date || today,
-    customerName: customer.name || estimate?.client?.name || "",
-    customerAddress: customer.address || estimate?.client?.address || "",
-    customerEmail: customer.email || estimate?.client?.email || "",
-    customerPhone: customer.phone || estimate?.client?.contact || "",
-    companyName: companyMeta.name || company?.name || "",
-    companyAddress: companyMeta.address || company?.address || "",
-    companyEmail: companyMeta.contactEmail || company?.email || "",
-    companyPhone: companyMeta.contactPhone || company?.contact || "",
-    invoiceReference: invoiceMeta.invoiceReference || estimate?.invoice_reference || "",
-    invoiceScopeOfWork: invoiceMeta.scopeOfWork || "",
-    invoiceTotalCode: invoiceMeta.totalCode || "",
-    invoiceEntries: invoiceRowsFromEstimate(estimate).map((entry, index) => ({
-      id: entry.id || `entry-${index + 1}`,
-      scope: entry.label || "",
-      total: String(Number(entry.amount || 0)),
-    })),
-  };
-}
-
 function createInvoiceEntry(index = 1) {
   return {
     id: `entry-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
@@ -171,103 +73,211 @@ function createInvoiceEntry(index = 1) {
   };
 }
 
-function InlineMessage({ error, message }) {
+function normalizeInvoiceRecord(invoice) {
+  if (!invoice) return null;
+  return {
+    ...invoice,
+    estimate_number: invoice.invoice_number,
+    estimate_date: invoice.invoice_date,
+    invoice_status: invoice.status || "draft",
+    summary: invoice.summary || {},
+  };
+}
+
+function buildInvoiceForm(invoice, company) {
+  const meta = invoice?.summary?.documentMeta || {};
+  const customer = meta.customer || {};
+  const invoiceMeta = meta.invoice || {};
+  const companyMeta = meta.company || {};
+  const today = getLocalDateInputValue();
+  const entries = Array.isArray(invoiceMeta.entries) && invoiceMeta.entries.length ? invoiceMeta.entries : [{ id: "entry-1", scope: "", total: 0 }];
+
+  return {
+    clientMode: invoice?.client_id ? "existing" : "new",
+    clientId: invoice?.client_id || "",
+    title: invoice?.title || "Invoice",
+    estimateDate: invoice?.estimate_date || invoice?.invoice_date || today,
+    validUntil: meta.validUntil || invoice?.valid_until || invoice?.invoice_date || today,
+    customerName: customer.name || invoice?.client?.name || "",
+    customerAddress: customer.address || invoice?.client?.address || "",
+    customerEmail: customer.email || invoice?.client?.email || "",
+    customerPhone: customer.phone || invoice?.client?.contact || "",
+    companyName: companyMeta.name || company?.name || "",
+    companyAddress: companyMeta.address || company?.address || "",
+    companyEmail: companyMeta.contactEmail || company?.email || "",
+    companyPhone: companyMeta.contactPhone || company?.contact || "",
+    invoiceReference: invoiceMeta.invoiceReference || invoice?.invoice_reference || "",
+    invoiceEntries: entries.map((entry, index) => ({
+      id: entry.id || `entry-${index + 1}`,
+      scope: entry.scope || "",
+      total: String(Number(entry.total || 0)),
+    })),
+  };
+}
+
+function emptyInvoiceForm(company) {
+  const today = getLocalDateInputValue();
+  return {
+    clientMode: "existing",
+    clientId: "",
+    title: "Invoice",
+    estimateDate: today,
+    validUntil: today,
+    customerName: "",
+    customerAddress: "",
+    customerEmail: "",
+    customerPhone: "",
+    companyName: company?.name || "",
+    companyAddress: company?.address || "",
+    companyEmail: company?.email || "",
+    companyPhone: company?.contact || "",
+    invoiceReference: "",
+    invoiceEntries: [createInvoiceEntry(1)],
+  };
+}
+
+function InlineMessage({ error, message, onDismiss }) {
   if (!error && !message) return null;
   return (
-    <div className={error ? "acm-message-error" : "acm-message-success"}>
-      {error || message}
+    <div className={`${error ? "acm-message-error" : "acm-message-success"} flex items-start justify-between gap-3`}>
+      <span>{error || message}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="shrink-0 rounded-full border border-current px-2 py-0.5 text-xs font-semibold leading-none opacity-80 transition hover:opacity-100"
+        aria-label="Close message"
+      >
+        x
+      </button>
     </div>
-  );
-}
-
-function downloadInvoicePdf(estimateId) {
-  if (!estimateId) return;
-  const url = `/api/estimates?id=${estimateId}&export=pdf&document=invoice&disposition=attachment`;
-  window.open(url, "_blank", "noopener,noreferrer");
-}
-
-function LabeledInput({ label, children }) {
-  return (
-    <label className="grid gap-2">
-      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">{label}</span>
-      {children}
-    </label>
   );
 }
 
 export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "", standalone = false }) {
   const router = useRouter();
-  const estimatesQuery = useApiQuery(
-    standalone && initialEstimateId ? `/api/estimates?id=${initialEstimateId}` : "/api/estimates?compact=1"
-  );
+  const invoicesQueryKey = standalone ? (initialEstimateId ? `/api/invoices?id=${initialEstimateId}` : "") : "/api/invoices?compact=1";
+  const invoicesQuery = useApiQuery(invoicesQueryKey);
   const settingsQuery = useApiQuery("/api/settings");
   const clientsQuery = useApiQuery("/api/clients");
+
   const [form, setForm] = useState(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [dirty, setDirty] = useState(false);
-  const [selectedEstimateId, setSelectedEstimateId] = useState(initialEstimateId);
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState(initialEstimateId);
+  const [editorOpen, setEditorOpen] = useState(Boolean(standalone && initialEstimateId));
+  const [isCreatingNew, setIsCreatingNew] = useState(!initialEstimateId && standalone);
+  const [dismissedBanner, setDismissedBanner] = useState("");
+  const editorRef = useRef(null);
+  const deferredSearchQuery = useDeferredValue(searchQuery);
 
-  const rows = useMemo(() => estimatesQuery.data?.estimates || [], [estimatesQuery.data?.estimates]);
   const company = settingsQuery.data?.company || null;
   const clients = useMemo(() => clientsQuery.data?.clients || [], [clientsQuery.data?.clients]);
-
-  const invoiceCandidates = useMemo(() => {
-    if (standalone) return rows;
-    return rows.filter((estimate) => {
-      const approvalStatus = String(estimate.approval_status || estimate.approvalStatus || "");
-      const status = String(estimate.status || "");
-      return approvalStatus === "approved" || status === "approved" || estimate.invoice_status === "draft" || estimate.invoice_status === "completed";
-    });
-  }, [rows, standalone]);
-
-  const filteredInvoiceCandidates = useMemo(
-    () =>
-      invoiceCandidates.filter((estimate) =>
-        matchesSearchQuery(
-          deferredSearchQuery,
-          estimate.title,
-          estimate.estimate_number,
-          estimate.client?.name,
-          estimate.invoice_reference,
-          estimate.invoice_status,
-          estimate.summary?.finalBid,
-          estimate.summary?.totalPrice
-        )
-      ),
-    [deferredSearchQuery, invoiceCandidates]
+  const invoices = useMemo(
+    () => (invoicesQuery.data?.invoices || []).map(normalizeInvoiceRecord),
+    [invoicesQuery.data?.invoices]
   );
 
-  const activeEstimate = useMemo(() => {
-    if (standalone) return rows.find((estimate) => estimate.id === initialEstimateId) || rows[0] || null;
-    return filteredInvoiceCandidates[0] || null;
-  }, [filteredInvoiceCandidates, initialEstimateId, rows, standalone]);
+  const filteredInvoices = useMemo(
+    () =>
+      invoices.filter((invoice) =>
+        matchesSearchQuery(
+          deferredSearchQuery,
+          invoice.title,
+          invoice.invoice_reference,
+          invoice.invoice_number,
+          invoice.client?.name,
+          invoice.status,
+          invoice.summary?.finalBid,
+          invoice.summary?.totalPrice
+        )
+      ),
+    [deferredSearchQuery, invoices]
+  );
 
-  const selectedEstimate = useMemo(() => {
-    if (standalone) return activeEstimate;
-    return filteredInvoiceCandidates.find((estimate) => estimate.id === selectedEstimateId) || filteredInvoiceCandidates[0] || null;
-  }, [activeEstimate, filteredInvoiceCandidates, selectedEstimateId, standalone]);
+  const queryError = invoicesQuery.error || settingsQuery.error || clientsQuery.error || "";
+  const activeBanner = error || queryError || message || "";
+  const activeBannerKey = `${error ? "error" : queryError ? "query" : message ? "message" : "none"}:${activeBanner}`;
+  const bannerError = error || queryError;
+  const bannerMessage = error || queryError ? "" : message;
+
+  const activeInvoice = useMemo(() => {
+    if (isCreatingNew) return null;
+    if (standalone) return invoices.find((invoice) => invoice.id === initialEstimateId) || invoices[0] || null;
+    return filteredInvoices.find((invoice) => invoice.id === selectedInvoiceId) || filteredInvoices[0] || null;
+  }, [filteredInvoices, initialEstimateId, invoices, isCreatingNew, selectedInvoiceId, standalone]);
 
   useEffect(() => {
-    if (!activeEstimate || !company) return;
-    setForm(buildInvoiceForm(activeEstimate, company));
+    if (!company) return;
+    if (isCreatingNew) {
+      setForm((current) => current || emptyInvoiceForm(company));
+      return;
+    }
+    if (!activeInvoice) return;
+    setForm(buildInvoiceForm(activeInvoice, company));
     setDirty(false);
-  }, [activeEstimate, company]);
+  }, [activeInvoice, company, isCreatingNew]);
+
+  useEffect(() => {
+    if (!form || form.clientMode !== "existing" || !form.clientId || !clients.length) return;
+    const selectedClient = clients.find((item) => item.id === form.clientId);
+    if (!selectedClient) return;
+
+    const nextName = selectedClient.name || "";
+    const nextAddress = selectedClient.address || "";
+    const nextEmail = selectedClient.email || "";
+    const nextPhone = selectedClient.contact || "";
+
+    if (
+      form.customerName === nextName &&
+      form.customerAddress === nextAddress &&
+      form.customerEmail === nextEmail &&
+      form.customerPhone === nextPhone
+    ) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...(current || {}),
+      customerName: nextName,
+      customerAddress: nextAddress,
+      customerEmail: nextEmail,
+      customerPhone: nextPhone,
+    }));
+  }, [clients, form]);
 
   useEffect(() => {
     if (standalone) return;
-    if (!filteredInvoiceCandidates.length) {
-      setSelectedEstimateId("");
+    if (!filteredInvoices.length) {
+      setSelectedInvoiceId("");
       return;
     }
-    if (!selectedEstimateId || !filteredInvoiceCandidates.some((estimate) => estimate.id === selectedEstimateId)) {
-      setSelectedEstimateId(filteredInvoiceCandidates[0].id);
+    if (!selectedInvoiceId || !filteredInvoices.some((invoice) => invoice.id === selectedInvoiceId)) {
+      setSelectedInvoiceId(filteredInvoices[0].id);
     }
-  }, [filteredInvoiceCandidates, selectedEstimateId, standalone]);
+  }, [filteredInvoices, selectedInvoiceId, standalone]);
 
+  useEffect(() => {
+    if (!editorOpen) return;
+    editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [editorOpen, activeInvoice?.id, isCreatingNew]);
+
+  useEffect(() => {
+    setDismissedBanner("");
+  }, [activeBannerKey]);
+
+  useEffect(() => {
+    if (!activeBanner || dismissedBanner === activeBannerKey) return undefined;
+    const timeoutMs = bannerError ? 8000 : 4000;
+    const timeoutId = window.setTimeout(() => {
+      if (bannerError === error) setError("");
+      if (bannerMessage === message) setMessage("");
+      setDismissedBanner(activeBannerKey);
+    }, timeoutMs);
+    return () => window.clearTimeout(timeoutId);
+  }, [activeBanner, activeBannerKey, bannerError, bannerMessage, dismissedBanner, error, message]);
 
   useEffect(() => {
     if (!dirty) return undefined;
@@ -282,6 +292,12 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
   function confirmDiscardChanges() {
     if (!dirty) return true;
     return window.confirm("You have unsaved invoice changes. Discard them?");
+  }
+
+  function dismissBanner() {
+    setError("");
+    setMessage("");
+    setDismissedBanner(activeBannerKey);
   }
 
   function updateForm(key, value) {
@@ -317,24 +333,18 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
   }
 
   function handleClientModeChange(nextMode) {
-    setForm((current) => ({
-      ...(current || {}),
-      clientMode: nextMode,
-      clientId: nextMode === "existing" ? current?.clientId || "" : "",
-      ...(nextMode === "new"
-        ? {}
-        : (() => {
-            const client = clients.find((item) => item.id === current?.clientId);
-            return client
-              ? {
-                  customerName: client.name || "",
-                  customerAddress: client.address || "",
-                  customerEmail: client.email || "",
-                  customerPhone: client.contact || "",
-                }
-              : {};
-          })()),
-    }));
+    setForm((current) => {
+      const selectedClient = nextMode === "existing" ? clients.find((item) => item.id === current?.clientId) : null;
+      return {
+        ...(current || {}),
+        clientMode: nextMode,
+        clientId: nextMode === "existing" ? current?.clientId || "" : "",
+        customerName: nextMode === "existing" ? selectedClient?.name || current?.customerName || "" : current?.customerName || "",
+        customerAddress: nextMode === "existing" ? selectedClient?.address || current?.customerAddress || "" : current?.customerAddress || "",
+        customerEmail: nextMode === "existing" ? selectedClient?.email || current?.customerEmail || "" : current?.customerEmail || "",
+        customerPhone: nextMode === "existing" ? selectedClient?.contact || current?.customerPhone || "" : current?.customerPhone || "",
+      };
+    });
     setDirty(true);
   }
 
@@ -350,27 +360,6 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
       customerPhone: client?.contact || "",
     }));
     setDirty(true);
-  }
-
-  function validateInvoice() {
-    if (!activeEstimate) return "Pick an estimate first.";
-    if (!form?.title?.trim()) return "Invoice title is required.";
-    if (!form?.estimateDate) return "Invoice date is required.";
-    if (!form?.validUntil) return "Valid until date is required.";
-    if (!form?.invoiceReference?.trim()) return "Invoice reference is required.";
-    if (form.clientMode === "existing" && !form.clientId) return "Select an existing client.";
-    if (!form?.customerName?.trim()) return "Client name is required.";
-    if (!form?.customerAddress?.trim()) return "Client address is required.";
-    if (!isValidEmail(form?.customerEmail)) return "Enter a valid client email.";
-    if (!form?.customerPhone?.trim()) return "Client phone is required.";
-    if (!form?.companyName?.trim()) return "Company name is required.";
-    if (!form?.companyAddress?.trim()) return "Company address is required.";
-    if (!isValidEmail(form?.companyEmail)) return "Enter a valid company email.";
-    if (!form?.companyPhone?.trim()) return "Company phone is required.";
-    if (!(form?.invoiceEntries || []).some((entry) => String(entry.scope || "").trim() || Number(entry.total || 0))) {
-      return "Add at least one invoice entry.";
-    }
-    return "";
   }
 
   async function resolveClientId() {
@@ -390,26 +379,43 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
     return created?.client?.id || "";
   }
 
-  async function runInvoiceAction(action, successMessage) {
+  function validateInvoice() {
+    if (!form?.title?.trim()) return "Invoice title is required.";
+    if (!form?.estimateDate) return "Invoice date is required.";
+    if (!form?.validUntil) return "Valid until date is required.";
+    if (!form?.invoiceReference?.trim()) return "Invoice reference is required.";
+    if (form.clientMode === "existing" && !form.clientId) return "Select an existing client.";
+    if (!form?.customerName?.trim()) return "Client name is required.";
+    if (!form?.customerAddress?.trim()) return "Client address is required.";
+    if (!isValidEmail(form?.customerEmail)) return "Enter a valid client email.";
+    if (!form?.customerPhone?.trim()) return "Client phone is required.";
+    if (!form?.companyName?.trim()) return "Company name is required.";
+    if (!form?.companyAddress?.trim()) return "Company address is required.";
+    if (!isValidEmail(form?.companyEmail)) return "Enter a valid company email.";
+    if (!form?.companyPhone?.trim()) return "Company phone is required.";
+    if (!(form?.invoiceEntries || []).some((entry) => String(entry.scope || "").trim() || Number(entry.total || 0))) {
+      return "Add at least one invoice entry.";
+    }
+    return "";
+  }
+
+  async function runInvoiceAction(_action, successMessage) {
     const validationError = validateInvoice();
     if (validationError) {
       setError(validationError);
       return false;
     }
 
-    if (!activeEstimate || !form) return false;
-
-    setBusyAction(action);
+    setBusyAction("save_invoice");
     setError("");
     setMessage("");
     try {
       const clientId = await resolveClientId();
       const payload = {
-        estimateId: activeEstimate.id,
-        action,
+        ...(isCreatingNew ? {} : { id: activeInvoice?.id }),
         clientId: clientId || null,
         title: form.title.trim(),
-        estimateDate: form.estimateDate,
+        invoiceDate: form.estimateDate,
         validUntil: form.validUntil,
         customerName: form.customerName.trim(),
         customerAddress: form.customerAddress.trim(),
@@ -426,23 +432,30 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
         })),
       };
 
-      const json = await sendJson("/api/estimate-workflow", {
-        method: "POST",
+      const json = await sendJson("/api/invoices", {
+        method: isCreatingNew ? "POST" : "PUT",
         body: payload,
       });
 
-      invalidateApiQuery("/api/estimates?compact=1", { refetchType: "none" });
-      invalidateApiQuery("/api/estimates", { refetchType: "none" });
-      await estimatesQuery.refresh().catch(() => null);
-      const refreshedEstimate = json?.estimate || null;
-      if (refreshedEstimate) {
-        setForm(buildInvoiceForm(refreshedEstimate, company));
+      invalidateApiQuery("/api/invoices?compact=1", { refetchType: "none" });
+      invalidateApiQuery("/api/invoices", { refetchType: "none" });
+      await invoicesQuery.refresh().catch(() => null);
+      const savedInvoice = normalizeInvoiceRecord(json?.invoice || null);
+      if (savedInvoice) {
+        setSelectedInvoiceId(savedInvoice.id);
+        setForm(buildInvoiceForm(savedInvoice, company));
       }
+      setIsCreatingNew(false);
+      setEditorOpen(true);
       setDirty(false);
       setMessage(successMessage);
       return true;
     } catch (requestError) {
-      setError(getInvoiceErrorMessage(requestError.message || "invoice_action_failed"));
+      const detail =
+        typeof requestError?.payload?.detail === "string"
+          ? requestError.payload.detail
+          : requestError?.payload?.detail?.message || "";
+      setError(detail || requestError.message || "invoice_action_failed");
       return false;
     } finally {
       setBusyAction("");
@@ -450,39 +463,58 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
   }
 
   async function deleteInvoice() {
-    if (!activeEstimate) return;
-    if (!window.confirm(`Delete invoice data for "${activeEstimate.title || `Estimate #${activeEstimate.estimate_number}`}"?`)) return;
-
+    if (!activeInvoice?.id) return;
+    if (!window.confirm(`Delete invoice "${activeInvoice.title || `#${activeInvoice.estimate_number}`}"?`)) return;
     setBusyAction("delete");
     setError("");
     setMessage("");
     try {
-      await sendJson("/api/estimate-workflow", {
-        method: "POST",
-        body: {
-          estimateId: activeEstimate.id,
-          action: "delete_invoice",
-        },
+      await sendJson("/api/invoices", {
+        method: "DELETE",
+        body: { id: activeInvoice.id },
       });
-      invalidateApiQuery("/api/estimates?compact=1", { refetchType: "none" });
-      invalidateApiQuery("/api/estimates", { refetchType: "none" });
-      await estimatesQuery.refresh().catch(() => null);
+      invalidateApiQuery("/api/invoices?compact=1", { refetchType: "none" });
+      invalidateApiQuery("/api/invoices", { refetchType: "none" });
+      await invoicesQuery.refresh().catch(() => null);
+      setEditorOpen(false);
+      setIsCreatingNew(false);
       setMessage("Invoice deleted.");
-      if (!standalone) return;
-      router.push(`/${roleBase}/invoicing`);
+      if (standalone) {
+        router.push(`/${roleBase}/invoicing`);
+      }
     } catch (requestError) {
-      setError(getInvoiceErrorMessage(requestError.message || "invoice_delete_failed"));
+      setError(requestError.message || "invoice_delete_failed");
     } finally {
       setBusyAction("");
     }
   }
 
-  const invoiceRows = useMemo(() => invoiceRowsFromEstimate(activeEstimate), [activeEstimate]);
-  const totalAmount = getInvoiceAmount(activeEstimate);
+  function downloadInvoicePdf(invoiceId) {
+    if (!invoiceId) return;
+    const url = `/api/invoices?id=${invoiceId}&export=pdf&disposition=attachment`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  function openExistingInvoice(invoiceId) {
+    if (!invoiceId) return;
+    router.push(`/${roleBase}/invoicing/${invoiceId}`);
+  }
+
+  function openCreateInvoice() {
+    router.push(`/${roleBase}/invoicing/new`);
+  }
+
+  const displayInvoice = isCreatingNew
+    ? { id: "", title: form?.title || "Invoice", estimate_number: "New", invoice_status: "not_started", invoice_reference: form?.invoiceReference || "" }
+    : activeInvoice;
+
+  const totalAmount = (form?.invoiceEntries || []).reduce((sum, entry) => sum + Number(entry.total || 0), 0);
 
   return (
     <div className="space-y-4">
-      <InlineMessage error={estimatesQuery.error || settingsQuery.error || clientsQuery.error || error} message={message} />
+      {activeBanner && dismissedBanner !== activeBannerKey ? (
+        <InlineMessage error={bannerError} message={bannerMessage} onDismiss={dismissBanner} />
+      ) : null}
 
       {!standalone ? (
         <section className="grid gap-3">
@@ -491,28 +523,20 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
               className={fieldClass("flex-1")}
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search invoices by estimate, client, reference, status, or value"
+              placeholder="Search invoices by title, client, reference, status, or value"
             />
-            <button
-              type="button"
-              onClick={() => {
-                const target = selectedEstimate;
-                if (!target) return;
-                router.push(`/${roleBase}/invoicing/${target.id}`);
-              }}
-              className="acm-btn acm-btn-primary h-9 px-4"
-              disabled={!selectedEstimate}
-            >
+            <button type="button" onClick={openCreateInvoice} className="acm-btn acm-btn-primary h-9 px-4">
               Create
             </button>
           </div>
           <div className="grid gap-4 lg:grid-cols-3">
             <InvoiceCandidateGrid
-              estimates={filteredInvoiceCandidates}
+              estimates={filteredInvoices}
               roleBase={roleBase}
               router={router}
-              selectedEstimateId={selectedEstimate?.id || ""}
-              onSelectEstimate={setSelectedEstimateId}
+              onOpenEstimate={openExistingInvoice}
+              selectedEstimateId={selectedInvoiceId || ""}
+              onSelectEstimate={setSelectedInvoiceId}
               formatDate={formatDate}
               formatCurrency={formatCurrency}
               getInvoiceAmount={getInvoiceAmount}
@@ -523,29 +547,35 @@ export function InvoicingWorkspace({ roleBase = "owner", initialEstimateId = "",
         </section>
       ) : null}
 
-      <InvoiceEditorPanel
-        roleBase={roleBase}
-        router={router}
-        activeEstimate={activeEstimate}
-        form={form}
-        standalone={standalone}
-        busyAction={busyAction}
-        clients={clients}
-        totalAmount={totalAmount}
-        confirmDiscardChanges={confirmDiscardChanges}
-        getInvoiceTone={getInvoiceTone}
-        getInvoiceLabel={getInvoiceLabel}
-        runInvoiceAction={runInvoiceAction}
-        downloadInvoicePdf={downloadInvoicePdf}
-        deleteInvoice={deleteInvoice}
-        updateForm={updateForm}
-        handleClientModeChange={handleClientModeChange}
-        handleClientSelect={handleClientSelect}
-        updateInvoiceEntry={updateInvoiceEntry}
-        removeInvoiceEntry={removeInvoiceEntry}
-        addInvoiceEntry={addInvoiceEntry}
-        formatCurrency={formatCurrency}
-      />
+      {standalone ? (
+        <div ref={editorRef}>
+          <InvoiceEditorPanel
+            roleBase={roleBase}
+            router={router}
+            activeEstimate={displayInvoice}
+            form={form}
+            standalone={standalone}
+            editorVisible
+            busyAction={busyAction}
+            clients={clients}
+            totalAmount={totalAmount}
+            confirmDiscardChanges={confirmDiscardChanges}
+            onCloseEditor={() => setEditorOpen(false)}
+            getInvoiceTone={getInvoiceTone}
+            getInvoiceLabel={getInvoiceLabel}
+            runInvoiceAction={runInvoiceAction}
+            downloadInvoicePdf={downloadInvoicePdf}
+            deleteInvoice={deleteInvoice}
+            updateForm={updateForm}
+            handleClientModeChange={handleClientModeChange}
+            handleClientSelect={handleClientSelect}
+            updateInvoiceEntry={updateInvoiceEntry}
+            removeInvoiceEntry={removeInvoiceEntry}
+            addInvoiceEntry={addInvoiceEntry}
+            formatCurrency={formatCurrency}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

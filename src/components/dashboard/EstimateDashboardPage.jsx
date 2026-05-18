@@ -9,7 +9,7 @@ import Modal from "@/components/dashboard/Modal";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
 import { PhoneInput } from "@/shared/forms/PhoneInput";
 import { getLocalDateInputValue } from "@/shared/utils/dateTime";
-import { Check, ChevronDown, Trash, Trash2Icon } from "lucide-react";
+import { Check, ChevronDown, Eye, EyeOff, Trash, Trash2Icon } from "lucide-react";
 
 const BRAND_PALETTES = {
   accentColor: ["#1e3a8a", "#0f766e", "#b45309", "#7c2d12", "#334155", "#0f766e"],
@@ -749,12 +749,14 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
     commissionPercent: "0",
     documentMeta: {
       validUntil: form.validUntil,
-      customer: {
-        name: form.customerName,
-        address: form.customerAddress,
-        email: form.customerEmail,
-        phone: form.customerPhone,
-      },
+      customer: form.clientId
+        ? {
+            name: form.customerName,
+            address: form.customerAddress,
+            email: form.customerEmail,
+            phone: form.customerPhone,
+          }
+        : {},
       company: {
         name: companyDetails.name,
         address: companyDetails.address,
@@ -1354,6 +1356,7 @@ const SectionTable = memo(function SectionTable({
   datalistOptions,
   collapsed,
   onToggle,
+  hideHeader = false,
   addLabel,
   summaryColumns = [],
   context = null,
@@ -1374,13 +1377,14 @@ const SectionTable = memo(function SectionTable({
   ), [rows, sectionKey]);
   return (
     <div className="space-y-3">
-      <button type="button" onClick={onToggle} className="flex w-full items-center justify-between gap-3 py-2 text-left">
-        <div>
-          <div className="text-base font-bold text-[color:var(--acm-fg)]">{title}</div>
-          {/* <div className="text-sm text-[color:var(--acm-muted-fg)]">{rows.length} row{rows.length === 1 ? "" : "s"}</div> */}
-        </div>
-        <ChevronRightIcon className={`h-5 w-5 transition ${collapsed ? "" : "rotate-90"}`} />
-      </button>
+      {!hideHeader ? (
+        <button type="button" onClick={onToggle} className="flex w-full items-center justify-between gap-3 py-2 text-left">
+          <div>
+            <div className="text-base font-bold text-[color:var(--acm-fg)]">{title}</div>
+          </div>
+          <ChevronRightIcon className={`h-5 w-5 transition ${collapsed ? "" : "rotate-90"}`} />
+        </button>
+      ) : null}
 
       {!collapsed ? (
         <div>
@@ -1775,7 +1779,12 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
 
       if (key === "clientId") {
         const client = clients.find((item) => item.id === value);
-        if (client) {
+        if (!value) {
+          next.customerName = "";
+          next.customerAddress = "";
+          next.customerEmail = "";
+          next.customerPhone = "";
+        } else if (client) {
           next.customerName = current.customerName || client.name || "";
           next.customerAddress = current.customerAddress || client.address || "";
           next.customerEmail = current.customerEmail || client.email || "";
@@ -2033,10 +2042,49 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   }
 
   function toggleSection(lineId, sectionKey) {
-    setCollapsedSections((current) => ({
-      ...current,
-      [`${lineId}:${sectionKey}`]: !current[`${lineId}:${sectionKey}`],
-    }));
+    setCollapsedSections((current) => {
+      const next = { ...current };
+      const currentVal = Boolean(current?.[`${lineId}:${sectionKey}`]);
+
+      // Special handling for Cost Code: showing Cost Code should collapse all tabs/sections
+      if (sectionKey === "costCode") {
+        if (currentVal) {
+          // currently collapsed=true (hidden) -> show cost code: collapse others
+          next[`${lineId}:costCode`] = false;
+          ["laborEntries", "subcontractorEntries", "materialEntries", "equipmentEntries"].forEach((k) => {
+            next[`${lineId}:${k}`] = true;
+          });
+        } else {
+          // currently visible -> hide cost code and show default (Labor)
+          next[`${lineId}:costCode`] = true;
+          next[`${lineId}:laborEntries`] = false;
+          ["subcontractorEntries", "materialEntries", "equipmentEntries"].forEach((k) => {
+            next[`${lineId}:${k}`] = true;
+          });
+        }
+        return next;
+      }
+
+      // Normal toggle for section tabs: just flip the collapsed state
+      next[`${lineId}:${sectionKey}`] = !currentVal;
+      // if we're showing a tab (setting collapsed -> false), ensure costCode is hidden
+      if (!next[`${lineId}:${sectionKey}`]) {
+        next[`${lineId}:costCode`] = true;
+      }
+      return next;
+    });
+  }
+
+  function showOnlySection(lineId, sectionKey) {
+    // collapse all other sections for this line and expand the requested one
+    const keys = ["laborEntries", "subcontractorEntries", "materialEntries", "equipmentEntries", "costCode"];
+    setCollapsedSections((current) => {
+      const next = { ...current };
+      keys.forEach((k) => {
+        next[`${lineId}:${k}`] = k !== sectionKey;
+      });
+      return next;
+    });
   }
 
   function handleGridKeyDown(event) {
@@ -2591,20 +2639,27 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                       const lineSummary = computeCostLineSummary(line, form);
                       return (
                         <Fragment>
-                    <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
-                      <div className="grid flex-1 gap-3 md:grid-cols-[minmax(0,140px)_minmax(280px,1fr)] md:items-center">
-                        <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Cost Code</div>
-                        <input
-                          className={sheetInputClass()}
-                          placeholder={`Cost code ${index + 1}`}
-                          value={line.code}
-                          onChange={(event) => updateLine(line.id, "code", event.target.value)}
-                        />
+                    <div className="mb-3 flex flex-wrap items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Cost Code</div>
+                          {/* <div className="text-xs text-[color:var(--acm-muted-fg)]">Section {index + 1}</div> */}
+                        </div>
+                        {!collapsedSections[`${line.id}:costCode`] ? (
+                          <div className="mt-2 grid gap-3 md:grid-cols-[minmax(0,140px)_minmax(280px,1fr)] md:items-center">
+                            <input
+                              className={sheetInputClass()}
+                              placeholder={`Cost code ${index + 1}`}
+                              value={line.code}
+                              onChange={(event) => updateLine(line.id, "code", event.target.value)}
+                            />
+                          </div>
+                        ) : null}
                       </div>
                       <div className="flex items-center gap-3">
-                        {/* <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--acm-muted-fg)]">
-                          Section {index + 1}
-                        </div> */}
+                        <button type="button" onClick={() => toggleSection(line.id, "costCode")} className="text-sm font-semibold text-[color:var(--acm-accent)]">
+                          {collapsedSections[`${line.id}:costCode`] ? <Eye /> : <EyeOff />}
+                        </button>
                         {form.costLines.length > 1 ? (
                           <button
                             type="button"
@@ -2617,67 +2672,110 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                       </div>
                     </div>
 
+                    <div className="mb-4">
+                      <div className="flex gap-2 border-b pb-2">
+                        {[
+                          ["laborEntries", "Labor"],
+                          ["subcontractorEntries", "Subcontractor"],
+                          ["materialEntries", "Material"],
+                          ["equipmentEntries", "Equipment"],
+                        ].map(([key, label]) => {
+                          const costCodeExplicit = collapsedSections.hasOwnProperty(`${line.id}:costCode`);
+                          const costCodeShown = costCodeExplicit ? !collapsedSections[`${line.id}:costCode`] : true;
+                          const explicit = collapsedSections.hasOwnProperty(`${line.id}:${key}`);
+                          const isActive = costCodeShown ? false : explicit ? !collapsedSections[`${line.id}:${key}`] : key === "laborEntries";
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={() => showOnlySection(line.id, key)}
+                              className={`px-3 py-1 text-sm font-semibold ${isActive ? "border-b-2 border-[color:var(--acm-accent)] text-[color:var(--acm-accent)]" : "text-[color:var(--acm-muted-fg)]"}`}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
                     <div className="space-y-8">
-                      <SectionTable
-                        title="Labor"
-                        addLabel="Add Other Labor"
-                        sectionKey="laborEntries"
-                        rows={line.laborEntries ?? []}
-                        columns={laborColumns}
-                        context={{ lineId: line.id }}
-                        summaryColumns={laborSummaryColumns}
-                        onChange={(rowId, key, value) => updateEntry(line.id, "laborEntries", rowId, key, value)}
-                        onAdd={() => addEntry(line.id, "laborEntries")}
-                        onRemove={(rowId) => removeEntry(line.id, "laborEntries", rowId)}
-                        onKeyDown={handleGridKeyDown}
-                        collapsed={collapsedSections[`${line.id}:laborEntries`]}
-                        onToggle={() => toggleSection(line.id, "laborEntries")}
-                      />
+                      {(() => {
+                        const costCodeExplicitLocal = Object.prototype.hasOwnProperty.call(collapsedSections, `${line.id}:costCode`);
+                        const costCodeShownLocal = costCodeExplicitLocal ? !collapsedSections[`${line.id}:costCode`] : true;
+                        const laborCollapsed = Object.prototype.hasOwnProperty.call(collapsedSections, `${line.id}:laborEntries`) ? collapsedSections[`${line.id}:laborEntries`] : costCodeShownLocal ? true : false;
+                        const subcontractorCollapsed = Object.prototype.hasOwnProperty.call(collapsedSections, `${line.id}:subcontractorEntries`) ? collapsedSections[`${line.id}:subcontractorEntries`] : costCodeShownLocal ? true : false;
+                        const materialCollapsed = Object.prototype.hasOwnProperty.call(collapsedSections, `${line.id}:materialEntries`) ? collapsedSections[`${line.id}:materialEntries`] : costCodeShownLocal ? true : false;
+                        const equipmentCollapsed = Object.prototype.hasOwnProperty.call(collapsedSections, `${line.id}:equipmentEntries`) ? collapsedSections[`${line.id}:equipmentEntries`] : costCodeShownLocal ? true : false;
 
-                      <SectionTable
-                        title="Subcontractor"
-                        addLabel="Add Subcontractor"
-                        sectionKey="subcontractorEntries"
-                        rows={line.subcontractorEntries ?? []}
-                        columns={subcontractorColumns}
-                        summaryColumns={baseTotalSummaryColumns}
-                        onChange={(rowId, key, value) => updateEntry(line.id, "subcontractorEntries", rowId, key, value)}
-                        onAdd={() => addEntry(line.id, "subcontractorEntries")}
-                        onRemove={(rowId) => removeEntry(line.id, "subcontractorEntries", rowId)}
-                        onKeyDown={handleGridKeyDown}
-                        collapsed={collapsedSections[`${line.id}:subcontractorEntries`]}
-                        onToggle={() => toggleSection(line.id, "subcontractorEntries")}
-                      />
+                        return (
+                          <>
+                            <SectionTable
+                              title="Labor"
+                              addLabel="Add Other Labor"
+                              sectionKey="laborEntries"
+                              rows={line.laborEntries ?? []}
+                              columns={laborColumns}
+                              context={{ lineId: line.id }}
+                              summaryColumns={laborSummaryColumns}
+                              onChange={(rowId, key, value) => updateEntry(line.id, "laborEntries", rowId, key, value)}
+                              onAdd={() => addEntry(line.id, "laborEntries")}
+                              onRemove={(rowId) => removeEntry(line.id, "laborEntries", rowId)}
+                              onKeyDown={handleGridKeyDown}
+                              collapsed={laborCollapsed}
+                              onToggle={() => toggleSection(line.id, "laborEntries")}
+                              hideHeader={true}
+                            />
 
-                      <SectionTable
-                        title="Material"
-                        addLabel="Add Other Material"
-                        sectionKey="materialEntries"
-                        rows={line.materialEntries ?? []}
-                        columns={materialColumns}
-                        summaryColumns={baseTotalSummaryColumns}
-                        onChange={(rowId, key, value) => updateEntry(line.id, "materialEntries", rowId, key, value)}
-                        onAdd={() => addEntry(line.id, "materialEntries")}
-                        onRemove={(rowId) => removeEntry(line.id, "materialEntries", rowId)}
-                        onKeyDown={handleGridKeyDown}
-                        collapsed={collapsedSections[`${line.id}:materialEntries`]}
-                        onToggle={() => toggleSection(line.id, "materialEntries")}
-                      />
+                            <SectionTable
+                              title="Subcontractor"
+                              addLabel="Add Subcontractor"
+                              sectionKey="subcontractorEntries"
+                              rows={line.subcontractorEntries ?? []}
+                              columns={subcontractorColumns}
+                              summaryColumns={baseTotalSummaryColumns}
+                              onChange={(rowId, key, value) => updateEntry(line.id, "subcontractorEntries", rowId, key, value)}
+                              onAdd={() => addEntry(line.id, "subcontractorEntries")}
+                              onRemove={(rowId) => removeEntry(line.id, "subcontractorEntries", rowId)}
+                              onKeyDown={handleGridKeyDown}
+                              collapsed={subcontractorCollapsed}
+                              onToggle={() => toggleSection(line.id, "subcontractorEntries")}
+                              hideHeader={true}
+                            />
 
-                      <SectionTable
-                        title="Equipment"
-                        addLabel="Add Other Equipment"
-                        sectionKey="equipmentEntries"
-                        rows={line.equipmentEntries ?? []}
-                        columns={equipmentColumns}
-                        summaryColumns={baseTotalSummaryColumns}
-                        onChange={(rowId, key, value) => updateEntry(line.id, "equipmentEntries", rowId, key, value)}
-                        onAdd={() => addEntry(line.id, "equipmentEntries")}
-                        onRemove={(rowId) => removeEntry(line.id, "equipmentEntries", rowId)}
-                        onKeyDown={handleGridKeyDown}
-                        collapsed={collapsedSections[`${line.id}:equipmentEntries`]}
-                        onToggle={() => toggleSection(line.id, "equipmentEntries")}
-                      />
+                            <SectionTable
+                              title="Material"
+                              addLabel="Add Other Material"
+                              sectionKey="materialEntries"
+                              rows={line.materialEntries ?? []}
+                              columns={materialColumns}
+                              summaryColumns={baseTotalSummaryColumns}
+                              onChange={(rowId, key, value) => updateEntry(line.id, "materialEntries", rowId, key, value)}
+                              onAdd={() => addEntry(line.id, "materialEntries")}
+                              onRemove={(rowId) => removeEntry(line.id, "materialEntries", rowId)}
+                              onKeyDown={handleGridKeyDown}
+                              collapsed={materialCollapsed}
+                              onToggle={() => toggleSection(line.id, "materialEntries")}
+                              hideHeader={true}
+                            />
+
+                            <SectionTable
+                              title="Equipment"
+                              addLabel="Add Other Equipment"
+                              sectionKey="equipmentEntries"
+                              rows={line.equipmentEntries ?? []}
+                              columns={equipmentColumns}
+                              summaryColumns={baseTotalSummaryColumns}
+                              onChange={(rowId, key, value) => updateEntry(line.id, "equipmentEntries", rowId, key, value)}
+                              onAdd={() => addEntry(line.id, "equipmentEntries")}
+                              onRemove={(rowId) => removeEntry(line.id, "equipmentEntries", rowId)}
+                              onKeyDown={handleGridKeyDown}
+                              collapsed={equipmentCollapsed}
+                              onToggle={() => toggleSection(line.id, "equipmentEntries")}
+                              hideHeader={true}
+                            />
+                          </>
+                        );
+                      })()}
 
                       <div className="grid gap-3 rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-xs text-[color:var(--acm-muted-fg)] md:grid-cols-7">
                         <div><span className="font-semibold text-[color:var(--acm-fg)]">Labor</span><div>{formatCurrency(lineSummary.laborCost)}</div></div>
