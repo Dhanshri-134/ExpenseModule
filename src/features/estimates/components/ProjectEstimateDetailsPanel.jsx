@@ -58,8 +58,9 @@ function ProjectEstimateDetailsPanelComponent({
         <div key={line.id || `${line.costCode?.code}-${index}`} className="rounded-[18px] border border-[color:var(--acm-border)] p-4">
           <div className="text-sm font-bold text-[color:var(--acm-fg)]">{line.costCode?.name || `Cost Line ${index + 1}`}</div>
           <div className="mt-1 text-xs text-[color:var(--acm-muted-fg)]">{line.costCode?.code || "-"} | {line.costCode?.description || "-"}</div>
-          <div className="mt-3 grid gap-2 text-sm md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-3 grid gap-2 text-sm md:grid-cols-2 xl:grid-cols-5">
             <div>Labor: {formatCurrency(line.laborCost)}</div>
+            <div>Subcontractor: {formatCurrency(line.subcontractorCost)}</div>
             <div>Material: {formatCurrency(line.materialCost)}</div>
             <div>Equipment: {formatCurrency(line.equipmentCost)}</div>
             <div>Overhead: {formatCurrency(line.directOverhead)}</div>

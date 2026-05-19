@@ -6,6 +6,7 @@ export const CalculationService = {
     const stRate = toNumber(entry.stRate);
     const otHours = toNumber(entry.otHours);
     const otRate = toNumber(entry.otRate);
+    const totalDays = toNumber(entry.metadata?.straightTimeDays) + toNumber(entry.metadata?.overtimeDays);
     const stCost = roundCurrency(stHours * stRate);
     const otCost = roundCurrency(otHours * otRate);
     const baseCost = roundCurrency(stCost + otCost);
@@ -26,6 +27,8 @@ export const CalculationService = {
       otHours,
       otRate,
       otCost,
+      totalManHours: roundCurrency(stHours + otHours),
+      totalDays,
       baseCost,
       overhead,
       subtotal,
@@ -135,9 +138,10 @@ export const CalculationService = {
 
   computeSubcontractor(entry = {}) {
     const amount = toNumber(entry.amount);
-    const combinedPercent = entry.workersCompPercent ?? entry.liabilityPercent;
-    const calculatedAmount = roundCurrency(amount * toPercent(combinedPercent));
-    const baseSubtotal = roundCurrency(amount + calculatedAmount);
+    const workersCompPercent = toPercent(entry.workersCompPercent);
+    const workersComp = roundCurrency(amount * workersCompPercent);
+    const liability = 0;
+    const baseSubtotal = roundCurrency(amount + workersComp);
     const overhead = roundCurrency(baseSubtotal * toPercent(entry.overheadPercent));
     const subtotal = roundCurrency(baseSubtotal + overhead);
     const profit = roundCurrency(subtotal * toPercent(entry.profitPercent));
@@ -146,9 +150,8 @@ export const CalculationService = {
     return {
       ...entry,
       amount,
-      calculatedAmount,
-      workersComp: calculatedAmount,
-      liability: 0,
+      workersComp,
+      liability,
       overhead,
       subtotal,
       profit,

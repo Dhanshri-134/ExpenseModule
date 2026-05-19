@@ -32,6 +32,13 @@ function formatCurrency(value) {
   }).format(Number.isFinite(amount) ? amount : 0);
 }
 
+function formatNumber(value, maximumFractionDigits = 2) {
+  const amount = Number(value ?? 0);
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits,
+  }).format(Number.isFinite(amount) ? amount : 0);
+}
+
 function formatPercent(value) {
   const amount = Number(value ?? 0);
   if (!Number.isFinite(amount)) return "0%";
@@ -101,7 +108,7 @@ function createMaterialEntry() {
   return {
     id: createId("material"),
     code: "",
-    description: "",
+    item: "",
     quantity: "",
     uom: "",
     wastePercent: "",
@@ -115,13 +122,25 @@ function createEquipmentEntry() {
   return {
     id: createId("equipment"),
     code: "",
-    description: "",
+    equipmentType: "",
     quantity: "",
     rentalDays: "",
     unitRate: "",
     freight: "",
     fuelPercent: "",
     taxPercent: "",
+  };
+}
+
+function createSubcontractorEntry() {
+  return {
+    id: createId("subcontractor"),
+    classification: "",
+    amount: "",
+    workersCompPercent: "",
+    liabilityPercent: "",
+    overheadPercent: "",
+    profitPercent: "",
   };
 }
 
@@ -151,6 +170,7 @@ function createCostLine(index = 1) {
     inflationRate: "",
     escalationYears: "",
     laborEntries: [createLaborEntry()],
+    subcontractorEntries: [createSubcontractorEntry()],
     materialEntries: [createMaterialEntry()],
     equipmentEntries: [createEquipmentEntry()],
     overheadEntries: [createOverheadEntry()],
@@ -185,8 +205,22 @@ function buildLaborMeta(entry) {
   const totalRatePercent = (entry.rates ?? []).reduce((sum, rate) => sum + toNumber(rate.value), 0);
   const derivedStraightRate = toNumber(entry.stRate) || baseWage * (1 + totalRatePercent / 100);
   const derivedOvertimeRate = toNumber(entry.otRate) || derivedStraightRate * 1.5;
-  const targetPay = toNumber(entry.stHours) * toNumber(entry.targetWage);
-  const prevailPay = toNumber(entry.stHours) * toNumber(entry.prevailWage);
+  const straightTimePersons = toNumber(entry.straightTimePersons);
+  const straightTimeDays = toNumber(entry.straightTimeDays);
+  const overtimePersons = toNumber(entry.overtimePersons);
+  const overtimeDays = toNumber(entry.overtimeDays);
+  const enteredStraightHours = toNumber(entry.stHours);
+  const enteredOvertimeHours = toNumber(entry.otHours);
+  const straightTimeHours =
+    straightTimePersons > 0 && straightTimeDays > 0
+      ? straightTimePersons * enteredStraightHours * straightTimeDays
+      : enteredStraightHours;
+  const overtimeHours =
+    overtimePersons > 0 && overtimeDays > 0
+      ? overtimePersons * enteredOvertimeHours * overtimeDays
+      : enteredOvertimeHours;
+  const targetPay = straightTimeHours * toNumber(entry.targetWage);
+  const prevailPay = straightTimeHours * toNumber(entry.prevailWage);
 
   return {
     title: entry.title,
@@ -196,10 +230,16 @@ function buildLaborMeta(entry) {
       name: rate.name,
       value: toNumber(rate.value),
     })),
-    straightTimePersons: toNumber(entry.straightTimePersons),
-    straightTimeDays: toNumber(entry.straightTimeDays),
-    overtimePersons: toNumber(entry.overtimePersons),
-    overtimeDays: toNumber(entry.overtimeDays),
+    straightTimePersons,
+    straightTimeDays,
+    overtimePersons,
+    overtimeDays,
+    enteredStraightHours,
+    enteredOvertimeHours,
+    straightTimeHours,
+    overtimeHours,
+    totalManHours: straightTimeHours + overtimeHours,
+    totalDays: straightTimeDays + overtimeDays,
     targetWage: toNumber(entry.targetWage),
     prevailWage: toNumber(entry.prevailWage),
     targetPay,
@@ -238,19 +278,31 @@ function buildPayload(form) {
         return {
           id: entry.id,
           description: entry.title,
-          stHours: entry.stHours,
+          stHours: meta.straightTimeHours,
           stRate: meta.derivedStraightRate,
-          otHours: entry.otHours,
+          otHours: meta.overtimeHours,
           otRate: meta.derivedOvertimeRate,
           metadata: meta,
         };
       }),
+      subcontractorEntries: line.subcontractorEntries.map((entry) => ({
+        id: entry.id,
+        description: entry.classification,
+        amount: entry.amount,
+        workersCompPercent: entry.workersCompPercent,
+        liabilityPercent: entry.liabilityPercent,
+        overheadPercent: entry.overheadPercent,
+        profitPercent: entry.profitPercent,
+        metadata: {
+          classification: entry.classification,
+        },
+      })),
       materialEntries: line.materialEntries.map((entry) => {
         const quantity = toNumber(entry.quantity);
         const wastePercent = toNumber(entry.wastePercent);
         return {
           id: entry.id,
-          description: entry.description,
+          description: entry.item,
           quantity,
           wastePercent,
           unitRate: entry.unitRate,
@@ -258,6 +310,7 @@ function buildPayload(form) {
           taxPercent: entry.taxPercent,
           metadata: {
             code: entry.code,
+            item: entry.item,
             uom: entry.uom,
             wasteQty: quantity * toPercent(wastePercent),
           },
@@ -274,7 +327,7 @@ function buildPayload(form) {
         const fuelAmount = costWithFreight * toPercent(fuelPercent);
         return {
           id: entry.id,
-          description: entry.description,
+          description: entry.equipmentType,
           qty: quantity,
           days: rentalDays,
           rate: unitRate,
@@ -283,6 +336,7 @@ function buildPayload(form) {
           taxPercent: entry.taxPercent,
           metadata: {
             code: entry.code,
+            equipmentType: entry.equipmentType,
             fuelPercent,
             costWithFuel: costWithFreight + fuelAmount,
           },
@@ -346,9 +400,9 @@ function formFromEstimate(estimate, projectId) {
                             value: rate.value ?? "",
                           }))
                         : [createRateRow()],
-                    stHours: entry.stHours ?? "",
+                    stHours: entry.metadata?.enteredStraightHours ?? entry.stHours ?? "",
                     stRate: entry.stRate ?? "",
-                    otHours: entry.otHours ?? "",
+                    otHours: entry.metadata?.enteredOvertimeHours ?? entry.otHours ?? "",
                     otRate: entry.otRate ?? "",
                     straightTimePersons: entry.metadata?.straightTimePersons ?? "",
                     straightTimeDays: entry.metadata?.straightTimeDays ?? "",
@@ -358,12 +412,24 @@ function formFromEstimate(estimate, projectId) {
                     prevailWage: entry.metadata?.prevailWage ?? "",
                   }))
                 : [createLaborEntry()],
+            subcontractorEntries:
+              (line.subcontractorEntries ?? []).length
+                ? line.subcontractorEntries.map((entry) => ({
+                    id: entry.id || createId("subcontractor"),
+                    classification: entry.metadata?.classification || entry.description || "",
+                    amount: entry.amount ?? "",
+                    workersCompPercent: percentInput(entry.workersCompPercent ?? 0),
+                    liabilityPercent: percentInput(entry.liabilityPercent ?? 0),
+                    overheadPercent: percentInput(entry.overheadPercent ?? 0),
+                    profitPercent: percentInput(entry.profitPercent ?? 0),
+                  }))
+                : [createSubcontractorEntry()],
             materialEntries:
               (line.materialEntries ?? []).length
                 ? line.materialEntries.map((entry) => ({
                     id: entry.id || createId("material"),
                     code: entry.metadata?.code || "",
-                    description: entry.description || "",
+                    item: entry.metadata?.item || entry.description || "",
                     quantity: entry.quantity ?? "",
                     uom: entry.metadata?.uom || "",
                     wastePercent: percentInput(entry.wastePercent ?? 0),
@@ -377,7 +443,7 @@ function formFromEstimate(estimate, projectId) {
                 ? line.equipmentEntries.map((entry) => ({
                     id: entry.id || createId("equipment"),
                     code: entry.metadata?.code || "",
-                    description: entry.description || "",
+                    equipmentType: entry.metadata?.equipmentType || entry.description || "",
                     quantity: entry.qty ?? "",
                     rentalDays: entry.days ?? "",
                     unitRate: entry.rate ?? "",
@@ -468,9 +534,12 @@ const EstimateSummaryCard = memo(function EstimateSummaryCard({ summary }) {
       <div className="text-lg font-bold text-[color:var(--acm-fg)]">Estimate Summary</div>
       <div className="mt-4 space-y-2 text-sm">
         <DetailRow label="Labor" value={formatCurrency(summary.laborCost)} />
+        <DetailRow label="Subcontractor" value={formatCurrency(summary.subcontractorCost)} />
         <DetailRow label="Material" value={formatCurrency(summary.materialCost)} />
         <DetailRow label="Equipment" value={formatCurrency(summary.equipmentCost)} />
         <DetailRow label="Overhead" value={formatCurrency(summary.directOverheadCost)} />
+        <DetailRow label="Man Hours" value={formatNumber(summary.totalManHours || 0)} />
+        <DetailRow label="Total Days" value={formatNumber(summary.totalDays || 0)} />
         <DetailRow label="Base Cost" value={formatCurrency(summary.baseCost)} />
         <DetailRow label="Markup" value={`${formatPercent(percentInput(summary.overheadPercent))} / ${formatPercent(percentInput(summary.profitPercent))} / ${formatPercent(percentInput(summary.commissionPercent))}`} />
         <DetailRow label="Future Cost" value={formatCurrency(summary.futureCost || 0)} />
@@ -850,7 +919,7 @@ export function ProjectEstimatesWorkspace({ projectId, canManage = false }) {
                 <LineSection
                   key={line.id}
                   title={line.name || `Cost Line ${lineIndex + 1}`}
-                  subtitle={`${line.code || "No code"} | ${line.description || "No description yet"}`}
+                  subtitle={`${line.code || "No code"} | ${line.description || "No details yet"}`}
                   action={
                     form.costLines.length > 1 ? (
                       <button type="button" onClick={() => removeCostLine(line.id)} className="text-xs font-semibold text-rose-500">
@@ -867,7 +936,7 @@ export function ProjectEstimatesWorkspace({ projectId, canManage = false }) {
                       <LabeledField label="Code">
                         <input className={fieldClass()} value={line.code} onChange={(event) => updateCostLine(line.id, "code", event.target.value)} />
                       </LabeledField>
-                      <LabeledField label="Description">
+                      <LabeledField label="Details">
                         <input className={fieldClass()} value={line.description} onChange={(event) => updateCostLine(line.id, "description", event.target.value)} />
                       </LabeledField>
                     </div>
@@ -876,7 +945,9 @@ export function ProjectEstimatesWorkspace({ projectId, canManage = false }) {
                       <div className="space-y-4">
                         {line.laborEntries.map((entry, index) => {
                           const meta = buildLaborMeta(entry);
-                          const totalAmount = toNumber(entry.stHours) * meta.derivedStraightRate + toNumber(entry.otHours) * meta.derivedOvertimeRate;
+                          const straightTimeCost = meta.straightTimeHours * meta.derivedStraightRate;
+                          const overtimeCost = meta.overtimeHours * meta.derivedOvertimeRate;
+                          const totalAmount = straightTimeCost + overtimeCost;
                           return (
                             <div key={entry.id} className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
                               <div className="mb-3 flex items-center justify-between gap-3">
@@ -932,33 +1003,45 @@ export function ProjectEstimatesWorkspace({ projectId, canManage = false }) {
                               </div>
 
                               <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                                <LabeledField label="Straight Time Hours">
+                                <LabeledField label="ST Hrs">
                                   <input className={fieldClass()} inputMode="decimal" value={entry.stHours} onChange={(event) => updateNestedEntry(line.id, "laborEntries", entry.id, "stHours", event.target.value)} />
                                 </LabeledField>
-                                <LabeledField label="Straight Time Rate">
+                                <LabeledField label="ST Rate">
                                   <input className={fieldClass()} inputMode="decimal" value={entry.stRate || meta.derivedStraightRate} onChange={(event) => updateNestedEntry(line.id, "laborEntries", entry.id, "stRate", event.target.value)} />
                                 </LabeledField>
-                                <LabeledField label="Overtime Hours">
+                                <LabeledField label="OT Hrs">
                                   <input className={fieldClass()} inputMode="decimal" value={entry.otHours} onChange={(event) => updateNestedEntry(line.id, "laborEntries", entry.id, "otHours", event.target.value)} />
                                 </LabeledField>
-                                <LabeledField label="Overtime Rate">
+                                <LabeledField label="OT Rate">
                                   <input className={fieldClass()} inputMode="decimal" value={entry.otRate || meta.derivedOvertimeRate} onChange={(event) => updateNestedEntry(line.id, "laborEntries", entry.id, "otRate", event.target.value)} />
                                 </LabeledField>
-                                <LabeledField label="Straight Time Person Count">
+                                <LabeledField label="ST Persons">
                                   <input className={fieldClass()} inputMode="decimal" value={entry.straightTimePersons} onChange={(event) => updateNestedEntry(line.id, "laborEntries", entry.id, "straightTimePersons", event.target.value)} />
                                 </LabeledField>
-                                <LabeledField label="Straight Time Days">
+                                <LabeledField label="ST Days">
                                   <input className={fieldClass()} inputMode="decimal" value={entry.straightTimeDays} onChange={(event) => updateNestedEntry(line.id, "laborEntries", entry.id, "straightTimeDays", event.target.value)} />
                                 </LabeledField>
-                                <LabeledField label="Overtime Person Count">
+                                <LabeledField label="OT Persons">
                                   <input className={fieldClass()} inputMode="decimal" value={entry.overtimePersons} onChange={(event) => updateNestedEntry(line.id, "laborEntries", entry.id, "overtimePersons", event.target.value)} />
                                 </LabeledField>
-                                <LabeledField label="Overtime Days">
+                                <LabeledField label="OT Days">
                                   <input className={fieldClass()} inputMode="decimal" value={entry.overtimeDays} onChange={(event) => updateNestedEntry(line.id, "laborEntries", entry.id, "overtimeDays", event.target.value)} />
                                 </LabeledField>
                               </div>
 
                               <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                                <div className="rounded-[16px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm">
+                                  <div className="font-semibold text-[color:var(--acm-muted-fg)]">ST Cost</div>
+                                  <div className="mt-1 text-sm font-bold text-[color:var(--acm-fg)]">
+                                    {formatNumber(meta.straightTimePersons)} x {formatNumber(meta.enteredStraightHours)} x {formatNumber(meta.straightTimeDays)} = {formatCurrency(straightTimeCost)}
+                                  </div>
+                                </div>
+                                <div className="rounded-[16px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm">
+                                  <div className="font-semibold text-[color:var(--acm-muted-fg)]">OT Cost</div>
+                                  <div className="mt-1 text-sm font-bold text-[color:var(--acm-fg)]">
+                                    {formatNumber(meta.overtimePersons)} x {formatNumber(meta.enteredOvertimeHours)} x {formatNumber(meta.overtimeDays)} = {formatCurrency(overtimeCost)}
+                                  </div>
+                                </div>
                                 <div className="rounded-[16px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm">
                                   <div className="font-semibold text-[color:var(--acm-muted-fg)]">Total Amount</div>
                                   <div className="mt-1 text-lg font-bold text-[color:var(--acm-fg)]">{formatCurrency(totalAmount)}</div>
@@ -972,8 +1055,8 @@ export function ProjectEstimatesWorkspace({ projectId, canManage = false }) {
                                   <div className="mt-1 text-lg font-bold text-[color:var(--acm-fg)]">{formatCurrency(meta.prevailPay)}</div>
                                 </div>
                                 <div className="rounded-[16px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm">
-                                  <div className="font-semibold text-[color:var(--acm-muted-fg)]">Derived ST / OT</div>
-                                  <div className="mt-1 text-sm font-bold text-[color:var(--acm-fg)]">{formatCurrency(meta.derivedStraightRate)} / {formatCurrency(meta.derivedOvertimeRate)}</div>
+                                  <div className="font-semibold text-[color:var(--acm-muted-fg)]">Total Man Hours / Days</div>
+                                  <div className="mt-1 text-sm font-bold text-[color:var(--acm-fg)]">{formatNumber(meta.totalManHours)} / {formatNumber(meta.totalDays)}</div>
                                 </div>
                               </div>
                             </div>
@@ -982,6 +1065,63 @@ export function ProjectEstimatesWorkspace({ projectId, canManage = false }) {
                       </div>
                       <button type="button" onClick={() => addNestedEntry(line.id, "laborEntries", createLaborEntry)} className="acm-btn acm-btn-secondary h-10 px-4">
                         Add Other Labor
+                      </button>
+                    </LineSection>
+
+                    <LineSection title="Subcontractor" subtitle="Classification, base amount, burden, markup, and total">
+                      <div className="space-y-4">
+                        {line.subcontractorEntries.map((entry, index) => {
+                          const amount = toNumber(entry.amount);
+                          const workersCompAmount = amount * toPercent(entry.workersCompPercent);
+                          const liabilityAmount = amount * toPercent(entry.liabilityPercent);
+                          const subtotal = amount + workersCompAmount + liabilityAmount;
+                          const overheadAmount = subtotal * toPercent(entry.overheadPercent);
+                          const profitAmount = (subtotal + overheadAmount) * toPercent(entry.profitPercent);
+                          const total = subtotal + overheadAmount + profitAmount;
+
+                          return (
+                            <div key={entry.id} className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-4">
+                              <div className="mb-3 flex items-center justify-between gap-3">
+                                <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Subcontractor Line {index + 1}</div>
+                                {line.subcontractorEntries.length > 1 ? (
+                                  <button type="button" onClick={() => removeNestedEntry(line.id, "subcontractorEntries", entry.id)} className="text-xs font-semibold text-rose-500">
+                                    Remove
+                                  </button>
+                                ) : null}
+                              </div>
+                              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                <LabeledField label="Classification">
+                                  <input className={fieldClass()} value={entry.classification} onChange={(event) => updateNestedEntry(line.id, "subcontractorEntries", entry.id, "classification", event.target.value)} />
+                                </LabeledField>
+                                <LabeledField label="Amount ($)">
+                                  <input className={fieldClass()} inputMode="decimal" value={entry.amount} onChange={(event) => updateNestedEntry(line.id, "subcontractorEntries", entry.id, "amount", event.target.value)} />
+                                </LabeledField>
+                                <LabeledField label="WC (%)">
+                                  <input className={fieldClass()} inputMode="decimal" value={entry.workersCompPercent} onChange={(event) => updateNestedEntry(line.id, "subcontractorEntries", entry.id, "workersCompPercent", event.target.value)} />
+                                </LabeledField>
+                                <LabeledField label="GL (%)">
+                                  <input className={fieldClass()} inputMode="decimal" value={entry.liabilityPercent} onChange={(event) => updateNestedEntry(line.id, "subcontractorEntries", entry.id, "liabilityPercent", event.target.value)} />
+                                </LabeledField>
+                                <LabeledField label="Overhead (%)">
+                                  <input className={fieldClass()} inputMode="decimal" value={entry.overheadPercent} onChange={(event) => updateNestedEntry(line.id, "subcontractorEntries", entry.id, "overheadPercent", event.target.value)} />
+                                </LabeledField>
+                                <LabeledField label="Profit (%)">
+                                  <input className={fieldClass()} inputMode="decimal" value={entry.profitPercent} onChange={(event) => updateNestedEntry(line.id, "subcontractorEntries", entry.id, "profitPercent", event.target.value)} />
+                                </LabeledField>
+                              </div>
+                              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                                <div className="rounded-[16px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm"><div className="font-semibold text-[color:var(--acm-muted-fg)]">WC Amt</div><div className="mt-1 font-bold">{formatCurrency(workersCompAmount)}</div></div>
+                                <div className="rounded-[16px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm"><div className="font-semibold text-[color:var(--acm-muted-fg)]">GL Amt</div><div className="mt-1 font-bold">{formatCurrency(liabilityAmount)}</div></div>
+                                <div className="rounded-[16px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm"><div className="font-semibold text-[color:var(--acm-muted-fg)]">Subtotal</div><div className="mt-1 font-bold">{formatCurrency(subtotal)}</div></div>
+                                <div className="rounded-[16px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm"><div className="font-semibold text-[color:var(--acm-muted-fg)]">Markup</div><div className="mt-1 font-bold">{formatCurrency(overheadAmount + profitAmount)}</div></div>
+                                <div className="rounded-[16px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm"><div className="font-semibold text-[color:var(--acm-muted-fg)]">Total</div><div className="mt-1 font-bold">{formatCurrency(total)}</div></div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <button type="button" onClick={() => addNestedEntry(line.id, "subcontractorEntries", createSubcontractorEntry)} className="acm-btn acm-btn-secondary h-10 px-4">
+                        Add Subcontractor
                       </button>
                     </LineSection>
 
@@ -1013,8 +1153,8 @@ export function ProjectEstimatesWorkspace({ projectId, canManage = false }) {
                                 <LabeledField label="Code">
                                   <input className={fieldClass()} value={entry.code} onChange={(event) => updateNestedEntry(line.id, "materialEntries", entry.id, "code", event.target.value)} />
                                 </LabeledField>
-                                <LabeledField label="Description">
-                                  <input className={fieldClass()} value={entry.description} onChange={(event) => updateNestedEntry(line.id, "materialEntries", entry.id, "description", event.target.value)} />
+                                <LabeledField label="Item">
+                                  <input className={fieldClass()} value={entry.item} onChange={(event) => updateNestedEntry(line.id, "materialEntries", entry.id, "item", event.target.value)} />
                                 </LabeledField>
                                 <LabeledField label="Quantity">
                                   <input className={fieldClass()} inputMode="decimal" value={entry.quantity} onChange={(event) => updateNestedEntry(line.id, "materialEntries", entry.id, "quantity", event.target.value)} />
@@ -1079,8 +1219,8 @@ export function ProjectEstimatesWorkspace({ projectId, canManage = false }) {
                                 <LabeledField label="Code">
                                   <input className={fieldClass()} value={entry.code} onChange={(event) => updateNestedEntry(line.id, "equipmentEntries", entry.id, "code", event.target.value)} />
                                 </LabeledField>
-                                <LabeledField label="Description">
-                                  <input className={fieldClass()} value={entry.description} onChange={(event) => updateNestedEntry(line.id, "equipmentEntries", entry.id, "description", event.target.value)} />
+                                <LabeledField label="Equipment Type">
+                                  <input className={fieldClass()} value={entry.equipmentType} onChange={(event) => updateNestedEntry(line.id, "equipmentEntries", entry.id, "equipmentType", event.target.value)} />
                                 </LabeledField>
                                 <LabeledField label="Quantity">
                                   <input className={fieldClass()} inputMode="decimal" value={entry.quantity} onChange={(event) => updateNestedEntry(line.id, "equipmentEntries", entry.id, "quantity", event.target.value)} />

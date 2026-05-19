@@ -63,6 +63,8 @@ export function EstimateCostLinePage({ roleBase = "owner", estimateId, costLineI
   );
 
   const company = settingsQuery.data?.company || null;
+  const paymentSchedule = estimate?.summary?.documentMeta?.paymentSchedule || null;
+  const estimateNotes = estimate?.summary?.documentMeta?.notes || estimate?.notes || "";
 
   return (
     <div className="space-y-6">
@@ -98,6 +100,27 @@ export function EstimateCostLinePage({ roleBase = "owner", estimateId, costLineI
             <div className={cardClass()}><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">Overhead</div><div className="mt-2 text-2xl font-bold">{formatCurrency(costLine.directOverhead)}</div></div>
             <div className={cardClass()}><div className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">Total</div><div className="mt-2 text-2xl font-bold">{formatCurrency(costLine.totalCost)}</div></div>
           </section>
+
+          {paymentSchedule?.enabled && (paymentSchedule.entries ?? []).length ? (
+            <section className={cardClass()}>
+              <div className="mb-4 text-lg font-bold text-[color:var(--acm-fg)]">Payment Schedule</div>
+              <div className="space-y-2">
+                {(paymentSchedule.entries ?? []).map((entry, index) => (
+                  <div key={entry.id || index} className="flex items-center justify-between gap-4 text-sm text-[color:var(--acm-fg)]">
+                    <div>{entry.name || `Payment ${index + 1}`}</div>
+                    <div className="font-semibold">{formatCurrency(entry.actualAmount ?? entry.amount ?? 0)}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {estimateNotes ? (
+            <section className={cardClass()}>
+              <div className="mb-4 text-lg font-bold text-[color:var(--acm-fg)]">Notes</div>
+              <div className="whitespace-pre-wrap text-sm text-[color:var(--acm-fg)]">{estimateNotes}</div>
+            </section>
+          ) : null}
 
           <DataTable
             title="Labor"

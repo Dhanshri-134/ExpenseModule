@@ -30,6 +30,12 @@ function sheetSelectClass(extra = "") {
   return `w-full appearance-none rounded-[18px] border border-[color:var(--acm-border)] bg-[linear-gradient(180deg,#ffffff,rgba(248,250,252,0.94))] px-4 py-3 pr-11 text-sm font-medium text-[color:var(--acm-fg)] shadow-[0_10px_26px_rgba(15,23,42,0.05)] outline-none transition focus:border-[color:var(--acm-accent)] focus:ring-2 focus:ring-[color:var(--acm-accent-soft)] ${extra}`.trim();
 }
 
+function autoResizeTextarea(target) {
+  if (!target) return;
+  target.style.height = "auto";
+  target.style.height = `${target.scrollHeight}px`;
+}
+
 function statusTone(status) {
   switch (status) {
     case "approved":
@@ -232,6 +238,14 @@ function createOverheadEntry() {
   };
 }
 
+function createPaymentScheduleEntry() {
+  return {
+    id: createId("payment-schedule"),
+    name: "",
+    amount: "",
+  };
+}
+
 function createCostLine(index = 1) {
   return {
     id: createId("cost-line"),
@@ -376,6 +390,10 @@ function emptyEstimateForm(clientId = "", templateId = "") {
     discountValue: "0",
     shippingCharge: "0",
     additionalCharges: "0",
+    paymentScheduleEnabled: false,
+    paymentScheduleType: "percent",
+    paymentScheduleNotes: "",
+    paymentScheduleEntries: [createPaymentScheduleEntry()],
     signatureLabel: "By",
     costLines: [createCostLine(1)],
   };
@@ -397,8 +415,10 @@ function calculateLabor(entry) {
   const stRate = roundToCents(tradeWage + (tradeWage * markupPercent) / 100);
   const otRate = roundToCents(stRate * 1.5);
   const crewHourlyRate = roundToCents(stRate * persons);
-  const stHours = roundToCents(persons * stHoursInput);
-  const otHours = otHoursInput > 0 ? roundToCents(otPersons * otHoursInput) : 0;
+  const stDays = Math.max(roundToCents(entry.straightTimeDays), 0);
+  const otDays = Math.max(roundToCents(entry.overtimeDays), 0);
+  const stHours = roundToCents(persons * stHoursInput * stDays);
+  const otHours = otHoursInput > 0 ? roundToCents(otPersons * otHoursInput * otDays) : 0;
   const stAmount = roundToCents(stHours * stRate);
   const otAmount = otHours > 0 ? roundToCents(otHours * otRate) : 0;
   const totalAmount = roundToCents(stAmount + otAmount);
@@ -419,6 +439,7 @@ function calculateLabor(entry) {
     crewHourlyRate,
     stAmount,
     otAmount,
+    totalDays: roundToCents(stDays + otDays),
     taxAmount: 0,
   };
 }
@@ -653,6 +674,38 @@ function computeUiTotals(form, previewSummary) {
   };
 }
 
+function buildPaymentScheduleSummary(form, uiTotals) {
+  const grandTotal = Math.max(toNumber(uiTotals?.grandTotal), 0);
+  const scheduleType = form.paymentScheduleType === "dollar" ? "dollar" : "percent";
+  const entries = (form.paymentScheduleEntries ?? [])
+    .map((entry) => {
+      const rawAmount = Math.max(toNumber(entry.amount), 0);
+      const actualAmount = scheduleType === "percent" ? roundToCents((grandTotal * rawAmount) / 100) : roundToCents(rawAmount);
+      const percent = grandTotal > 0 ? roundToCents((actualAmount / grandTotal) * 100) : 0;
+      return {
+        id: entry.id,
+        name: String(entry.name || "").trim(),
+        rawAmount,
+        actualAmount,
+        percent,
+      };
+    })
+    .filter((entry) => entry.name || entry.rawAmount > 0);
+
+  const scheduledAmount = roundToCents(entries.reduce((sum, entry) => sum + entry.actualAmount, 0));
+  const remainingAmount = roundToCents(Math.max(grandTotal - scheduledAmount, 0));
+  const remainingPercent = grandTotal > 0 ? roundToCents((remainingAmount / grandTotal) * 100) : 0;
+
+  return {
+    enabled: Boolean(form.paymentScheduleEnabled),
+    type: scheduleType,
+    entries,
+    scheduledAmount,
+    remainingAmount,
+    remainingPercent,
+  };
+}
+
 function computeCostLineSummary(line, defaults = {}) {
   let laborCost = 0;
   let subcontractorCost = 0;
@@ -661,6 +714,8 @@ function computeCostLineSummary(line, defaults = {}) {
   let taxAmount = 0;
   let overheadAmount = 0;
   let profitAmount = 0;
+  let totalManHours = 0;
+  let totalDays = 0;
 
   (line.laborEntries ?? []).forEach((entry) => {
     const d = calculateLabor(entry);
@@ -668,6 +723,8 @@ function computeCostLineSummary(line, defaults = {}) {
     taxAmount += d.taxAmount || 0;
     overheadAmount += d.overheadAmount || 0;
     profitAmount += d.profitAmount || 0;
+    totalManHours += (d.stHours || 0) + (d.otHours || 0);
+    totalDays += d.totalDays || 0;
   });
   (line.subcontractorEntries ?? []).forEach((entry) => {
     const d = calculateSubcontractor(entry);
@@ -717,6 +774,8 @@ function computeCostLineSummary(line, defaults = {}) {
     profitAmount,
     commissionPercent: 0,
     commissionAmount: 0,
+    totalManHours: roundCurrency(totalManHours),
+    totalDays: roundCurrency(totalDays),
     total,
     laborCount: (line.laborEntries ?? []).length + (line.subcontractorEntries ?? []).length,
     materialCount: (line.materialEntries ?? []).length,
@@ -740,6 +799,8 @@ function buildClientPreviewSummary(form) {
   const overheadPercent = toPercent(form.overheadPercent);
   const profitPercent = toPercent(form.profitPercent);
   const totalBeforeCommission = roundCurrency(lineSummaries.reduce((sum, line) => sum + (line.total || 0), 0));
+  const totalManHours = roundCurrency(lineSummaries.reduce((sum, line) => sum + (line.totalManHours || 0), 0));
+  const totalDays = roundCurrency(lineSummaries.reduce((sum, line) => sum + (line.totalDays || 0), 0));
   const totalPrice = totalBeforeCommission;
   const finalBid = totalPrice;
 
@@ -758,6 +819,8 @@ function buildClientPreviewSummary(form) {
     profitAmount,
     commissionPercent: 0,
     commissionAmount,
+    totalManHours,
+    totalDays,
     totalPrice,
     finalBid,
   };
@@ -765,6 +828,7 @@ function buildClientPreviewSummary(form) {
 
 function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
   const totals = computeUiTotals(form, previewSummary);
+  const paymentSchedule = buildPaymentScheduleSummary(form, totals);
   const formSnapshot = {
     estimateNumber: form.estimateNumber,
     estimateDate: form.estimateDate,
@@ -782,6 +846,10 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
     discountValue: form.discountValue,
     shippingCharge: form.shippingCharge,
     additionalCharges: form.additionalCharges,
+    paymentScheduleEnabled: form.paymentScheduleEnabled,
+    paymentScheduleType: form.paymentScheduleType,
+    paymentScheduleNotes: form.paymentScheduleNotes,
+    paymentScheduleEntries: form.paymentScheduleEntries ?? [],
     signatureLabel: form.signatureLabel,
     overheadPercent: form.overheadPercent,
     profitPercent: form.profitPercent,
@@ -838,6 +906,8 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
       discountValue: form.discountValue,
       shippingCharge: form.shippingCharge,
       additionalCharges: form.additionalCharges,
+      paymentSchedule,
+      paymentScheduleNotes: form.paymentScheduleNotes,
       totals,
       formSnapshot,
     },
@@ -1000,6 +1070,17 @@ function mapEstimateToForm(estimate, templates) {
     discountValue: String(formSnapshot.discountValue ?? meta.discountValue ?? 0),
     shippingCharge: String(formSnapshot.shippingCharge ?? meta.shippingCharge ?? 0),
     additionalCharges: String(formSnapshot.additionalCharges ?? meta.additionalCharges ?? 0),
+    paymentScheduleEnabled: Boolean(formSnapshot.paymentScheduleEnabled ?? meta.paymentSchedule?.enabled ?? false),
+    paymentScheduleType: formSnapshot.paymentScheduleType || meta.paymentSchedule?.type || "percent",
+    paymentScheduleNotes: formSnapshot.paymentScheduleNotes || meta.paymentScheduleNotes || "",
+    paymentScheduleEntries:
+      Array.isArray(formSnapshot.paymentScheduleEntries) && formSnapshot.paymentScheduleEntries.length
+        ? formSnapshot.paymentScheduleEntries.map((entry) => ({
+            id: entry.id || createId("payment-schedule"),
+            name: String(entry.name || "").trim(),
+            amount: String(entry.amount ?? ""),
+          }))
+        : [createPaymentScheduleEntry()],
     signatureLabel: formSnapshot.signatureLabel || meta.signatureLabel || "Accepted By",
     overheadPercent: String(overheadPercent),
     profitPercent: String(profitPercent),
@@ -1020,6 +1101,22 @@ function LabeledInput({ label, children }) {
     <label className="grid gap-2">
       <span className="text-sm font-semibold text-[color:var(--acm-muted-fg)]">{label}</span>
       {children}
+    </label>
+  );
+}
+
+function FloatingField({ label, value, children }) {
+  const active = String(value ?? "").trim() !== "";
+  return (
+    <label className="relative block">
+      {children}
+      <span
+        className={`pointer-events-none absolute left-3 bg-white px-1 text-[color:var(--acm-muted-fg)] transition-all duration-150 ${
+          active ? "top-0 -translate-y-1/2 text-xs" : "top-1/2 -translate-y-1/2 text-sm"
+        }`}
+      >
+        {label}
+      </span>
     </label>
   );
 }
@@ -1312,7 +1409,7 @@ const EstimateRecordsPanel = memo(function EstimateRecordsPanel({
 
 const EstimateTotalsTable = memo(function EstimateTotalsTable({ previewSummary, uiTotals }) {
   return (
-    <div className="overflow-x-auto">
+    <div className="space-y-3 overflow-x-auto">
       <table className="min-w-full">
         <thead>
           <tr className="text-left text-xs uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
@@ -1323,6 +1420,8 @@ const EstimateTotalsTable = memo(function EstimateTotalsTable({ previewSummary, 
             <th className="py-2">Tax</th>
             <th className="py-2">Overhead</th>
             <th className="py-2">Profit</th>
+            <th className="py-2">Man Hours</th>
+            <th className="py-2">Total Days</th>
             <th className="py-2">Total Estimate</th>
           </tr>
         </thead>
@@ -1335,6 +1434,8 @@ const EstimateTotalsTable = memo(function EstimateTotalsTable({ previewSummary, 
             <td className="py-2">{formatCurrency(uiTotals.taxAmount)}</td>
             <td className="py-2">{formatCurrency(previewSummary.overheadAmount)}</td>
             <td className="py-2">{formatCurrency(previewSummary.profitAmount)}</td>
+            <td className="py-2">{formatDecimalInput(previewSummary.totalManHours || 0)}</td>
+            <td className="py-2">{formatDecimalInput(previewSummary.totalDays || 0)}</td>
             <td className="py-2">{formatCurrency(uiTotals.grandTotal || 0)}</td>
           </tr>
         </tbody>
@@ -1514,19 +1615,7 @@ function TargetWageTrigger({ value, onClick }) {
 }
 
 function buildVisibleColumns(columns) {
-  const visible = [];
-  for (let index = 0; index < columns.length; index += 1) {
-    const column = columns[index];
-    const nextColumn = columns[index + 1];
-    if (column.key === "description" && visible.at(-1)?.key === "code") continue;
-    if (column.key === "code" && nextColumn?.key === "description") {
-      visible.push({ ...column, width: nextColumn.width || column.width, pairedDescriptionColumn: nextColumn });
-      index += 1;
-      continue;
-    }
-    visible.push(column);
-  }
-  return visible;
+  return columns;
 }
 
 const SectionTable = memo(function SectionTable({
@@ -1548,8 +1637,7 @@ const SectionTable = memo(function SectionTable({
   context = null,
 }) {
   const visibleColumns = useMemo(() => buildVisibleColumns(columns), [columns]);
-  const stackedDetailColumn = visibleColumns.find((column) => column.type === "textarea");
-  const tableColumns = stackedDetailColumn ? visibleColumns.filter((column) => column.key !== stackedDetailColumn.key) : visibleColumns;
+  const tableColumns = visibleColumns;
   const derivedRows = useMemo(() => rows.map((row) =>
     sectionKey === "laborEntries"
       ? calculateLabor(row)
@@ -1601,7 +1689,6 @@ const SectionTable = memo(function SectionTable({
               <tbody data-grid-scope={sectionKey}>
                 {rows.map((row, index) => {
                   const derived = derivedRows[index];
-                  const detailColSpan = tableColumns.length + summaryColumns.length + 1;
                   return (
                     <Fragment key={row.id}>
                       <tr className="border-t border-[color:var(--acm-border)] align-top">
@@ -1669,25 +1756,6 @@ const SectionTable = memo(function SectionTable({
                           )}
                         </td>
                       </tr>
-                      {stackedDetailColumn ? (
-                        <tr className="border-b border-[color:var(--acm-border)]">
-  <td colSpan={detailColSpan} className="px-2 py-1">
-    <TableCellInput
-      value={row[stackedDetailColumn.key]}
-      list={
-        stackedDetailColumn.listId ||
-        (stackedDetailColumn.list ? datalistId : undefined)
-      }
-      type={stackedDetailColumn.type || "text"}
-      placeholder={stackedDetailColumn.placeholder}
-      onChange={(event) =>
-        onChange(row.id, stackedDetailColumn.key, event.target.value)
-      }
-      onKeyDown={onKeyDown}
-    />
-  </td>
-</tr>
-                      ) : null}
                     </Fragment>
                   );
                 })}
@@ -1739,6 +1807,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const [statusDraft, setStatusDraft] = useState("draft");
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
+  const [paymentScheduleDialogOpen, setPaymentScheduleDialogOpen] = useState(false);
   const [targetWageDialog, setTargetWageDialog] = useState({
     open: false,
     field: "targetWage",
@@ -1860,6 +1929,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const previewSummary = useMemo(() => buildClientPreviewSummary(form), [form]);
   const payload = useMemo(() => buildPayload(form, selectedTemplate, previewSummary, companyDetails), [companyDetails, form, previewSummary, selectedTemplate]);
   const uiTotals = useMemo(() => computeUiTotals(form, previewSummary), [form, previewSummary]);
+  const paymentScheduleSummary = useMemo(() => buildPaymentScheduleSummary(form, uiTotals), [form, uiTotals]);
   const detailMode = Boolean(initialEstimateId && selectedCostLineId);
   const activeLineIndex = useMemo(() => form.costLines.findIndex((line) => line.id === selectedCostLineId), [form.costLines, selectedCostLineId]);
   const activeCostLine = activeLineIndex >= 0 ? form.costLines[activeLineIndex] : null;
@@ -2357,6 +2427,36 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     setDirtyState();
   }
 
+
+  function updatePaymentScheduleEntry(entryId, key, value) {
+    setForm((current) => ({
+      ...current,
+      paymentScheduleEntries: (current.paymentScheduleEntries ?? []).map((entry) =>
+        entry.id === entryId ? { ...entry, [key]: value } : entry
+      ),
+    }));
+    setDirtyState();
+  }
+
+  function addPaymentScheduleEntry() {
+    setForm((current) => ({
+      ...current,
+      paymentScheduleEntries: [...(current.paymentScheduleEntries ?? []), createPaymentScheduleEntry()],
+    }));
+    setDirtyState();
+  }
+
+  function removePaymentScheduleEntry(entryId) {
+    setForm((current) => {
+      const nextEntries = (current.paymentScheduleEntries ?? []).filter((entry) => entry.id !== entryId);
+      return {
+        ...current,
+        paymentScheduleEntries: nextEntries.length ? nextEntries : [createPaymentScheduleEntry()],
+      };
+    });
+    setDirtyState();
+  }
+
   function toggleSection(lineId, sectionKey) {
     setCollapsedSections((current) => {
       const next = { ...current };
@@ -2781,7 +2881,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   }, [payload, templates, validateEstimate, estimateListQuery, standalone, form.costLines, form.id, selectedCostLineId]);
 
   const laborColumns = [
-    { key: "description", placeholder: "Scope of work", type: "textarea" },
+    // { key: "description", placeholder: "Scope of work", type: "textarea" },
     { key: "classification", label: "Classification", placeholder: "Classification", width: "w-40" },
     {
       key: "targetWage",
@@ -2802,7 +2902,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
         <input
           readOnly
           value={formatCurrency(derived?.stRate ?? 0)}
-          className={sheetInputClass("w-full text-right bg-[color:var(--acm-surface-2)] text-[color:var(--acm-fg)]")}
+          className={"w-full  border-0 text-[color:var(--acm-fg)] px-2 py-2 text-sm font-semibold"}
         />
       ),
       width: "w-32"
@@ -2814,7 +2914,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
         <input
           readOnly
           value={formatCurrency(derived?.otRate ?? 0)}
-          className={sheetInputClass("w-full text-right bg-[color:var(--acm-surface-2)] text-[color:var(--acm-fg)]")}
+          className={"w-full  border-0 text-[color:var(--acm-fg)] px-2 py-2 text-sm font-semibold"}
         />
       ),
       width: "w-32"
@@ -2918,7 +3018,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   ];
 
   const subcontractorColumns = [
-    { key: "description", label: "Description", placeholder: "Description", width: "w-72", type: "textarea" },
+    { key: "description", label: "Classification", placeholder: "Classification", width: "w-72", type: "textarea" },
     { key: "cost", label: "Cost", placeholder: "0" },
     { key: "workersCompPercent", label: "WC% / GL%", placeholder: "0" },
     {
@@ -2975,7 +3075,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   ];
 
   const materialColumns = [
-    { key: "description", label: "Scope of work", placeholder: "Scope of work", width: "w-72", type: "textarea" },
+    { key: "description", label: "Item", placeholder: "Item", width: "w-72", type: "textarea" },
     { key: "quantity", label: "Quantity",  placeholder: "0" },
     {
       key: "uom",
@@ -2997,7 +3097,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   ];
 
   const equipmentColumns = [
-    { key: "description", label: "Scope of work",  placeholder: "Scope of work", width: "w-72", type: "textarea" },
+    { key: "description", label: "Equipment Type",  placeholder: "Equipment Type", width: "w-72", type: "textarea" },
     { key: "quantity", label: "Quantity",  placeholder: "0" },
     { key: "rentalDays", label: "Rental Days",  placeholder: "0" },
     { key: "unitRate", label: "Rate",  placeholder: "0" },
@@ -3123,6 +3223,95 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                   </StyledSelect>
                 </LabeledInput>
               </div>
+
+              {/* <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Payment Schedule</div>
+                    <div className="mt-1 text-sm text-[color:var(--acm-muted-fg)]">Optional payment milestones for the estimate and PDF summary.</div>
+                  </div>
+                  <label className="inline-flex items-center gap-2 text-sm font-semibold text-[color:var(--acm-fg)]">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(form.paymentScheduleEnabled)}
+                      onChange={(event) => updateEstimate("paymentScheduleEnabled", event.target.checked)}
+                    />
+                    Add Payment Schedule
+                  </label>
+                </div>
+
+                {form.paymentScheduleEnabled ? (
+                  <div className="mt-5 space-y-4">
+                    <div className="flex flex-wrap gap-4">
+                      <label className="inline-flex items-center gap-2 text-sm font-medium text-[color:var(--acm-fg)]">
+                        <input
+                          type="radio"
+                          name="payment-schedule-type"
+                          checked={form.paymentScheduleType === "percent"}
+                          onChange={() => updateEstimate("paymentScheduleType", "percent")}
+                        />
+                        Percent
+                      </label>
+                      <label className="inline-flex items-center gap-2 text-sm font-medium text-[color:var(--acm-fg)]">
+                        <input
+                          type="radio"
+                          name="payment-schedule-type"
+                          checked={form.paymentScheduleType === "dollar"}
+                          onChange={() => updateEstimate("paymentScheduleType", "dollar")}
+                        />
+                        Dollar ($)
+                      </label>
+                    </div>
+
+                    <div className="space-y-3">
+                      {(form.paymentScheduleEntries ?? []).map((entry) => (
+                        <div key={entry.id} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto] md:items-end">
+                          <LabeledInput label="Payment Name">
+                            <input
+                              className={sheetInputClass()}
+                              value={entry.name}
+                              onChange={(event) => updatePaymentScheduleEntry(entry.id, "name", event.target.value)}
+                            />
+                          </LabeledInput>
+                          <LabeledInput label={form.paymentScheduleType === "percent" ? "Payment Amount (%)" : "Payment Amount ($)"}>
+                            <input
+                              className={sheetInputClass()}
+                              inputMode="decimal"
+                              value={entry.amount}
+                              onChange={(event) => updatePaymentScheduleEntry(entry.id, "amount", event.target.value)}
+                            />
+                          </LabeledInput>
+                          <button
+                            type="button"
+                            onClick={() => removePaymentScheduleEntry(entry.id)}
+                            className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-rose-200 text-rose-600 hover:bg-rose-50"
+                            aria-label="Remove payment row"
+                          >
+                            <Trash size={16} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <button type="button" onClick={addPaymentScheduleEntry} className="acm-btn acm-btn-secondary h-10 px-4">
+                        Add Payment
+                      </button>
+                      <div className="text-sm font-semibold text-[color:var(--acm-fg)]">
+                        Remaining: {paymentScheduleSummary.remainingPercent.toFixed(2)}%
+                      </div>
+                    </div>
+
+                    <LabeledInput label="Notes">
+                      <textarea
+                        className={sheetInputClass("min-h-[96px]")}
+                        value={form.paymentScheduleNotes}
+                        onChange={(event) => updateEstimate("paymentScheduleNotes", event.target.value)}
+                      />
+                    </LabeledInput>
+                  </div>
+                ) : null}
+              </div> */}
 
               <div className="space-y-8">
                 {form.costLines.map((line, index) => (
@@ -3358,6 +3547,40 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
               </datalist>
 
               <EstimateTotalsTable previewSummary={previewSummary} uiTotals={uiTotals} />
+              {form.paymentScheduleEnabled && paymentScheduleSummary.entries.length ? (
+                <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5">
+                  <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Payment Schedule</div>
+                  <div className="mt-4 space-y-2">
+                    {paymentScheduleSummary.entries.map((entry, index) => (
+                      <div key={entry.id || index} className="flex items-center justify-between gap-4 text-sm text-[color:var(--acm-fg)]">
+                        <div>{entry.name || `Payment ${index + 1}`}</div>
+                        <div className="font-semibold">{formatCurrency(entry.actualAmount)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setPaymentScheduleDialogOpen(true)}
+                  className="acm-btn acm-btn-secondary h-10 px-4"
+                >
+                  {form.paymentScheduleEnabled ? "Edit Payment Schedule" : "Add Payment Schedule"}
+                </button>
+              </div>
+              <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5">
+                <FloatingField label="Notes" value={form.notes}>
+                  <textarea
+                    ref={autoResizeTextarea}
+                    className={sheetInputClass("peer min-h-[110px] resize-none overflow-hidden pt-5")}
+                    placeholder=" "
+                    value={form.notes}
+                    onChange={(event) => updateEstimate("notes", event.target.value)}
+                    onInput={(event) => autoResizeTextarea(event.currentTarget)}
+                  />
+                </FloatingField>
+              </div>
           </div>
         </section>
       ) : null}
@@ -3461,6 +3684,102 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
         </div>
       </Modal>
 
+      <Modal open={paymentScheduleDialogOpen} title="Payment Schedule" onClose={() => setPaymentScheduleDialogOpen(false)} maxWidth="max-w-2xl">
+        <div className="grid gap-4">
+          <div className="flex flex-wrap gap-4">
+            <label className="inline-flex items-center gap-2 text-sm font-medium text-[color:var(--acm-fg)]">
+              <input
+                type="radio"
+                name="payment-schedule-type-modal"
+                checked={form.paymentScheduleType === "percent"}
+                onChange={() => updateEstimate("paymentScheduleType", "percent")}
+              />
+              Percent
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm font-medium text-[color:var(--acm-fg)]">
+              <input
+                type="radio"
+                name="payment-schedule-type-modal"
+                checked={form.paymentScheduleType === "dollar"}
+                onChange={() => updateEstimate("paymentScheduleType", "dollar")}
+              />
+              Dollar ($)
+            </label>
+          </div>
+
+          <div className="space-y-3">
+            {(form.paymentScheduleEntries ?? []).map((entry) => (
+              <div key={entry.id} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto] md:items-end">
+                <FloatingField label="Payment Name" value={entry.name}>
+                  <input
+                    className={sheetInputClass("peer pt-5")}
+                    placeholder=" "
+                    value={entry.name}
+                    onChange={(event) => updatePaymentScheduleEntry(entry.id, "name", event.target.value)}
+                  />
+                </FloatingField>
+                <FloatingField label={form.paymentScheduleType === "percent" ? "Payment Amount (%)" : "Payment Amount ($)"} value={entry.amount}>
+                  <input
+                    className={sheetInputClass("peer pt-5")}
+                    inputMode="decimal"
+                    placeholder=" "
+                    value={entry.amount}
+                    onChange={(event) => updatePaymentScheduleEntry(entry.id, "amount", event.target.value)}
+                  />
+                </FloatingField>
+                <button
+                  type="button"
+                  onClick={() => removePaymentScheduleEntry(entry.id)}
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-rose-200 text-rose-600 hover:bg-rose-50"
+                  aria-label="Remove payment row"
+                >
+                  <Trash size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <button type="button" onClick={addPaymentScheduleEntry} className="acm-btn acm-btn-secondary h-10 px-4">
+              Add Payment
+            </button>
+            <div className="text-sm font-semibold text-[color:var(--acm-fg)]">
+              Remaining: {paymentScheduleSummary.remainingPercent.toFixed(2)}%
+            </div>
+          </div>
+
+          <FloatingField label="Notes" value={form.paymentScheduleNotes}>
+            <textarea
+              ref={autoResizeTextarea}
+              className={sheetInputClass("peer min-h-[96px] resize-none overflow-hidden pt-5")}
+              placeholder=" "
+              value={form.paymentScheduleNotes}
+              onChange={(event) => updateEstimate("paymentScheduleNotes", event.target.value)}
+              onInput={(event) => autoResizeTextarea(event.currentTarget)}
+            />
+          </FloatingField>
+
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setPaymentScheduleDialogOpen(false)} className="acm-btn acm-btn-secondary h-10 px-4">
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                updateEstimate("paymentScheduleEnabled", true);
+                setPaymentScheduleDialogOpen(false);
+              }}
+              disabled={form.paymentScheduleType === "percent" && Math.abs(paymentScheduleSummary.remainingPercent) > 0.001}
+              className="acm-btn acm-btn-primary h-10 px-4 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+
+
       <Modal
         open={targetWageDialog.open}
         title={
@@ -3532,10 +3851,10 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                   placeholder="0"
                 />
               </LabeledInput>
-              <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
+              {/* <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">Calculated ST Rate</div>
                 <div className="text-lg font-semibold">{formatCurrency(targetWageDialogStRate)}</div>
-              </div>
+              </div> */}
               <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">Person Cost</div>
                 <div className="text-lg font-semibold">
@@ -3547,26 +3866,52 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
 
           {(targetWageDialog.field === "stCost") && (
             <>
-              <LabeledInput label="ST Hrs">
-                <input
-                  className={sheetInputClass()}
-                  inputMode="decimal"
-                  value={targetWageDialog.straightTimeHours}
-                  onChange={(event) => setTargetWageDialog((current) => ({
-                    ...current,
-                    straightTimeHours: event.target.value
-                  }))}
-                  placeholder="0"
-                />
-              </LabeledInput>
-              {/* <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
-                <div className="text-xs text-[color:var(--acm-muted-fg)]">ST Rate</div>
-                <div className="text-lg font-semibold">{formatCurrency(targetWageDialogStRate)}</div>
-              </div> */}
+              <div className="grid gap-4 md:grid-cols-3">
+                <LabeledInput label="ST Persons">
+                  <input
+                    className={sheetInputClass()}
+                    inputMode="decimal"
+                    value={targetWageDialog.straightTimePersons}
+                    onChange={(event) => setTargetWageDialog((current) => ({
+                      ...current,
+                      straightTimePersons: event.target.value
+                    }))}
+                    placeholder="0"
+                  />
+                </LabeledInput>
+                <LabeledInput label="ST Hrs">
+                  <input
+                    className={sheetInputClass()}
+                    inputMode="decimal"
+                    value={targetWageDialog.straightTimeHours}
+                    onChange={(event) => setTargetWageDialog((current) => ({
+                      ...current,
+                      straightTimeHours: event.target.value
+                    }))}
+                    placeholder="0"
+                  />
+                </LabeledInput>
+                <LabeledInput label="ST Days">
+                  <input
+                    className={sheetInputClass()}
+                    inputMode="decimal"
+                    value={targetWageDialog.straightTimeDays}
+                    onChange={(event) => setTargetWageDialog((current) => ({
+                      ...current,
+                      straightTimeDays: event.target.value
+                    }))}
+                    placeholder="0"
+                  />
+                </LabeledInput>
+              </div>
+              <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
+                <div className="text-xs text-[color:var(--acm-muted-fg)]">Total ST Hours</div>
+                <div className="text-lg font-semibold">{formatDecimalInput(targetWageDialogStHours)}</div>
+              </div>
               <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">ST Cost</div>
                 <div className="text-lg font-semibold">
-                  {formatCurrency(roundToCents(toNumber(targetWageDialog.straightTimePersons) * toNumber(targetWageDialog.straightTimeHours) * targetWageDialogStRate))}
+                  {formatCurrency(roundToCents(targetWageDialogStHours * targetWageDialogStRate))}
                 </div>
               </div>
             </>
@@ -3574,32 +3919,54 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
 
           {(targetWageDialog.field === "otCost") && (
             <>
-              <LabeledInput label="OT Hrs">
-                <input
-                  className={sheetInputClass()}
-                  inputMode="decimal"
-                  value={targetWageDialog.overtimeHours}
-                  onChange={(event) => setTargetWageDialog((current) => ({
-                    ...current,
-                    overtimeHours: event.target.value
-                  }))}
-                  placeholder="0"
-                />
-              </LabeledInput>
-              {/* <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
-                <div className="text-xs text-[color:var(--acm-muted-fg)]">Calculated OT Rate</div>
-                <div className="text-lg font-semibold">{formatCurrency(targetWageDialogOtRate)}</div>
-              </div> */}
+              <div className="grid gap-4 md:grid-cols-3">
+                <LabeledInput label="OT Persons">
+                  <input
+                    className={sheetInputClass()}
+                    inputMode="decimal"
+                    value={targetWageDialog.overtimePersons}
+                    onChange={(event) => setTargetWageDialog((current) => ({
+                      ...current,
+                      overtimePersons: event.target.value
+                    }))}
+                    placeholder="0"
+                  />
+                </LabeledInput>
+                <LabeledInput label="OT Hrs">
+                  <input
+                    className={sheetInputClass()}
+                    inputMode="decimal"
+                    value={targetWageDialog.overtimeHours}
+                    onChange={(event) => setTargetWageDialog((current) => ({
+                      ...current,
+                      overtimeHours: event.target.value
+                    }))}
+                    placeholder="0"
+                  />
+                </LabeledInput>
+                <LabeledInput label="OT Days">
+                  <input
+                    className={sheetInputClass()}
+                    inputMode="decimal"
+                    value={targetWageDialog.overtimeDays}
+                    onChange={(event) => setTargetWageDialog((current) => ({
+                      ...current,
+                      overtimeDays: event.target.value
+                    }))}
+                    placeholder="0"
+                  />
+                </LabeledInput>
+              </div>
+              <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
+                <div className="text-xs text-[color:var(--acm-muted-fg)]">Total OT Hours</div>
+                <div className="text-lg font-semibold">{formatDecimalInput(targetWageDialogOtHours)}</div>
+              </div>
               <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">OT Cost</div>
                 <div className="text-lg font-semibold">
                   {formatCurrency(
-                    toNumber(targetWageDialog.overtimeHours) > 0
-                      ? roundToCents(
-                          (toNumber(targetWageDialog.overtimePersons) || toNumber(targetWageDialog.straightTimePersons)) *
-                            toNumber(targetWageDialog.overtimeHours) *
-                            targetWageDialogOtRate
-                        )
+                    targetWageDialogOtHours > 0
+                      ? roundToCents(targetWageDialogOtHours * targetWageDialogOtRate)
                       : 0
                   )}
                 </div>

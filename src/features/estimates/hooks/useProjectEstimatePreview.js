@@ -4,10 +4,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 export const EMPTY_ESTIMATE_PREVIEW_SUMMARY = Object.freeze({
   laborCost: 0,
+  subcontractorCost: 0,
   materialCost: 0,
   equipmentCost: 0,
   directOverheadCost: 0,
   baseCost: 0,
+  totalManHours: 0,
+  totalDays: 0,
   finalBid: 0,
   totalPrice: 0,
 });

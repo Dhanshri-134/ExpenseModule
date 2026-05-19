@@ -311,6 +311,8 @@ function flattenEstimateRows(estimate) {
       code: costCode.costCode?.code || `CL-${index + 1}`,
       label: groupLabel,
       description: costCode.description || costCode.costCode?.description || "",
+      rate: totalPrice,
+      quantity: 1,
       totalPrice,
     });
   });
@@ -356,34 +358,34 @@ function buildCostLineDetailSections(estimate) {
       groups: [
         {
           title: "Labor",
-          columns: ["Classification", "ST Persons", "ST Days", "OT Persons", "OT Days", "Target Wage", "Target Pay", "Total"],
+          columns: ["Classification", "ST Hrs", "ST Days", "OT Hrs", "OT Days", "ST Cost", "OT Cost", "Total"],
           widths: [72, 34, 34, 34, 34, 52, 56, 72],
           fontSize: 5.5,
           rowLayout: "stackedDescription",
-          detailLabel: "Scope of Work",
+          detailLabel: "Title",
           rows: (costCode.laborEntries ?? []).map((entry) => ({
             cells: [
               entry.metadata?.classification || "-",
-              entry.metadata?.straightTimePersons ?? "-",
+              entry.metadata?.enteredStraightHours ?? entry.stHours ?? "-",
               entry.metadata?.straightTimeDays ?? "-",
-              entry.metadata?.overtimePersons ?? "-",
+              entry.metadata?.enteredOvertimeHours ?? entry.otHours ?? "-",
               entry.metadata?.overtimeDays ?? "-",
-              entry.metadata?.targetWage ? formatPdfCurrency(entry.metadata.targetWage) : "-",
-              formatPdfCurrency(entry.metadata?.targetPay || 0),
+              formatPdfCurrency(entry.stCost || 0),
+              formatPdfCurrency(entry.otCost || 0),
               formatPdfCurrency(entry.metadata?.finalTotal || entry.totalCost || 0),
             ],
-            detail: entry.metadata?.description || entry.description || "-",
+            detail: entry.metadata?.title || entry.description || "-",
           })),
         },
         {
           title: "Subcontractor",
-          columns: ["Cost", "WC %", "GL %", "Overhead %", "Profit %", "Total"],
-          widths: [74, 48, 48, 58, 52, 74],
+          columns: ["Classification", "Cost", "WC %", "GL %", "Overhead %", "Profit %", "Total"],
+          widths: [82, 52, 38, 38, 48, 40, 72],
           fontSize: 5.5,
-          rowLayout: "stackedDescription",
-          detailLabel: "Scope Of Work",
+          rowLayout: "flat",
           rows: (costCode.subcontractorEntries ?? []).map((entry) => ({
             cells: [
+              entry.metadata?.classification || entry.description || label,
               formatPdfCurrency(entry.amount ?? entry.cost ?? 0),
               percent(entry.metadata?.workersCompPercent ?? entry.workersCompPercent),
               percent(entry.metadata?.liabilityPercent ?? entry.liabilityPercent),
@@ -391,7 +393,6 @@ function buildCostLineDetailSections(estimate) {
               percent(entry.metadata?.profitPercent ?? entry.profitPercent),
               formatPdfCurrency(entry.metadata?.finalTotal || subcontractorTotal(entry.metadata || entry)),
             ],
-            detail: entry.description || label,
           })),
         },
         {
@@ -400,7 +401,7 @@ function buildCostLineDetailSections(estimate) {
           widths: [46, 42, 42, 58, 52, 42, 82],
           fontSize: 5.5,
           rowLayout: "stackedDescription",
-          detailLabel: "Description",
+          detailLabel: "Item",
           rows: (costCode.materialEntries ?? []).map((entry) => ({
             cells: [
               entry.quantity || 0,
@@ -411,7 +412,7 @@ function buildCostLineDetailSections(estimate) {
               percent(entry.taxPercent),
               formatPdfCurrency(entry.metadata?.finalTotal || entry.totalCost || 0),
             ],
-            detail: entry.description || label,
+            detail: entry.metadata?.item || entry.description || label,
           })),
         },
         {
@@ -420,7 +421,7 @@ function buildCostLineDetailSections(estimate) {
           widths: [46, 58, 58, 50, 42, 42, 98],
           fontSize: 5.5,
           rowLayout: "stackedDescription",
-          detailLabel: "Description",
+          detailLabel: "Equipment Type",
           rows: (costCode.equipmentEntries ?? []).map((entry) => ({
             cells: [
               entry.qty || 0,
@@ -431,7 +432,7 @@ function buildCostLineDetailSections(estimate) {
               percent(entry.taxPercent),
               formatPdfCurrency(entry.metadata?.finalTotal || entry.totalCost || 0),
             ],
-            detail: entry.description || label,
+            detail: entry.metadata?.equipmentType || entry.description || label,
           })),
         },
         {
@@ -457,6 +458,32 @@ function drawText(commands, text, x, y, size = 10, fillRgb = [15, 23, 42]) {
   commands.push(`/F1 ${size} Tf`);
   commands.push(`1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm`);
   commands.push(`(${escapePdfText(text)}) Tj`);
+  commands.push("ET");
+}
+
+function drawJustifiedText(commands, text, x, y, width, size = 10, fillRgb = [15, 23, 42]) {
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) return;
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length < 2) {
+    drawText(commands, trimmed, x, y, size, fillRgb);
+    return;
+  }
+  const naturalText = words.join(" ");
+  const naturalWidth = approximatePdfTextWidth(naturalText, size);
+  const extraWidth = width - naturalWidth;
+  if (extraWidth <= 0.5) {
+    drawText(commands, naturalText, x, y, size, fillRgb);
+    return;
+  }
+  const wordSpacing = extraWidth / (words.length - 1);
+  commands.push("BT");
+  commands.push(`${pdfColor(fillRgb)} rg`);
+  commands.push(`/F1 ${size} Tf`);
+  commands.push(`${wordSpacing.toFixed(3)} Tw`);
+  commands.push(`1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm`);
+  commands.push(`(${escapePdfText(naturalText)}) Tj`);
+  commands.push("0 Tw");
   commands.push("ET");
 }
 
@@ -519,6 +546,8 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
   const summary = estimate?.summary || {};
   const validUntil = meta.validUntil || "";
   const totalValue = summary.finalBid ?? summary.totalPrice ?? totals.grandTotal ?? 0;
+  const paymentSchedule = meta.paymentSchedule && typeof meta.paymentSchedule === "object" ? meta.paymentSchedule : null;
+  const notesText = String(meta.notes || estimate?.notes || meta.paymentScheduleNotes || "").trim();
   const pages = [];
 
   const rawCustomerName = customer.name || estimate?.client?.name || "";
@@ -536,6 +565,7 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
     [company.contactPhone, company.contactEmail].filter(Boolean).join("  |  "),
   ].filter(Boolean);
 
+  const footerReserve = 132;
   const createPage = () => [];
   const closePage = (pageCommands) => {
     if (pageCommands.length) {
@@ -568,6 +598,36 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
   let commands = createPage();
   let y = drawPageHeader(commands);
 
+  const checkPageSpace = (currentY, neededHeight, reserve = footerReserve) => currentY - neededHeight >= page.margin + reserve;
+  const addNewPageIfNeeded = (neededHeight, reserve = footerReserve, onNewPage = null) => {
+    if (checkPageSpace(y, neededHeight, reserve)) return;
+    closePage(commands);
+    commands = createPage();
+    y = drawPageHeader(commands);
+    if (typeof onNewPage === "function") onNewPage();
+  };
+
+  const renderFooterSection = () => {
+    if (!checkPageSpace(y, 0, footerReserve)) {
+      closePage(commands);
+      commands = createPage();
+      y = drawPageHeader(commands);
+    }
+  };
+
+  const renderJustifiedParagraph = (text, x, startY, width, { size = 8.3, leading = 12, color = ink } = {}) => {
+    const lines = wrapPdfLine(text, Math.max(12, Math.floor(width / (size * 0.56))));
+    lines.forEach((lineText, index) => {
+      const isLastLine = index === lines.length - 1;
+      if (isLastLine) {
+        drawText(commands, lineText, x, startY - index * leading, size, color);
+        return;
+      }
+      drawJustifiedText(commands, lineText, x, startY - index * leading, width, size, color);
+    });
+    return lines.length * leading;
+  };
+
   const gap = 12;
   const availableWidth = page.width - page.margin * 2;
   const columnWidth = hasCustomerDetails ? (availableWidth - gap) / 2 : availableWidth;
@@ -599,10 +659,8 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
 
   if (hasCustomerDetails) {
     drawText(commands, "Customer Details", page.margin, boxTop, 11, accent);
-    drawRect(commands, page.margin, boxTop - 14 - boxHeight, columnWidth, boxHeight, null, line, 1);
   }
   drawText(commands, detailsTitle, hasCustomerDetails ? page.margin + columnWidth + gap : page.margin, boxTop, 11, accent);
-  drawRect(commands, hasCustomerDetails ? page.margin + columnWidth + gap : page.margin, boxTop - 14 - boxHeight, columnWidth, boxHeight, null, line, 1);
 
   const customerX = page.margin + 10;
   const detailsX = (hasCustomerDetails ? page.margin + columnWidth + gap : page.margin) + 10;
@@ -630,50 +688,106 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
 
   const tableX = page.margin;
   const tableWidth = availableWidth;
-  const costCodeWidth = 170;
-  const totalWidth = 120;
-  const scopeWidth = tableWidth - costCodeWidth - totalWidth;
+  const descriptionWidth = 255;
+  const rateWidth = 90;
+  const quantityWidth = 70;
+  const totalWidth = tableWidth - descriptionWidth - rateWidth - quantityWidth;
   const headerHeight = 24;
 
-  drawRect(commands, tableX, y - headerHeight, costCodeWidth, headerHeight, null, line, 0.8);
-  drawRect(commands, tableX + costCodeWidth, y - headerHeight, scopeWidth, headerHeight, null, line, 0.8);
-  drawRect(commands, tableX + costCodeWidth + scopeWidth, y - headerHeight, totalWidth, headerHeight, null, line, 0.8);
-  drawText(commands, "Cost Code", tableX + 10, y - 16, 9, ink);
-  drawText(commands, "Scope Of Work", tableX + costCodeWidth + 10, y - 16, 9, ink);
-  drawRightAlignedText(commands, "Total", tableX + tableWidth - 10, y - 16, 9, ink);
-  y -= headerHeight;
+  const renderTableHeader = () => {
+    commands.push(`${pdfColor(line)} RG`);
+    commands.push("0.8 w");
+    commands.push(`${tableX} ${y - headerHeight} m ${tableX + tableWidth} ${y - headerHeight} l S`);
+    drawText(commands, "Description", tableX + 4, y - 16, 9, ink);
+    drawRightAlignedText(commands, "Rate", tableX + descriptionWidth + rateWidth - 8, y - 16, 9, ink);
+    drawRightAlignedText(commands, "Quantity", tableX + descriptionWidth + rateWidth + quantityWidth - 8, y - 16, 9, ink);
+    drawRightAlignedText(commands, "Total", tableX + tableWidth - 8, y - 16, 9, ink);
+    y -= headerHeight;
+  };
+
+  renderTableHeader();
 
   rows.forEach((row) => {
-    const normalizedCode = String(row.code || "").trim();
-    const normalizedLabel = String(row.label || "").trim();
-    const costCodeText =
-      normalizedCode && normalizedLabel && normalizedCode.toLowerCase() !== normalizedLabel.toLowerCase()
-        ? `${normalizedCode} - ${normalizedLabel}`
-        : normalizedLabel || normalizedCode || "-";
-    const scopeText = String(row.description || row.detail || normalizedLabel || normalizedCode || "-").trim() || "-";
-    const costCodeLines = wrapPdfLine(costCodeText, 26);
-    const scopeLines = wrapPdfLine(scopeText, 56);
-    const rowHeight = Math.max(26, Math.max(costCodeLines.length, scopeLines.length) * 10 + 10);
-    drawRect(commands, tableX, y - rowHeight, costCodeWidth, rowHeight, null, line, 0.8);
-    drawRect(commands, tableX + costCodeWidth, y - rowHeight, scopeWidth, rowHeight, null, line, 0.8);
-    drawRect(commands, tableX + costCodeWidth + scopeWidth, y - rowHeight, totalWidth, rowHeight, null, line, 0.8);
-    costCodeLines.forEach((lineText, index) => {
-      drawText(commands, lineText, tableX + 10, y - 15 - index * 9, 8.3, ink);
-    });
-    scopeLines.forEach((lineText, index) => {
-      drawText(commands, lineText, tableX + costCodeWidth + 10, y - 15 - index * 9, 8.3, ink);
-    });
-    drawRightAlignedText(commands, formatPdfCurrency(row.totalPrice || 0), tableX + tableWidth - 10, y - 15, 8.5, ink);
+    const costCodeText = String(row.code || row.label || "-").trim() || "-";
+    const scopeText = String(row.description || row.detail || row.label || row.code || "-").trim() || "-";
+    const scopeLines = wrapPdfLine(scopeText, 74);
+    const rowHeight = 20;
+    const scopeHeight = Math.max(20, scopeLines.length * 10 + 6);
+    addNewPageIfNeeded(rowHeight + scopeHeight + 8, footerReserve, renderTableHeader);
+    drawText(commands, costCodeText, tableX + 4, y - 13, 8.5, ink);
+    drawRightAlignedText(commands, formatPdfCurrency(row.rate || row.totalPrice || 0), tableX + descriptionWidth + rateWidth - 8, y - 13, 8.5, ink);
+    drawRightAlignedText(commands, String(row.quantity || 1), tableX + descriptionWidth + rateWidth + quantityWidth - 8, y - 13, 8.5, ink);
+    drawRightAlignedText(commands, formatPdfCurrency(row.totalPrice || 0), tableX + tableWidth - 8, y - 13, 8.5, ink);
     y -= rowHeight;
+    scopeLines.forEach((lineText, index) => {
+      drawText(commands, lineText, tableX + 4, y - 7 - index * 10, 8, ink);
+    });
+    commands.push(`${tableX} ${y - scopeHeight} m ${tableX + tableWidth} ${y - scopeHeight} l S`);
+    y -= scopeHeight;
   });
 
-  const totalRowHeight = 28;
-  drawRect(commands, tableX, y - totalRowHeight, costCodeWidth, totalRowHeight, null, line, 1);
-  drawRect(commands, tableX + costCodeWidth, y - totalRowHeight, scopeWidth, totalRowHeight, null, line, 1);
-  drawRect(commands, tableX + costCodeWidth + scopeWidth, y - totalRowHeight, totalWidth, totalRowHeight, null, line, 1);
-  drawText(commands, "Grand Total", tableX + costCodeWidth + 10, y - 17, 9, ink);
-  drawRightAlignedText(commands, formatPdfCurrency(totalValue), tableX + tableWidth - 10, y - 17, 10, ink);
+  y -= 16;
+  const summaryLabelRight = tableX + tableWidth - 120;
+  const summaryValueRight = tableX + tableWidth;
+  const summaryLines = [
+    ["Subtotal", formatPdfCurrency(totals.subtotal ?? totalValue)],
+    ["Total", formatPdfCurrency(totalValue)],
+  ];
 
+  if (paymentSchedule?.enabled && Array.isArray(paymentSchedule.entries) && paymentSchedule.entries.length) {
+    const firstPayment = paymentSchedule.entries[0];
+    if (firstPayment) {
+      summaryLines.push([
+        firstPayment.name || "1st Payment",
+        formatPdfCurrency(firstPayment.actualAmount ?? firstPayment.amount ?? 0),
+      ]);
+    }
+  }
+
+  addNewPageIfNeeded(summaryLines.length * 16 + (paymentSchedule?.enabled ? 80 : 0) + (notesText ? 160 : 0), footerReserve);
+
+  summaryLines.forEach(([labelText, valueText], index) => {
+    drawText(commands, labelText, summaryLabelRight, y - 2, 8.5, ink);
+    drawRightAlignedText(commands, valueText, summaryValueRight, y - 2, 8.5, ink);
+    if (index < 3) {
+      commands.push(`${summaryLabelRight} ${y - 8} m ${summaryValueRight} ${y - 8} l S`);
+    }
+    y -= 16;
+  });
+
+  if (paymentSchedule?.enabled && Array.isArray(paymentSchedule.entries) && paymentSchedule.entries.length) {
+    y -= 8;
+    drawText(commands, "Payment Schedule", tableX + (tableWidth * 0.4), y, 10, ink);
+    y -= 14;
+    paymentSchedule.entries.forEach((entry, index) => {
+      addNewPageIfNeeded(22, footerReserve);
+      const amount = entry.actualAmount ?? entry.amount ?? 0;
+      const percent = normalizeNumber(entry.percent);
+      drawText(commands, `${entry.name || `${index + 1}st Payment`} (${percent.toFixed(0)}%)`, tableX + (tableWidth * 0.4), y, 8.3, ink);
+      drawRightAlignedText(commands, formatPdfCurrency(amount), tableX + tableWidth, y, 8.3, ink);
+      commands.push(`${tableX + (tableWidth * 0.4)} ${y - 6} m ${tableX + tableWidth} ${y - 6} l S`);
+      y -= 15;
+    });
+  }
+
+  if (notesText) {
+    const notesX = page.margin;
+    const notesWidth = page.width - page.margin * 2;
+    y -= 10;
+    addNewPageIfNeeded(48, footerReserve);
+    drawText(commands, "Notes", notesX, y, 10, ink);
+    y -= 12;
+    const noteParagraphs = String(notesText).split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean);
+    noteParagraphs.forEach((paragraph, index) => {
+      const lineCount = wrapPdfLine(paragraph, Math.max(12, Math.floor(notesWidth / (8.3 * 0.52)))).length;
+      const needed = lineCount * 12 + (index < noteParagraphs.length - 1 ? 10 : 0);
+      addNewPageIfNeeded(needed, footerReserve);
+      const usedHeight = renderJustifiedParagraph(paragraph, notesX, y, notesWidth, { size: 8.3, leading: 12, color: ink });
+      y -= usedHeight + 6;
+    });
+  }
+
+  renderFooterSection();
   closePage(commands);
 
   return pages;
@@ -877,24 +991,26 @@ export async function estimateToPdfBuffer(estimate, options = {}) {
     return Buffer.from(await pdfDoc.save());
   }
   
-  const firstPage = pages[0];
+  const lastPage = pages[pages.length - 1];
   const logoImage = await embedPdfImage(pdfDoc, company.logoDataUrl, {
     removeLightBackground: true,
   });
   if (logoImage) {
     const dimensions = logoImage.scaleToFit(145, 80);
-    firstPage.drawImage(logoImage, {
-      x: 42,
-      y: 700,
-      width: 150,
-      height: 150,
+    pages.forEach((page) => {
+      page.drawImage(logoImage, {
+        x: 42,
+        y: 700,
+        width: 150,
+        height: 150,
+      });
     });
   }
 
   const signatureImage = await embedPdfImage(pdfDoc, company.signatureDataUrl);
-  if (signatureImage) {
+  if (signatureImage && lastPage) {
     const dimensions = signatureImage.scaleToFit(180, 100);
-    firstPage.drawImage(signatureImage, {
+    lastPage.drawImage(signatureImage, {
       x: 423,
       y: 72,
       width: dimensions.width,
@@ -903,9 +1019,9 @@ export async function estimateToPdfBuffer(estimate, options = {}) {
   }
 
   const stampImage = await embedPdfImage(pdfDoc, company.stampDataUrl);
-  if (stampImage) {
+  if (stampImage && lastPage) {
     const dimensions = stampImage.scaleToFit(120, 120);
-    firstPage.drawImage(stampImage, {
+    lastPage.drawImage(stampImage, {
       x: 42,
       y: 58,
       width: dimensions.width,

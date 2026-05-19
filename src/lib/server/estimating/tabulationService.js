@@ -12,6 +12,8 @@ function aggregateCostCodeRow({
   profitPercent = 0,
 }) {
   const laborCost = sumBy(laborEntries, (entry) => entry.totalCost);
+  const totalManHours = sumBy(laborEntries, (entry) => entry.totalManHours ?? entry.stHours + entry.otHours);
+  const totalDays = sumBy(laborEntries, (entry) => entry.totalDays ?? 0);
   const subcontractorCost = sumBy(
   subcontractorEntries,
   (entry) => entry.totalCost
@@ -48,6 +50,8 @@ const totalCost = roundCurrency(
     equipmentEntries,
     overheadEntries,
     laborCost,
+    totalManHours,
+    totalDays,
     materialCost,
     equipmentCost,
     directOverhead,
@@ -99,6 +103,8 @@ export const TabulationService = {
       projectId,
       costCodes: rows,
       laborCost: sumBy(rows, (row) => row.laborCost),
+      totalManHours: sumBy(rows, (row) => row.totalManHours),
+      totalDays: sumBy(rows, (row) => row.totalDays),
       subcontractorCost: sumBy(
   rows,
   (row) => row.subcontractorCost
