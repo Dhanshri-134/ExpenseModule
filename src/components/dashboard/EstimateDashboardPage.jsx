@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { Fragment, memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/router";
 import { BusyButton, CompactListRow } from "@/components/dashboard/DashboardUi";
 import { ChevronRightIcon } from "@/components/dashboard/icons";
@@ -47,7 +48,7 @@ function createId(prefix) {
 }
 
 function toNumber(value) {
-  const parsed = Number(value ?? 0);
+  const parsed = parseFloat(String(value ?? "").trim());
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -58,6 +59,10 @@ function toPercent(value) {
 
 function roundCurrency(value) {
   return Math.round((toNumber(value) + Number.EPSILON) * 10000) / 10000;
+}
+
+function roundToCents(value) {
+  return Math.round((toNumber(value) + Number.EPSILON) * 100) / 100;
 }
 
 function formatDecimalInput(value) {
@@ -231,7 +236,7 @@ function createCostLine(index = 1) {
   return {
     id: createId("cost-line"),
     costCodeId: "",
-    code: `SEC-${String(index).padStart(3, "0")}`,
+    code: "",
     description: "",
     laborEntries: [createLaborEntry()],
     subcontractorEntries: [createSubcontractorEntry()],
@@ -377,22 +382,26 @@ function emptyEstimateForm(clientId = "", templateId = "") {
 }
 
 function calculateLabor(entry) {
-  const targetWage = entry.targetWage
-    ? toNumber(entry.targetWage)
-    : toNumber(entry.targetWageBase) * (1 + toNumber(entry.targetWageMarkupPercent) / 100);
-  const stHours = roundCurrency(
-    toNumber(entry.straightTimePersons) * (toNumber(entry.straightTimeHours) || 0) * toNumber(entry.straightTimeDays)
-  );
-  const otHours = roundCurrency(
-    toNumber(entry.overtimePersons) *
-      (toNumber(entry.overtimeHours) || 0) *
-      toNumber(entry.overtimeDays)
-  );
-  const stRatePercent = toNumber(entry.stRatePercent);
-  const otRatePercent = toNumber(entry.otRatePercent);
-  const stRate = roundCurrency(targetWage * toPercent(stRatePercent));
-  const otRate = roundCurrency(targetWage * toPercent(otRatePercent));
-  const totalAmount = roundCurrency(stHours * stRate + otHours * otRate);
+  const tradeWage = roundToCents(entry.targetWageBase || entry.targetWage);
+  const markupPercent =
+    entry.targetWageMarkupPercent !== "" && entry.targetWageMarkupPercent !== undefined && entry.targetWageMarkupPercent !== null
+      ? toNumber(entry.targetWageMarkupPercent)
+      : toNumber(entry.stRatePercent);
+  const persons = roundToCents(entry.straightTimePersons);
+  const stHoursInput = roundToCents(entry.straightTimeHours);
+  const otHoursInput = roundToCents(entry.overtimeHours);
+  const otPersons =
+    entry.overtimePersons !== "" && entry.overtimePersons !== undefined && entry.overtimePersons !== null
+      ? roundToCents(entry.overtimePersons)
+      : persons;
+  const stRate = roundToCents(tradeWage + (tradeWage * markupPercent) / 100);
+  const otRate = roundToCents(stRate * 1.5);
+  const crewHourlyRate = roundToCents(stRate * persons);
+  const stHours = roundToCents(persons * stHoursInput);
+  const otHours = otHoursInput > 0 ? roundToCents(otPersons * otHoursInput) : 0;
+  const stAmount = roundToCents(stHours * stRate);
+  const otAmount = otHours > 0 ? roundToCents(otHours * otRate) : 0;
+  const totalAmount = roundToCents(stAmount + otAmount);
   const markup = applyRowMarkup(totalAmount, entry);
 
   return {
@@ -401,10 +410,15 @@ function calculateLabor(entry) {
     otHours,
     otRate,
     total: totalAmount,
-    overheadAmount: roundCurrency(markup.overheadAmount),
-    profitAmount: roundCurrency(markup.profitAmount),
-    finalTotal: roundCurrency(markup.finalTotal),
-    targetPay: roundCurrency(stHours * targetWage),
+    overheadAmount: roundToCents(markup.overheadAmount),
+    profitAmount: roundToCents(markup.profitAmount),
+    finalTotal: roundToCents(markup.finalTotal),
+    targetPay: roundToCents(stHours * tradeWage),
+    targetWage: tradeWage,
+    markupPercent,
+    crewHourlyRate,
+    stAmount,
+    otAmount,
     taxAmount: 0,
   };
 }
@@ -498,7 +512,7 @@ function flattenEstimateCostLines(costCodes = []) {
     const costLine = createCostLine(index + 1);
     costLine.id = line.id || createId("cost-line");
     costLine.costCodeId = line.costCode?.id || "";
-    costLine.code = line.costCode?.code || `SEC-${String(index + 1).padStart(3, "0")}`;
+    costLine.code = line.costCode?.code || "";
     costLine.description = line.description || line.costCode?.description || "";
     costLine.laborEntries = [];
     costLine.subcontractorEntries = [];
@@ -830,7 +844,7 @@ function buildPayload(form, selectedTemplate, previewSummary, companyDetails) {
     costCodes: (form.costLines?.length ? form.costLines : [createCostLine(1)]).map((line, index) => ({
       id: isUuid(line.id) ? line.id : undefined,
       costCodeId: line.costCodeId || undefined,
-      code: String(line.code || "").trim() || `SEC-${String(index + 1).padStart(3, "0")}`,
+      code: String(line.code || "").trim() || "",
       name: String(line.code || "").trim() || `Section ${index + 1}`,
       description: String(line.description || line.code || `Section ${index + 1}`).trim(),
       laborEntries: (line.laborEntries ?? []).map((entry) => {
@@ -1366,6 +1380,127 @@ function TableCellInput({ value, onChange, onKeyDown, list, placeholder = "", ty
   );
 }
 
+const MATERIAL_UOM_OPTIONS = ["EA", "SF", "LF", "CY", "CF"];
+
+function MaterialUomInput({ value, onChange, onKeyDown }) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef(null);
+  const [menuRect, setMenuRect] = useState(null);
+
+  useEffect(() => {
+    function handlePointerDown(event) {
+      if (!wrapperRef.current?.contains(event.target)) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const rect = wrapperRef.current?.getBoundingClientRect();
+    if (rect) {
+      setMenuRect({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+      });
+    }
+
+    function closeMenu() {
+      setOpen(false);
+    }
+
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    return () => {
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [open]);
+
+  const filteredOptions = MATERIAL_UOM_OPTIONS.filter((option) =>
+    option.toLowerCase().includes(String(value || "").trim().toLowerCase())
+  );
+
+  return (
+    <div
+      ref={wrapperRef}
+      className="relative min-w-[84px]"
+      onClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+    >
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={onKeyDown}
+        onFocus={() => setOpen(true)}
+        onClick={() => setOpen(true)}
+        placeholder="Unit"
+        data-grid-input="true"
+        className={sheetInputClass("min-w-[84px] rounded-md px-2 py-2 pr-8 text-[0.7rem]")}
+      />
+      <button
+        type="button"
+        tabIndex={-1}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen((current) => !current);
+        }}
+        className="absolute right-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-[color:var(--acm-muted-fg)]"
+      >
+        <ChevronDown className={`h-3.5 w-3.5 transition ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && menuRect
+        ? createPortal(
+            <div
+              className="fixed z-[9999] max-h-44 overflow-y-auto rounded-[12px] border border-[color:var(--acm-border)] bg-white p-1 shadow-[0_12px_28px_rgba(15,23,42,0.12)]"
+              style={{
+                top: menuRect.top,
+                left: menuRect.left,
+                width: menuRect.width,
+              }}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {filteredOptions.length ? (
+                filteredOptions.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onClick={() => {
+                      onChange(option);
+                      setOpen(false);
+                    }}
+                    className="flex w-full items-center rounded-[10px] px-2 py-2 text-left text-[0.7rem] font-medium text-[color:var(--acm-fg)] hover:bg-[color:var(--acm-surface-2)]"
+                  >
+                    {option}
+                  </button>
+                ))
+              ) : (
+                <div className="px-2 py-2 text-[0.7rem] text-[color:var(--acm-muted-fg)]">
+                  Type a custom UOM
+                </div>
+              )}
+            </div>,
+            document.body
+          )
+        : null}
+    </div>
+  );
+}
+
 function TargetWageTrigger({ value, onClick }) {
   return (
     <button
@@ -1609,9 +1744,12 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     field: "targetWage",
     lineId: "",
     rowId: "",
+    classification: "",
     rowTargetWage: "",
     baseWage: "",
     markupPercent: "",
+    overheadPercent: "",
+    profitPercent: "",
     stRatePercent: "",
     otRatePercent: "",
     straightTimePersons: "",
@@ -1968,9 +2106,12 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       field,
       lineId,
       rowId: row.id,
-      rowTargetWage: row.targetWage || "",
+      classification: row.classification || "",
+      rowTargetWage: row.targetWageBase || row.targetWage || "",
       baseWage: row.targetWageBase || row.targetWage || "",
-      markupPercent: row.targetWageMarkupPercent || "",
+      markupPercent: row.targetWageMarkupPercent || row.stRatePercent || "",
+      overheadPercent: row.overheadPercent || "",
+      profitPercent: row.profitPercent || "",
       stRatePercent: row.stRatePercent || "",
       otRatePercent: row.otRatePercent || "",
       straightTimePersons: row.straightTimePersons || "",
@@ -1988,9 +2129,12 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       field: "targetWage",
       lineId: "",
       rowId: "",
+      classification: "",
       rowTargetWage: "",
       baseWage: "",
       markupPercent: "",
+      overheadPercent: "",
+      profitPercent: "",
       stRatePercent: "",
       otRatePercent: "",
       straightTimePersons: "",
@@ -2002,17 +2146,11 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     });
   }
 
-  const targetWageDialogBaseWage = toNumber(targetWageDialog.baseWage);
-  const targetWageDialogMarkupPercent = toNumber(targetWageDialog.markupPercent);
-  const targetWageDialogTargetWage = roundCurrency(
-    targetWageDialogBaseWage * (1 + targetWageDialogMarkupPercent / 100)
+  const targetWageDialogTargetWage = roundToCents(toNumber(targetWageDialog.rowTargetWage));
+  const targetWageDialogStRate = roundToCents(
+    targetWageDialogTargetWage + (targetWageDialogTargetWage * toNumber(targetWageDialog.markupPercent)) / 100
   );
-  const targetWageDialogStRate = roundCurrency(
-    targetWageDialogTargetWage * toPercent(toNumber(targetWageDialog.stRatePercent))
-  );
-  const targetWageDialogOtRate = roundCurrency(
-    targetWageDialogTargetWage * toPercent(toNumber(targetWageDialog.otRatePercent))
-  );
+  const targetWageDialogOtRate = roundToCents(targetWageDialogStRate * 1.5);
   const targetWageDialogStHours = roundCurrency(
     toNumber(targetWageDialog.straightTimePersons) * (toNumber(targetWageDialog.straightTimeHours) || 0) * toNumber(targetWageDialog.straightTimeDays)
   );
@@ -2023,12 +2161,20 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     targetWageDialogStHours * targetWageDialogStRate +
       targetWageDialogOtHours * targetWageDialogOtRate
   );
+  const targetWageDialogOverheadAmount = roundCurrency(
+    targetWageDialogTotalAmount * toPercent(toNumber(targetWageDialog.overheadPercent))
+  );
+  const targetWageDialogProfitAmount = roundCurrency(
+    (targetWageDialogTotalAmount + targetWageDialogOverheadAmount) * toPercent(toNumber(targetWageDialog.profitPercent))
+  );
+  const targetWageDialogFinalTotal = roundCurrency(
+    targetWageDialogTotalAmount + targetWageDialogOverheadAmount + targetWageDialogProfitAmount
+  );
 
   function applyTargetWageDialog(event) {
     event.preventDefault();
-    const baseWage = toNumber(targetWageDialog.baseWage);
-    const markupPercent = toNumber(targetWageDialog.markupPercent);
-    const finalWage = baseWage * (1 + markupPercent / 100);
+    const tradeWage = roundToCents(targetWageDialog.rowTargetWage);
+    const markupPercent = roundToCents(targetWageDialog.markupPercent);
 
     setForm((current) => ({
       ...current,
@@ -2040,11 +2186,11 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
             row.id === targetWageDialog.rowId
               ? {
                   ...row,
-                  targetWage: formatDecimalInput(finalWage),
-                  targetWageBase: formatDecimalInput(baseWage),
+                  targetWage: formatDecimalInput(tradeWage),
+                  targetWageBase: formatDecimalInput(tradeWage),
                   targetWageMarkupPercent: formatDecimalInput(markupPercent),
-                  stRatePercent: formatDecimalInput(targetWageDialog.stRatePercent),
-                  otRatePercent: formatDecimalInput(targetWageDialog.otRatePercent),
+                  stRatePercent: formatDecimalInput(markupPercent),
+                  otRatePercent: formatDecimalInput(150),
                   straightTimePersons: formatDecimalInput(targetWageDialog.straightTimePersons),
                   straightTimeHours: formatDecimalInput(targetWageDialog.straightTimeHours),
                   straightTimeDays: formatDecimalInput(targetWageDialog.straightTimeDays),
@@ -2637,59 +2783,86 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const laborColumns = [
     { key: "description", placeholder: "Scope of work", type: "textarea" },
     { key: "classification", label: "Classification", placeholder: "Classification", width: "w-40" },
-    { key: "targetWage", label: "Target Wages", placeholder: "Target Wages", width: "w-32" },
+    {
+      key: "targetWage",
+      label: "Target Wage",
+      width: "w-32",
+      renderInput: ({ derived, row, context }) => (
+        <TargetWageTrigger
+          value={derived?.targetWage ?? row.targetWageBase ?? row.targetWage}
+          onClick={() => openTargetWageDialog(context?.lineId || "", row, "targetWage")}
+        />
+      ),
+    },
   
     {
       key: "stHours",
-      label: "ST Hour",
-      renderInput: ({ derived, row, context }) => (
-        <button
-          type="button"
-          onClick={() => openTargetWageDialog(context?.lineId || "", row, "stHours")}
+      label: "ST Rate",
+      renderInput: ({ derived }) => (
+        <input
+          readOnly
+          value={formatCurrency(derived?.stRate ?? 0)}
           className={sheetInputClass("w-full text-right bg-[color:var(--acm-surface-2)] text-[color:var(--acm-fg)]")}
-        >
-          {formatCurrency(derived?.stHours ?? 0)}
-        </button>
-      ), width: "w-32"
+        />
+      ),
+      width: "w-32"
     },
     {
       key: "stRate",
-      label: "ST Rate",
-      renderInput: ({ derived, row, context }) => (
-        <button
-          type="button"
-          onClick={() => openTargetWageDialog(context?.lineId || "", row, "stRate")}
-          className={sheetInputClass("w-full text-right bg-[color:var(--acm-surface-2)] text-[color:var(--acm-fg)]")}
-        >
-          {formatCurrency(derived?.stRate ?? 0)}
-        </button>
-      ), width: "w-32"
-    },
-    {
-      key: "otHours",
-      label: "OT Hour",
-      renderInput: ({ derived, row, context }) => (
-        <button
-          type="button"
-          onClick={() => openTargetWageDialog(context?.lineId || "", row, "otHours")}
-          className={sheetInputClass("w-full text-right bg-[color:var(--acm-surface-2)] text-[color:var(--acm-fg)]")}
-        >
-          {formatCurrency(derived?.otHours ?? 0)}
-        </button>
-      ), width: "w-32"
-    },
-    {
-      key: "otRate",
       label: "OT Rate",
+      renderInput: ({ derived }) => (
+        <input
+          readOnly
+          value={formatCurrency(derived?.otRate ?? 0)}
+          className={sheetInputClass("w-full text-right bg-[color:var(--acm-surface-2)] text-[color:var(--acm-fg)]")}
+        />
+      ),
+      width: "w-32"
+    },
+    
+    {
+      key: "personCost",
+      label: "Person Cost",
+      width: "w-32",
       renderInput: ({ derived, row, context }) => (
         <button
           type="button"
-          onClick={() => openTargetWageDialog(context?.lineId || "", row, "otRate")}
+          onClick={() => openTargetWageDialog(context?.lineId || "", row, "personCost")}
           className={sheetInputClass("w-full text-right bg-[color:var(--acm-surface-2)] text-[color:var(--acm-fg)]")}
         >
-          {formatCurrency(derived?.otRate ?? 0)}
+          {formatCurrency(derived?.crewHourlyRate ?? 0)}
         </button>
-      ), width: "w-32"
+      ),
+    },
+    
+    {
+      key: "stCost",
+      label: "ST Cost",
+      width: "w-32",
+      renderInput: ({ derived, row, context }) => (
+        <button
+          type="button"
+          onClick={() => openTargetWageDialog(context?.lineId || "", row, "stCost")}
+          className={sheetInputClass("w-full text-right bg-[color:var(--acm-surface-2)] text-[color:var(--acm-fg)]")}
+        >
+          {formatCurrency(derived?.stAmount ?? 0)}
+        </button>
+      ),
+    },
+    
+    {
+      key: "otCost",
+      label: "OT Cost",
+      width: "w-32",
+      renderInput: ({ derived, row, context }) => (
+        <button
+          type="button"
+          onClick={() => openTargetWageDialog(context?.lineId || "", row, "otCost")}
+          className={sheetInputClass("w-full text-right bg-[color:var(--acm-surface-2)] text-[color:var(--acm-fg)]")}
+        >
+          {formatCurrency(derived?.otAmount ?? 0)}
+        </button>
+      ),
     },
     {
       key: "total",
@@ -2804,7 +2977,17 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const materialColumns = [
     { key: "description", label: "Scope of work", placeholder: "Scope of work", width: "w-72", type: "textarea" },
     { key: "quantity", label: "Quantity",  placeholder: "0" },
-    { key: "uom", label: "UOM", placeholder: "Unit" },
+    {
+      key: "uom",
+      label: "UOM",
+      placeholder: "Unit",
+      renderInput: ({ row, onChange }) => (
+        <MaterialUomInput
+          value={row.uom || ""}
+          onChange={onChange}
+        />
+      ),
+    },
     { key: "wastePercent", label: "Waste %",  placeholder: "0" },
     { key: "unitRate", label: "Rate",  placeholder: "0" },
     { key: "freight", label: "Freight ($)",  placeholder: "0" },
@@ -2885,7 +3068,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                 </div>
                 <div className="text-right">
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--acm-muted-fg)]">Estimate</div>
-                  <div className="mt-1 text-2xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">{form.estimateNumber ? `#${form.estimateNumber}` : "Draft"}</div>
+                  <div className="mt-1 text-2xl font-extrabold tracking-tight text-[color:var(--acm-fg)]">{form.estimateNumber ? `${form.estimateNumber}` : "Draft"}</div>
                   <div className="mt-1 flex items-center justify-end gap-2">
                     <StatusPill status={form.status} />
                   </div>
@@ -2950,61 +3133,114 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                         <Fragment>
                     <div className="mb-3 flex flex-wrap items-start justify-between gap-4">
                       <div className="flex-1">
-                        <div className="flex items-center gap-3">
-                          <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Cost Code</div>
-                          {/* <div className="text-xs text-[color:var(--acm-muted-fg)]">Section {index + 1}</div> */}
-                        {/* {!collapsedSections[`${line.id}:costCode`] ? ( */}
-                          <div className="mt-2 grid gap-3 md:grid-cols-[minmax(0,140px)_minmax(280px,1fr)] md:items-center">
+                      <div className="flex-1 justify-between gap-3 md:flex">
+
+                        <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Cost Code</div>
+                          <div className="flex items-center gap-3">
+                            <button type="button" onClick={() => toggleSection(line.id, "costCode")} className="text-sm font-semibold text-[color:var(--acm-accent)]">
+                              {collapsedSections[`${line.id}:costCode`] ? <Eye /> : <EyeOff />}
+                            </button>
+                            {form.costLines.length > 1 ? (
+                              <button
+                                type="button"
+                                onClick={() => removeCostLine(line.id)}
+                                className="rounded-full border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                              >
+                                Remove
+                              </button>
+                            ) : null}
+                          </div>
+                          </div>
+                        <div className="mt-2 grid gap-3 md:grid-cols-[minmax(0,160px)_minmax(0,1fr)] md:items-start">
+                          <label className="relative block">
                             <input
-                              className={sheetInputClass()}
-                              placeholder={`Cost code ${index + 1}`}
+                              className={sheetInputClass("peer pt-5")}
+                              placeholder=" "
                               value={line.code}
                               onChange={(event) => updateLine(line.id, "code", event.target.value)}
                             />
-                          </div>
-                        {/* ) : null} */}
+                            <span
+                              className={`pointer-events-none absolute left-3 bg-white px-1 text-[color:var(--acm-muted-fg)] transition-all duration-150 ${
+                                line.code
+                                  ? "top-0 -translate-y-1/2 text-xs"
+                                  : "top-1/2 -translate-y-1/2 text-sm"
+                              } peer-focus:top-0 peer-focus:-translate-y-1/2 peer-focus:text-xs peer-focus:text-[color:var(--acm-accent)]`}
+                            >
+                              {`Cost Code`}
+                            </span>
+                          </label>
+                          <label className="relative block">
+                            <textarea
+                              rows={1}
+                              className={sheetInputClass("peer min-h-[2.75rem] resize-none overflow-hidden pb-2 pt-5 leading-5")}
+                              placeholder=" "
+                              value={line.description || ""}
+                              onChange={(event) => updateLine(line.id, "description", event.target.value)}
+                              onInput={(event) => {
+                                event.currentTarget.style.height = "auto";
+                                event.currentTarget.style.height = `${event.currentTarget.scrollHeight}px`;
+                              }}
+                            />
+                            <span
+                              className={`pointer-events-none absolute left-3 bg-white px-1 text-[color:var(--acm-muted-fg)] transition-all duration-150 ${
+                                line.description
+                                  ? "top-0 -translate-y-1/2 text-xs"
+                                  : "top-1/2 -translate-y-1/2 text-sm"
+                              } peer-focus:top-0 peer-focus:-translate-y-1/2 peer-focus:text-xs peer-focus:text-[color:var(--acm-accent)]`}
+                            >
+                              Scope of Work
+                            </span>
+                          </label>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <button type="button" onClick={() => toggleSection(line.id, "costCode")} className="text-sm font-semibold text-[color:var(--acm-accent)]">
-                          {collapsedSections[`${line.id}:costCode`] ? <Eye /> : <EyeOff />}
-                        </button>
-                        {form.costLines.length > 1 ? (
-                          <button
-                            type="button"
-                            onClick={() => removeCostLine(line.id)}
-                            className="rounded-full border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50"
-                          >
-                            Remove
-                          </button>
-                        ) : null}
-                      </div>
+                     
                     </div>
 
                     <div className="mb-4">
-                      <div className="flex gap-2 pb-2">
-                        {[
+                      {(() => {
+                        const tabs = [
                           ["laborEntries", "Labor"],
                           ["subcontractorEntries", "Subcontractor"],
                           ["materialEntries", "Material"],
                           ["equipmentEntries", "Equipment"],
-                        ].map(([key, label]) => {
-                          const costCodeExplicit = collapsedSections.hasOwnProperty(`${line.id}:costCode`);
-                          const costCodeShown = costCodeExplicit ? !collapsedSections[`${line.id}:costCode`] : true;
-                          const explicit = collapsedSections.hasOwnProperty(`${line.id}:${key}`);
-                          const isActive = costCodeShown ? false : explicit ? !collapsedSections[`${line.id}:${key}`] : key === "laborEntries";
-                          return (
-                            <button
-                              key={key}
-                              type="button"
-                              onClick={() => showOnlySection(line.id, key)}
-                              className={`px-3 py-1 text-sm font-semibold rounded-md ${isActive ? "bg-[color:var(--acm-surface-1)] text-white border-b-2 border-yellow-400" : "text-[color:var(--acm-muted-fg)] hover:bg-[color:var(--acm-surface-1)]-50"}`}
-                            >
-                              {label}
-                            </button>
-                          );
-                        })}
-                      </div>
+                        ];
+                        const costCodeExplicit = collapsedSections.hasOwnProperty(`${line.id}:costCode`);
+                        const costCodeShown = costCodeExplicit ? !collapsedSections[`${line.id}:costCode`] : true;
+                        const activeIndex = costCodeShown
+                          ? 0
+                          : Math.max(
+                              0,
+                              tabs.findIndex(([key]) => {
+                                const explicit = collapsedSections.hasOwnProperty(`${line.id}:${key}`);
+                                return explicit ? !collapsedSections[`${line.id}:${key}`] : key === "laborEntries";
+                              })
+                            );
+
+                        return (
+                          <div className="relative grid grid-cols-4 rounded-full border border-[color:var(--acm-border)] bg-white p-1 shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
+                            <div
+                              className="absolute bottom-1 top-1 text-white rounded-full bg-[color:var(--acm-surface-1)] shadow-[0_8px_18px_rgba(15,23,42,0.08)] transition-transform duration-300 ease-out"
+                              style={{
+                                left: "4px",
+                                width: "calc(25% - 6px)",
+                                transform: `translateX(calc(${activeIndex * 100}% + ${activeIndex * 2}px))`,
+                              }}
+                            />
+                            {tabs.map(([key, label], index) => (
+                              <button
+                                key={key}
+                                type="button"
+                                onClick={() => showOnlySection(line.id, key)}
+                                className={`relative z-10 rounded-full px-3 py-2 text-sm font-semibold transition-colors ${
+                                  index === activeIndex ? "text-white" : "text-[color:var(--acm-muted-fg)]"
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     <div className="space-y-8">
@@ -3228,7 +3464,13 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       <Modal
         open={targetWageDialog.open}
         title={
-          targetWageDialog.field === "stHours"
+          targetWageDialog.field === "personCost"
+            ? "Person Cost"
+            : targetWageDialog.field === "stCost"
+            ? "ST Cost"
+            : targetWageDialog.field === "otCost"
+            ? "OT Cost"
+            : targetWageDialog.field === "stHours"
             ? "ST Hours"
             : targetWageDialog.field === "stRate"
             ? "ST Rate"
@@ -3242,7 +3484,130 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
         maxWidth="max-w-md"
       >
         <form onSubmit={applyTargetWageDialog} className="grid gap-4">
-          {(targetWageDialog.field === "stRate" || targetWageDialog.field === "otRate") && (
+          {(targetWageDialog.field === "stRate") && (
+            <>
+              <LabeledInput label="Target Wage">
+                <input
+                  className={sheetInputClass()}
+                  inputMode="decimal"
+                  value={targetWageDialog.rowTargetWage}
+                  onChange={(event) => setTargetWageDialog((current) => ({
+                    ...current,
+                    rowTargetWage: event.target.value
+                  }))}
+                  placeholder=""
+                />
+              </LabeledInput>
+              <LabeledInput label="Mark Up %">
+                <input
+                  className={sheetInputClass()}
+                  inputMode="decimal"
+                  value={targetWageDialog.markupPercent}
+                  onChange={(event) => setTargetWageDialog((current) => ({
+                    ...current,
+                    markupPercent: event.target.value
+                  }))}
+                  placeholder=""
+                />
+              </LabeledInput>
+              <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
+                <div className="text-xs text-[color:var(--acm-muted-fg)]">ST Rate</div>
+                <div className="text-lg font-semibold">{formatCurrency(targetWageDialogStRate)}</div>
+              </div>
+            </>
+          )}
+
+          {(targetWageDialog.field === "personCost") && (
+            <>
+              <LabeledInput label="Persons">
+                <input
+                  className={sheetInputClass()}
+                  inputMode="decimal"
+                  value={targetWageDialog.straightTimePersons}
+                  onChange={(event) => setTargetWageDialog((current) => ({
+                    ...current,
+                    straightTimePersons: event.target.value,
+                    overtimePersons: current.overtimePersons || event.target.value
+                  }))}
+                  placeholder="0"
+                />
+              </LabeledInput>
+              <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
+                <div className="text-xs text-[color:var(--acm-muted-fg)]">Calculated ST Rate</div>
+                <div className="text-lg font-semibold">{formatCurrency(targetWageDialogStRate)}</div>
+              </div>
+              <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
+                <div className="text-xs text-[color:var(--acm-muted-fg)]">Person Cost</div>
+                <div className="text-lg font-semibold">
+                  {formatCurrency(roundToCents(toNumber(targetWageDialog.straightTimePersons) * targetWageDialogStRate))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {(targetWageDialog.field === "stCost") && (
+            <>
+              <LabeledInput label="ST Hrs">
+                <input
+                  className={sheetInputClass()}
+                  inputMode="decimal"
+                  value={targetWageDialog.straightTimeHours}
+                  onChange={(event) => setTargetWageDialog((current) => ({
+                    ...current,
+                    straightTimeHours: event.target.value
+                  }))}
+                  placeholder="0"
+                />
+              </LabeledInput>
+              {/* <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
+                <div className="text-xs text-[color:var(--acm-muted-fg)]">ST Rate</div>
+                <div className="text-lg font-semibold">{formatCurrency(targetWageDialogStRate)}</div>
+              </div> */}
+              <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
+                <div className="text-xs text-[color:var(--acm-muted-fg)]">ST Cost</div>
+                <div className="text-lg font-semibold">
+                  {formatCurrency(roundToCents(toNumber(targetWageDialog.straightTimePersons) * toNumber(targetWageDialog.straightTimeHours) * targetWageDialogStRate))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {(targetWageDialog.field === "otCost") && (
+            <>
+              <LabeledInput label="OT Hrs">
+                <input
+                  className={sheetInputClass()}
+                  inputMode="decimal"
+                  value={targetWageDialog.overtimeHours}
+                  onChange={(event) => setTargetWageDialog((current) => ({
+                    ...current,
+                    overtimeHours: event.target.value
+                  }))}
+                  placeholder="0"
+                />
+              </LabeledInput>
+              {/* <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
+                <div className="text-xs text-[color:var(--acm-muted-fg)]">Calculated OT Rate</div>
+                <div className="text-lg font-semibold">{formatCurrency(targetWageDialogOtRate)}</div>
+              </div> */}
+              <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
+                <div className="text-xs text-[color:var(--acm-muted-fg)]">OT Cost</div>
+                <div className="text-lg font-semibold">
+                  {formatCurrency(
+                    toNumber(targetWageDialog.overtimeHours) > 0
+                      ? roundToCents(
+                          (toNumber(targetWageDialog.overtimePersons) || toNumber(targetWageDialog.straightTimePersons)) *
+                            toNumber(targetWageDialog.overtimeHours) *
+                            targetWageDialogOtRate
+                        )
+                      : 0
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+
+          {(targetWageDialog.field === "otRate") && (
             <>
               <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">Target Wage</div>
@@ -3252,17 +3617,17 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                 <input
                   className={sheetInputClass()}
                   inputMode="decimal"
-                  value={targetWageDialog.field === "stRate" ? targetWageDialog.stRatePercent : targetWageDialog.otRatePercent}
+                  value={targetWageDialog.otRatePercent}
                   onChange={(event) => setTargetWageDialog((current) => ({
                     ...current,
-                    [targetWageDialog.field === "stRate" ? "stRatePercent" : "otRatePercent"]: event.target.value
+                    otRatePercent: event.target.value
                   }))}
                   placeholder={""}
                 />
               </LabeledInput>
               <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
-                <div className="text-xs text-[color:var(--acm-muted-fg)]">{targetWageDialog.field === "stRate" ? "ST" : "OT"} Rate</div>
-                <div className="text-lg font-semibold">{formatCurrency(roundCurrency(toNumber(targetWageDialog.rowTargetWage) * toPercent(toNumber(targetWageDialog.field === "stRate" ? targetWageDialog.stRatePercent : targetWageDialog.otRatePercent))))}</div>
+                <div className="text-xs text-[color:var(--acm-muted-fg)]">OT Rate</div>
+                <div className="text-lg font-semibold">{formatCurrency(roundCurrency(toNumber(targetWageDialog.rowTargetWage) * toPercent(toNumber(targetWageDialog.otRatePercent))))}</div>
               </div>
             </>
           )}
@@ -3300,7 +3665,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
               </div>
               <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">ST Hours Total</div>
-                <div className="text-lg font-semibold">{formatCurrency(roundCurrency(toNumber(targetWageDialog.straightTimePersons) * (toNumber(targetWageDialog.straightTimeHours) || 0) * toNumber(targetWageDialog.straightTimeDays)))}</div>
+                <div className="text-lg font-semibold">{formatDecimalInput(roundCurrency(toNumber(targetWageDialog.straightTimePersons) * (toNumber(targetWageDialog.straightTimeHours) || 0) * toNumber(targetWageDialog.straightTimeDays)))}</div>
               </div>
             </>
           )}
@@ -3338,7 +3703,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
               </div>
               <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
                 <div className="text-xs text-[color:var(--acm-muted-fg)]">OT Hours Total</div>
-                <div className="text-lg font-semibold">{formatCurrency(roundCurrency(toNumber(targetWageDialog.overtimePersons) * (toNumber(targetWageDialog.overtimeHours) || 0) * toNumber(targetWageDialog.overtimeDays)))}</div>
+                <div className="text-lg font-semibold">{formatDecimalInput(roundCurrency(toNumber(targetWageDialog.overtimePersons) * (toNumber(targetWageDialog.overtimeHours) || 0) * toNumber(targetWageDialog.overtimeDays)))}</div>
               </div>
             </>
           )}
@@ -3346,16 +3711,16 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
           {(targetWageDialog.field === "targetWage") && (
             <>
               <div className="grid gap-4 md:grid-cols-2">
-                <LabeledInput label="Base Wage">
+                <LabeledInput label="Target Wage">
                   <input
                     className={sheetInputClass()}
                     inputMode="decimal"
-                    value={targetWageDialog.baseWage}
-                    onChange={(event) => setTargetWageDialog((current) => ({ ...current, baseWage: event.target.value }))}
+                    value={targetWageDialog.rowTargetWage}
+                    onChange={(event) => setTargetWageDialog((current) => ({ ...current, rowTargetWage: event.target.value }))}
                     placeholder="00"
                   />
                 </LabeledInput>
-                <LabeledInput label="Markup %">
+                <LabeledInput label="Mark Up %">
                   <input
                     className={sheetInputClass()}
                     inputMode="decimal"
@@ -3365,103 +3730,9 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                   />
                 </LabeledInput>
               </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <LabeledInput label="ST Rate %">
-                  <input
-                    className={sheetInputClass()}
-                    inputMode="decimal"
-                    value={targetWageDialog.stRatePercent}
-                    onChange={(event) => setTargetWageDialog((current) => ({ ...current, stRatePercent: event.target.value }))}
-                    placeholder="000"
-                  />
-                </LabeledInput>
-                <LabeledInput label="OT Rate %">
-                  <input
-                    className={sheetInputClass()}
-                    inputMode="decimal"
-                    value={targetWageDialog.otRatePercent}
-                    onChange={(event) => setTargetWageDialog((current) => ({ ...current, otRatePercent: event.target.value }))}
-                    placeholder="000"
-                  />
-                </LabeledInput>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-3">
-                <LabeledInput label="ST Persons">
-                  <input
-                    className={sheetInputClass()}
-                    inputMode="decimal"
-                    value={targetWageDialog.straightTimePersons}
-                    onChange={(event) => setTargetWageDialog((current) => ({ ...current, straightTimePersons: event.target.value }))}
-                    placeholder="0"
-                  />
-                </LabeledInput>
-                <LabeledInput label="ST Hours">
-                  <input
-                    className={sheetInputClass()}
-                    inputMode="decimal"
-                    value={targetWageDialog.straightTimeHours}
-                    onChange={(event) => setTargetWageDialog((current) => ({ ...current, straightTimeHours: event.target.value }))}
-                    placeholder="0"
-                  />
-                </LabeledInput>
-                <LabeledInput label="ST Days">
-                  <input
-                    className={sheetInputClass()}
-                    inputMode="decimal"
-                    value={targetWageDialog.straightTimeDays}
-                    onChange={(event) => setTargetWageDialog((current) => ({ ...current, straightTimeDays: event.target.value }))}
-                    placeholder="0"
-                  />
-                </LabeledInput>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-3">
-                <LabeledInput label="OT Persons">
-                  <input
-                    className={sheetInputClass()}
-                    inputMode="decimal"
-                    value={targetWageDialog.overtimePersons}
-                    onChange={(event) => setTargetWageDialog((current) => ({ ...current, overtimePersons: event.target.value }))}
-                    placeholder="0"
-                  />
-                </LabeledInput>
-                <LabeledInput label="OT Hours">
-                  <input
-                    className={sheetInputClass()}
-                    inputMode="decimal"
-                    value={targetWageDialog.overtimeHours}
-                    onChange={(event) => setTargetWageDialog((current) => ({ ...current, overtimeHours: event.target.value }))}
-                    placeholder="0"
-                  />
-                </LabeledInput>
-                <LabeledInput label="OT Days">
-                  <input
-                    className={sheetInputClass()}
-                    inputMode="decimal"
-                    value={targetWageDialog.overtimeDays}
-                    onChange={(event) => setTargetWageDialog((current) => ({ ...current, overtimeDays: event.target.value }))}
-                    placeholder="0"
-                  />
-                </LabeledInput>
-              </div>
-
               <div className="rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] px-4 py-3 text-sm text-[color:var(--acm-fg)]">
-                <div className="grid gap-2">
-                  <div className="font-semibold">Target Wage</div>
-                  <div>{formatCurrency(targetWageDialogTargetWage)}/hr</div>
-                  <div className="font-semibold">ST Rate</div>
-                  <div>{formatCurrency(targetWageDialogStRate)}/hr</div>
-                  <div className="font-semibold">OT Rate</div>
-                  <div>{formatCurrency(targetWageDialogOtRate)}/hr</div>
-                  <div className="font-semibold">ST Hours</div>
-                  <div>{formatCurrency(targetWageDialogStHours)}</div>
-                  <div className="font-semibold">OT Hours</div>
-                  <div>{formatCurrency(targetWageDialogOtHours)}</div>
-                  <div className="font-semibold">Total</div>
-                  <div>{formatCurrency(targetWageDialogTotalAmount)}</div>
-                </div>
+                <div className="text-xs text-[color:var(--acm-muted-fg)]">Calculated Amount</div>
+                <div className="text-lg font-semibold">{formatCurrency(targetWageDialogStRate)}</div>
               </div>
             </>
           )}

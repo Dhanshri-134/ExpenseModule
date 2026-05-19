@@ -360,7 +360,7 @@ function buildCostLineDetailSections(estimate) {
           widths: [72, 34, 34, 34, 34, 52, 56, 72],
           fontSize: 5.5,
           rowLayout: "stackedDescription",
-          detailLabel: "Scope Of Work",
+          detailLabel: "Scope of Work",
           rows: (costCode.laborEntries ?? []).map((entry) => ({
             cells: [
               entry.metadata?.classification || "-",
@@ -630,38 +630,48 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
 
   const tableX = page.margin;
   const tableWidth = availableWidth;
-  const labelWidth = tableWidth - 120;
+  const costCodeWidth = 170;
   const totalWidth = 120;
+  const scopeWidth = tableWidth - costCodeWidth - totalWidth;
   const headerHeight = 24;
 
-  drawRect(commands, tableX, y - headerHeight, labelWidth, headerHeight, null, line, 0.8);
-  drawRect(commands, tableX + labelWidth, y - headerHeight, totalWidth, headerHeight, null, line, 0.8);
-  drawText(commands, "Scope of Work", tableX + 10, y - 16, 9, ink);
+  drawRect(commands, tableX, y - headerHeight, costCodeWidth, headerHeight, null, line, 0.8);
+  drawRect(commands, tableX + costCodeWidth, y - headerHeight, scopeWidth, headerHeight, null, line, 0.8);
+  drawRect(commands, tableX + costCodeWidth + scopeWidth, y - headerHeight, totalWidth, headerHeight, null, line, 0.8);
+  drawText(commands, "Cost Code", tableX + 10, y - 16, 9, ink);
+  drawText(commands, "Scope Of Work", tableX + costCodeWidth + 10, y - 16, 9, ink);
   drawRightAlignedText(commands, "Total", tableX + tableWidth - 10, y - 16, 9, ink);
   y -= headerHeight;
 
   rows.forEach((row) => {
     const normalizedCode = String(row.code || "").trim();
     const normalizedLabel = String(row.label || "").trim();
-    const rowLabel =
+    const costCodeText =
       normalizedCode && normalizedLabel && normalizedCode.toLowerCase() !== normalizedLabel.toLowerCase()
         ? `${normalizedCode} - ${normalizedLabel}`
         : normalizedLabel || normalizedCode || "-";
-    const scopeLines = wrapPdfLine(rowLabel, 48);
-    const rowHeight = Math.max(26, scopeLines.length * 10 + 10);
-    drawRect(commands, tableX, y - rowHeight, labelWidth, rowHeight, null, line, 0.8);
-    drawRect(commands, tableX + labelWidth, y - rowHeight, totalWidth, rowHeight, null, line, 0.8);
-    scopeLines.forEach((lineText, index) => {
+    const scopeText = String(row.description || row.detail || normalizedLabel || normalizedCode || "-").trim() || "-";
+    const costCodeLines = wrapPdfLine(costCodeText, 26);
+    const scopeLines = wrapPdfLine(scopeText, 56);
+    const rowHeight = Math.max(26, Math.max(costCodeLines.length, scopeLines.length) * 10 + 10);
+    drawRect(commands, tableX, y - rowHeight, costCodeWidth, rowHeight, null, line, 0.8);
+    drawRect(commands, tableX + costCodeWidth, y - rowHeight, scopeWidth, rowHeight, null, line, 0.8);
+    drawRect(commands, tableX + costCodeWidth + scopeWidth, y - rowHeight, totalWidth, rowHeight, null, line, 0.8);
+    costCodeLines.forEach((lineText, index) => {
       drawText(commands, lineText, tableX + 10, y - 15 - index * 9, 8.3, ink);
+    });
+    scopeLines.forEach((lineText, index) => {
+      drawText(commands, lineText, tableX + costCodeWidth + 10, y - 15 - index * 9, 8.3, ink);
     });
     drawRightAlignedText(commands, formatPdfCurrency(row.totalPrice || 0), tableX + tableWidth - 10, y - 15, 8.5, ink);
     y -= rowHeight;
   });
 
   const totalRowHeight = 28;
-  drawRect(commands, tableX, y - totalRowHeight, labelWidth, totalRowHeight, null, line, 1);
-  drawRect(commands, tableX + labelWidth, y - totalRowHeight, totalWidth, totalRowHeight, null, line, 1);
-  drawText(commands, "Grand Total", tableX + 10, y - 17, 9, ink);
+  drawRect(commands, tableX, y - totalRowHeight, costCodeWidth, totalRowHeight, null, line, 1);
+  drawRect(commands, tableX + costCodeWidth, y - totalRowHeight, scopeWidth, totalRowHeight, null, line, 1);
+  drawRect(commands, tableX + costCodeWidth + scopeWidth, y - totalRowHeight, totalWidth, totalRowHeight, null, line, 1);
+  drawText(commands, "Grand Total", tableX + costCodeWidth + 10, y - 17, 9, ink);
   drawRightAlignedText(commands, formatPdfCurrency(totalValue), tableX + tableWidth - 10, y - 17, 10, ink);
 
   closePage(commands);

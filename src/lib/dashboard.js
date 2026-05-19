@@ -88,7 +88,7 @@ export function filterNavigationByAccess(navigation = [], moduleAccess = null) {
 
 export function filterNavigationForViewer(navigation = [], viewer = null) {
   const filtered = filterNavigationByAccess(navigation, viewer?.moduleAccess);
-  return filtered.filter((item) => item.label === "Expenses");
+  return filtered.filter((item) => item.label === "Estimates");
 }
 
 export function getProjectNavigation(roleBase, projectId) {

@@ -186,20 +186,21 @@ function InvoiceEditorPanelComponent({
             </div>
 
             <div className="mt-4 overflow-hidden rounded-[18px] border border-[color:var(--acm-border)]">
-              <div className="grid grid-cols-[1fr_160px] border-b border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
-                <div>Scope Of Work</div>
-                <div className="text-right">Total</div>
+              <div className="grid grid-cols-[1fr_160px] border-b border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-0 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
+                <div className="py-[6px] px-[4px]">Scope Of Work</div>
+                <div className="text-right px-4 py-3">Total</div>
               </div>
               {(form.invoiceEntries || []).map((entry) => (
-                <div key={entry.id} className="grid grid-cols-[1fr_160px_84px] items-center gap-3 border-b border-[color:var(--acm-border)] px-4 py-2 text-sm text-[color:var(--acm-fg)] last:border-b-0">
-                  <input
-                    className={sheetFieldClass()}
+                <div key={entry.id} className="grid grid-cols-[1fr_160px_84px] items-center gap-3 border-b border-[color:var(--acm-border)] px-0 py-2 text-sm text-[color:var(--acm-fg)] last:border-b-0">
+                  <textarea
+                    className={sheetFieldClass("min-h-[48px] resize-none py-[2px] px-[4px] break-words whitespace-normal")}
                     value={entry.scope}
                     onChange={(event) => updateInvoiceEntry(entry.id, "scope", event.target.value)}
                     placeholder="Scope of work"
+                    rows={2}
                   />
                   <input
-                    className={sheetFieldClass("text-right")}
+                    className={sheetFieldClass("text-right px-[4px] py-[2px]")}
                     inputMode="decimal"
                     value={entry.total}
                     onChange={(event) => updateInvoiceEntry(entry.id, "total", event.target.value)}
