@@ -10,7 +10,7 @@ import Modal from "@/components/dashboard/Modal";
 import { invalidateApiQuery, useApiQuery } from "@/lib/client/apiQuery";
 import { PhoneInput } from "@/shared/forms/PhoneInput";
 import { getLocalDateInputValue } from "@/shared/utils/dateTime";
-import { Check, ChevronDown, Eye, EyeOff, Trash, Trash2Icon } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Eye, EyeOff, Trash, Trash2Icon } from "lucide-react";
 
 
 
@@ -652,6 +652,7 @@ function calculateOverhead(entry) {
 }
 
 function computeUiTotals(form, previewSummary) {
+  const categoryDisplayTotals = computeCategoryDisplayTotals(form);
   const taxAmount = form.costLines.reduce((sum, line) => {
     const laborTax = (line.laborEntries ?? []).reduce((acc, entry) => acc + calculateLabor(entry).taxAmount, 0);
     const subcontractorTax = (line.subcontractorEntries ?? []).reduce((acc, entry) => acc + calculateSubcontractor(entry).taxAmount, 0);
@@ -671,6 +672,71 @@ function computeUiTotals(form, previewSummary) {
     taxAmount,
     additionalCharges,
     grandTotal,
+    ...categoryDisplayTotals,
+  };
+}
+
+function computeCategoryDisplayTotals(form) {
+  let laborDisplayCost = 0;
+  let subcontractorDisplayCost = 0;
+  let materialDisplayCost = 0;
+  let equipmentDisplayCost = 0;
+
+  (form.costLines ?? []).forEach((line) => {
+    (line.laborEntries ?? []).forEach((entry) => {
+      const derived = calculateLabor(entry);
+      laborDisplayCost += (derived.total || 0) + (derived.overheadAmount || 0);
+    });
+    (line.subcontractorEntries ?? []).forEach((entry) => {
+      const derived = calculateSubcontractor(entry);
+      subcontractorDisplayCost += (derived.total || 0) + (derived.overheadAmount || 0);
+    });
+    (line.materialEntries ?? []).forEach((entry) => {
+      const derived = calculateMaterial(entry);
+      materialDisplayCost += (derived.total || 0) + (derived.overheadAmount || 0);
+    });
+    (line.equipmentEntries ?? []).forEach((entry) => {
+      const derived = calculateEquipment(entry);
+      equipmentDisplayCost += (derived.total || 0) + (derived.overheadAmount || 0);
+    });
+  });
+
+  return {
+    laborDisplayCost: roundCurrency(laborDisplayCost),
+    subcontractorDisplayCost: roundCurrency(subcontractorDisplayCost),
+    materialDisplayCost: roundCurrency(materialDisplayCost),
+    equipmentDisplayCost: roundCurrency(equipmentDisplayCost),
+  };
+}
+
+function computeCostLineDisplaySummary(line) {
+  let laborDisplayCost = 0;
+  let subcontractorDisplayCost = 0;
+  let materialDisplayCost = 0;
+  let equipmentDisplayCost = 0;
+
+  (line.laborEntries ?? []).forEach((entry) => {
+    const derived = calculateLabor(entry);
+    laborDisplayCost += (derived.total || 0) + (derived.overheadAmount || 0);
+  });
+  (line.subcontractorEntries ?? []).forEach((entry) => {
+    const derived = calculateSubcontractor(entry);
+    subcontractorDisplayCost += (derived.total || 0) + (derived.overheadAmount || 0);
+  });
+  (line.materialEntries ?? []).forEach((entry) => {
+    const derived = calculateMaterial(entry);
+    materialDisplayCost += (derived.total || 0) + (derived.overheadAmount || 0);
+  });
+  (line.equipmentEntries ?? []).forEach((entry) => {
+    const derived = calculateEquipment(entry);
+    equipmentDisplayCost += (derived.total || 0) + (derived.overheadAmount || 0);
+  });
+
+  return {
+    laborDisplayCost: roundCurrency(laborDisplayCost),
+    subcontractorDisplayCost: roundCurrency(subcontractorDisplayCost),
+    materialDisplayCost: roundCurrency(materialDisplayCost),
+    equipmentDisplayCost: roundCurrency(equipmentDisplayCost),
   };
 }
 
@@ -1408,38 +1474,32 @@ const EstimateRecordsPanel = memo(function EstimateRecordsPanel({
 });
 
 const EstimateTotalsTable = memo(function EstimateTotalsTable({ previewSummary, uiTotals }) {
+  const items = [
+    ["Labor", formatCurrency(uiTotals.laborDisplayCost || 0)],
+    ["Subcontractor", formatCurrency(uiTotals.subcontractorDisplayCost || 0)],
+    ["Material", formatCurrency(uiTotals.materialDisplayCost || 0)],
+    ["Equipment", formatCurrency(uiTotals.equipmentDisplayCost || 0)],
+    ["Tax", formatCurrency(uiTotals.taxAmount || 0)],
+    ["Overhead", formatCurrency(previewSummary.overheadAmount || 0)],
+    ["Profit", formatCurrency(previewSummary.profitAmount || 0)],
+    ["Man Hours", formatDecimalInput(previewSummary.totalManHours || 0)],
+    ["Total Days", formatDecimalInput(previewSummary.totalDays || 0)],
+    ["Total Estimate", formatCurrency(uiTotals.grandTotal || 0)],
+  ];
+
   return (
-    <div className="space-y-3 overflow-x-auto">
-      <table className="min-w-full">
-        <thead>
-          <tr className="text-left text-xs uppercase tracking-[0.16em] text-[color:var(--acm-muted-fg)]">
-            <th className="py-2">Labor</th>
-            <th className="py-2">Subcontractor</th>
-            <th className="py-2">Material</th>
-            <th className="py-2">Equipment</th>
-            <th className="py-2">Tax</th>
-            <th className="py-2">Overhead</th>
-            <th className="py-2">Profit</th>
-            <th className="py-2">Man Hours</th>
-            <th className="py-2">Total Days</th>
-            <th className="py-2">Total Estimate</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr className="text-sm font-semibold text-[color:var(--acm-fg)]">
-            <td className="py-2">{formatCurrency(previewSummary.laborCost)}</td>
-            <td className="py-2">{formatCurrency(previewSummary.subcontractorCost)}</td>
-            <td className="py-2">{formatCurrency(previewSummary.materialCost)}</td>
-            <td className="py-2">{formatCurrency(previewSummary.equipmentCost)}</td>
-            <td className="py-2">{formatCurrency(uiTotals.taxAmount)}</td>
-            <td className="py-2">{formatCurrency(previewSummary.overheadAmount)}</td>
-            <td className="py-2">{formatCurrency(previewSummary.profitAmount)}</td>
-            <td className="py-2">{formatDecimalInput(previewSummary.totalManHours || 0)}</td>
-            <td className="py-2">{formatDecimalInput(previewSummary.totalDays || 0)}</td>
-            <td className="py-2">{formatCurrency(uiTotals.grandTotal || 0)}</td>
-          </tr>
-        </tbody>
-      </table>
+    <div className="space-y-2 max-w-md">
+      {items.map(([label, value]) => (
+        <div
+          key={label}
+          className="flex justify-between items-center bg-white border border-[color:var(--acm-border)] rounded-lg px-3 py-2"
+        >
+          <div className="text-sm text-[color:var(--acm-muted-fg)]">{label}</div>
+          <div className={label === "Total Estimate" ? "text-lg font-bold text-[color:var(--acm-accent)]" : "text-sm font-medium text-[color:var(--acm-fg)]"}>
+            {value}
+          </div>
+        </div>
+      ))}
     </div>
   );
 });
@@ -1784,6 +1844,8 @@ const SectionTable = memo(function SectionTable({
 
 export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = "", initialCostLineId = "", standalone = false }) {
   const router = useRouter();
+  const pageRootRef = useRef(null);
+  const scrollContainerRef = useRef(null);
   const clientsQuery = useApiQuery("/api/clients");
   const settingsQuery = useApiQuery("/api/settings");
   const { query: templatesQuery, templates: rawTemplates, defaultTemplate: rawDefaultTemplate } = useEstimateTemplates();
@@ -1808,6 +1870,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [paymentScheduleDialogOpen, setPaymentScheduleDialogOpen] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const [targetWageDialog, setTargetWageDialog] = useState({
     open: false,
     field: "targetWage",
@@ -1867,6 +1930,38 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       return changed ? next : current;
     });
   }, [form.costLines]);
+
+  useEffect(() => {
+    function findScrollContainer(node) {
+      let current = node?.parentElement || null;
+      while (current) {
+        const style = window.getComputedStyle(current);
+        const overflowY = style.overflowY;
+        const isScrollable = (overflowY === "auto" || overflowY === "scroll") && current.scrollHeight > current.clientHeight;
+        if (isScrollable) return current;
+        current = current.parentElement;
+      }
+      return window;
+    }
+
+    const scrollContainer = findScrollContainer(pageRootRef.current);
+    scrollContainerRef.current = scrollContainer;
+
+    function readScrollTop() {
+      if (scrollContainer === window) {
+        return window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+      }
+      return scrollContainer.scrollTop || 0;
+    }
+
+    function handleScroll() {
+      setShowScrollTop(readScrollTop() > 140);
+    }
+
+    handleScroll();
+    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
+    return () => scrollContainer.removeEventListener("scroll", handleScroll);
+  }, []);
 
   const clients = useMemo(() => clientsQuery.data?.clients ?? [], [clientsQuery.data?.clients]);
   const profile = useMemo(() => settingsQuery.data?.profile ?? null, [settingsQuery.data?.profile]);
@@ -2462,28 +2557,26 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
       const next = { ...current };
       const currentVal = Boolean(current?.[`${lineId}:${sectionKey}`]);
 
-      // Special handling for Cost Code: showing Cost Code should collapse all tabs/sections
       if (sectionKey === "costCode") {
         if (currentVal) {
-          // currently collapsed=true (hidden) -> show cost code: collapse others
+          // Opening the costCode view: expand Labor by default and collapse others
           next[`${lineId}:costCode`] = false;
-          ["laborEntries", "subcontractorEntries", "materialEntries", "equipmentEntries"].forEach((k) => {
-            next[`${lineId}:${k}`] = true;
-          });
-        } else {
-          // currently visible -> hide cost code and show default (Labor)
-          next[`${lineId}:costCode`] = true;
           next[`${lineId}:laborEntries`] = false;
-          ["subcontractorEntries", "materialEntries", "equipmentEntries"].forEach((k) => {
-            next[`${lineId}:${k}`] = true;
-          });
+          next[`${lineId}:subcontractorEntries`] = true;
+          next[`${lineId}:materialEntries`] = true;
+          next[`${lineId}:equipmentEntries`] = true;
+        } else {
+          // Closing the costCode view: collapse everything
+          next[`${lineId}:costCode`] = true;
+          next[`${lineId}:laborEntries`] = true;
+          next[`${lineId}:subcontractorEntries`] = true;
+          next[`${lineId}:materialEntries`] = true;
+          next[`${lineId}:equipmentEntries`] = true;
         }
         return next;
       }
 
-      // Normal toggle for section tabs: just flip the collapsed state
       next[`${lineId}:${sectionKey}`] = !currentVal;
-      // if we're showing a tab (setting collapsed -> false), ensure costCode is hidden
       if (!next[`${lineId}:${sectionKey}`]) {
         next[`${lineId}:costCode`] = true;
       }
@@ -2886,7 +2979,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     {
       key: "targetWage",
       label: "Target Wage",
-      width: "w-32",
+      width: "w-25",
       renderInput: ({ derived, row, context }) => (
         <TargetWageTrigger
           value={derived?.targetWage ?? row.targetWageBase ?? row.targetWage}
@@ -2905,7 +2998,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
           className={"w-full  border-0 text-[color:var(--acm-fg)] px-2 py-2 text-sm font-semibold"}
         />
       ),
-      width: "w-32"
+      width: "w-20"
     },
     {
       key: "stRate",
@@ -2917,13 +3010,13 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
           className={"w-full  border-0 text-[color:var(--acm-fg)] px-2 py-2 text-sm font-semibold"}
         />
       ),
-      width: "w-32"
+      width: "w-20"
     },
     
     {
       key: "personCost",
       label: "Person Cost",
-      width: "w-32",
+      width: "w-20",
       renderInput: ({ derived, row, context }) => (
         <button
           type="button"
@@ -2938,7 +3031,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     {
       key: "stCost",
       label: "ST Cost",
-      width: "w-32",
+      width: "w-25",
       renderInput: ({ derived, row, context }) => (
         <button
           type="button"
@@ -2953,7 +3046,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     {
       key: "otCost",
       label: "OT Cost",
-      width: "w-32",
+      width: "w-25",
       renderInput: ({ derived, row, context }) => (
         <button
           type="button"
@@ -2977,7 +3070,8 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     },
     {
       key: "overheadPercent",
-      label: "Overhead %",
+      label: "OH %",
+      width: "w-20",
       placeholder: "0",
       renderInput: ({ row, derived, onChange }) => (
         <div className="flex items-center gap-2">
@@ -2997,7 +3091,8 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
     },
     {
       key: "profitPercent",
-      label: "Profit %",
+      label: "Profit ",
+      width: "w-20",
       placeholder: "0",
       renderInput: ({ row, derived, onChange }) => (
         <div className="flex items-center gap-2">
@@ -3109,7 +3204,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
   ];
 
   return (
-    <div className="min-h-screen space-y-6 bg-white">
+    <div ref={pageRootRef} className="min-h-screen space-y-6 bg-white">
       <section>
         <div className={`flex flex-wrap items-center gap-4 ${standalone ? "justify-end" : "justify-between"}`}>
           {/* <div>
@@ -3318,6 +3413,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                   <div key={line.id} className="  ">
                     {(() => {
                       const lineSummary = computeCostLineSummary(line, form);
+                      const lineDisplaySummary = computeCostLineDisplaySummary(line);
                       return (
                         <Fragment>
                     <div className="mb-3 flex flex-wrap items-start justify-between gap-4">
@@ -3360,6 +3456,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                           </label>
                           <label className="relative block">
                             <textarea
+                              ref={(node) => autoResizeTextarea(node)}
                               rows={1}
                               className={sheetInputClass("peer min-h-[2.75rem] resize-none overflow-hidden pb-2 pt-5 leading-5")}
                               placeholder=" "
@@ -3403,31 +3500,36 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                                 const explicit = collapsedSections.hasOwnProperty(`${line.id}:${key}`);
                                 return explicit ? !collapsedSections[`${line.id}:${key}`] : key === "laborEntries";
                               })
-                            );
+                            )
+                          ;
 
                         return (
-                          <div className="relative grid grid-cols-4 rounded-full border border-[color:var(--acm-border)] bg-white p-1 shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
-                            <div
-                              className="absolute bottom-1 top-1 text-white rounded-full bg-[color:var(--acm-surface-1)] shadow-[0_8px_18px_rgba(15,23,42,0.08)] transition-transform duration-300 ease-out"
-                              style={{
-                                left: "4px",
-                                width: "calc(25% - 6px)",
-                                transform: `translateX(calc(${activeIndex * 100}% + ${activeIndex * 2}px))`,
-                              }}
-                            />
-                            {tabs.map(([key, label], index) => (
-                              <button
-                                key={key}
-                                type="button"
-                                onClick={() => showOnlySection(line.id, key)}
-                                className={`relative z-10 rounded-full px-3 py-2 text-sm font-semibold transition-colors ${
-                                  index === activeIndex ? "text-white" : "text-[color:var(--acm-muted-fg)]"
-                                }`}
-                              >
-                                {label}
-                              </button>
-                            ))}
-                          </div>
+                          <>
+                            {costCodeShown ? (
+                              <div className="relative grid grid-cols-4 rounded-full border border-[color:var(--acm-border)] bg-white p-1 shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
+                                <div
+                                  className="absolute bottom-1 top-1 text-white rounded-full bg-[color:var(--acm-surface-1)] shadow-[0_8px_18px_rgba(15,23,42,0.08)] transition-transform duration-300 ease-out"
+                                  style={{
+                                    left: "4px",
+                                    width: "calc(25% - 6px)",
+                                    transform: `translateX(calc(${activeIndex * 100}% + ${activeIndex * 2}px))`,
+                                  }}
+                                />
+                                {tabs.map(([key, label], index) => (
+                                  <button
+                                    key={key}
+                                    type="button"
+                                    onClick={() => showOnlySection(line.id, key)}
+                                    className={`relative z-10 rounded-full px-3 py-2 text-sm font-semibold transition-colors ${
+                                      index === activeIndex ? "text-white" : "text-[color:var(--acm-muted-fg)]"
+                                    }`}
+                                  >
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                          </>
                         );
                       })()}
                     </div>
@@ -3507,18 +3609,16 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                               onToggle={() => toggleSection(line.id, "equipmentEntries")}
                               hideHeader={true}
                             />
-                            {!costCodeShownLocal ? (
-                              <div className="grid gap-3 rounded-[18px] border border-[color:var(--acm-border)] bg-white px-4 py-3 text-xs text-[color:var(--acm-muted-fg)] md:grid-cols-8">
-                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Labor</span><div>{formatCurrency(lineSummary.laborCost)}</div></div>
-                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Subcontractor</span><div>{formatCurrency(lineSummary.subcontractorCost)}</div></div>
-                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Material</span><div>{formatCurrency(lineSummary.materialCost)}</div></div>
-                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Equipment</span><div>{formatCurrency(lineSummary.equipmentCost)}</div></div>
-                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Tax</span><div>{formatCurrency(lineSummary.taxAmount || 0)}</div></div>
-                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Overhead</span><div>{formatCurrency(lineSummary.overheadAmount || 0)}</div></div>
-                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Profit</span><div>{formatCurrency(lineSummary.profitAmount || 0)}</div></div>
-                                <div><span className="font-semibold text-[color:var(--acm-fg)]">Total</span><div>{formatCurrency(lineSummary.total)}</div></div>
-                              </div>
-                            ) : null}
+                            <div className="grid gap-3 rounded-[18px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] px-4 py-3 text-xs text-[color:var(--acm-muted-fg)] md:grid-cols-8">
+                              <div><span className="font-semibold text-[color:var(--acm-fg)]">Labor</span><div>{formatCurrency(lineDisplaySummary.laborDisplayCost)}</div></div>
+                              <div><span className="font-semibold text-[color:var(--acm-fg)]">Subcontractor</span><div>{formatCurrency(lineDisplaySummary.subcontractorDisplayCost)}</div></div>
+                              <div><span className="font-semibold text-[color:var(--acm-fg)]">Material</span><div>{formatCurrency(lineDisplaySummary.materialDisplayCost)}</div></div>
+                              <div><span className="font-semibold text-[color:var(--acm-fg)]">Equipment</span><div>{formatCurrency(lineDisplaySummary.equipmentDisplayCost)}</div></div>
+                              <div><span className="font-semibold text-[color:var(--acm-fg)]">Tax</span><div>{formatCurrency(lineSummary.taxAmount || 0)}</div></div>
+                              <div><span className="font-semibold text-[color:var(--acm-fg)]">Overhead</span><div>{formatCurrency(lineSummary.overheadAmount || 0)}</div></div>
+                              <div><span className="font-semibold text-[color:var(--acm-fg)]">Profit</span><div>{formatCurrency(lineSummary.profitAmount || 0)}</div></div>
+                              <div><span className="font-semibold text-[color:var(--acm-fg)]">Total</span><div>{formatCurrency(lineSummary.total)}</div></div>
+                            </div>
                           </>
                         );
                       })()}
@@ -3530,7 +3630,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                 ))}
 
                 <div className="flex justify-end">
-                  <button type="button" onClick={addCostLine} className="acm-btn acm-btn-secondary h-10 px-4">
+                  <button type="button" onClick={addCostLine} className="acm-btn acm-btn-primary h-10 px-4 ">
                     Add Cost Code
                   </button>
                 </div>
@@ -3546,28 +3646,39 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                 {suggestionLibrary.equipment.map((option) => <option key={option.label} value={option.label} />)}
               </datalist>
 
-              <EstimateTotalsTable previewSummary={previewSummary} uiTotals={uiTotals} />
-              {form.paymentScheduleEnabled && paymentScheduleSummary.entries.length ? (
-                <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5">
-                  <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Payment Schedule</div>
-                  <div className="mt-4 space-y-2">
-                    {paymentScheduleSummary.entries.map((entry, index) => (
-                      <div key={entry.id || index} className="flex items-center justify-between gap-4 text-sm text-[color:var(--acm-fg)]">
-                        <div>{entry.name || `Payment ${index + 1}`}</div>
-                        <div className="font-semibold">{formatCurrency(entry.actualAmount)}</div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <EstimateTotalsTable previewSummary={previewSummary} uiTotals={uiTotals} />
+                </div>
+                <div>
+                  {form.paymentScheduleEnabled && paymentScheduleSummary.entries.length ? (
+                    <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5">
+                      <div className="text-sm font-semibold text-[color:var(--acm-fg)]">Payment Schedule</div>
+                      <div className="mt-4 space-y-2">
+                        {paymentScheduleSummary.entries.map((entry, index) => (
+                          <div key={entry.id || index} className="flex items-center justify-between gap-4 text-sm text-[color:var(--acm-fg)]">
+                            <div>{entry.name || (index === 0 ? "1st Payment" : index === 1 ? formatCurrency(entry.actualAmount) : `Payment ${index + 1}`)}</div>
+                            <div className="font-semibold">{formatCurrency(entry.actualAmount)}</div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-[24px] border border-dashed border-[color:var(--acm-border)] bg-[color:var(--acm-surface-2)] p-5 text-sm text-[color:var(--acm-muted-fg)]">
+                      No payment schedule configured.
+                    </div>
+                  )}
+
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentScheduleDialogOpen(true)}
+                      className="acm-btn acm-btn-primary h-10 px-4 "
+                    >
+                      {form.paymentScheduleEnabled ? "Edit Payment Schedule" : "Add Payment Schedule"}
+                    </button>
                   </div>
                 </div>
-              ) : null}
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setPaymentScheduleDialogOpen(true)}
-                  className="acm-btn acm-btn-secondary h-10 px-4"
-                >
-                  {form.paymentScheduleEnabled ? "Edit Payment Schedule" : "Add Payment Schedule"}
-                </button>
               </div>
               <div className="rounded-[24px] border border-[color:var(--acm-border)] bg-[color:var(--acm-surface)] p-5">
                 <FloatingField label="Notes" value={form.notes}>
@@ -3581,6 +3692,23 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
                   />
                 </FloatingField>
               </div>
+              {showScrollTop ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = scrollContainerRef.current;
+                    if (target && target !== window && typeof target.scrollTo === "function") {
+                      target.scrollTo({ top: 0, behavior: "smooth" });
+                      return;
+                    }
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  className="fixed bottom-6 right-6 z-[999] inline-flex h-12 w-12 cursor-pointer animate-bounce items-center justify-center rounded-full border border-[color:var(--acm-accent)] bg-[color:var(--acm-navbar)] text-white shadow-[0_18px_36px_rgba(15,23,42,0.28)] transition hover:scale-105 pointer-events-auto"
+                  aria-label="Scroll to top"
+                >
+                  <ChevronUp className="h-5 w-5" />
+                </button>
+              ) : null}
           </div>
         </section>
       ) : null}
@@ -3708,7 +3836,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
           </div>
 
           <div className="space-y-3">
-            {(form.paymentScheduleEntries ?? []).map((entry) => (
+            {(form.paymentScheduleEntries ?? []).map((entry, idx) => (
               <div key={entry.id} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto] md:items-end">
                 <FloatingField label="Payment Name" value={entry.name}>
                   <input
@@ -3748,16 +3876,7 @@ export function EstimateDashboardPage({ roleBase = "owner", initialEstimateId = 
             </div>
           </div>
 
-          <FloatingField label="Notes" value={form.paymentScheduleNotes}>
-            <textarea
-              ref={autoResizeTextarea}
-              className={sheetInputClass("peer min-h-[96px] resize-none overflow-hidden pt-5")}
-              placeholder=" "
-              value={form.paymentScheduleNotes}
-              onChange={(event) => updateEstimate("paymentScheduleNotes", event.target.value)}
-              onInput={(event) => autoResizeTextarea(event.currentTarget)}
-            />
-          </FloatingField>
+          {/* Notes removed per UI request */}
 
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setPaymentScheduleDialogOpen(false)} className="acm-btn acm-btn-secondary h-10 px-4">

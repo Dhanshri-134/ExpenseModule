@@ -30,6 +30,7 @@
   --acm-label-bg: rgba(244, 248, 255, 0.94);
   --acm-label-font: "Aptos", "Segoe UI Semibold", "Trebuchet MS", sans-serif;
   --acm-sidebar: rgba(248, 250, 255, 0.94);
+  --acm-navbar: #000033;
 
   --background: var(--acm-bg);
   --foreground: var(--acm-fg);
@@ -198,7 +199,7 @@ html[data-theme="dark"] body {
 
   .acm-btn-primary {
     @apply text-white;
-    background: #f59e0b;
+    background: var(--acm-surface-1);
     /* box-shadow: 0 18px 45px rgba(245, 158, 11, 0.24); */
   }
 

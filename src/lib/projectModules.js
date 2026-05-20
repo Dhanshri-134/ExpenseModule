@@ -512,6 +512,27 @@ function drawRightAlignedText(commands, text, rightX, y, size = 10, fillRgb = [1
   drawText(commands, safeText, rightX - width, y, size, fillRgb);
 }
 
+function drawWrappedRightAlignedText(commands, text, leftX, rightX, y, size = 10, leading = 13, fillRgb = [15, 23, 42]) {
+  const width = Math.max(0, rightX - leftX);
+  const maxLength = Math.max(12, Math.floor(width / (size * 0.56)));
+  const lines = wrapPdfLine(text, maxLength);
+  lines.forEach((lineText, index) => {
+    const lineWidth = approximatePdfTextWidth(lineText, size);
+    const x = Math.max(leftX, rightX - lineWidth);
+    drawText(commands, lineText, x, y - index * leading, size, fillRgb);
+  });
+  return lines.length * leading;
+}
+
+function drawWrappedLeftAlignedText(commands, text, x, y, width, size = 10, leading = 13, fillRgb = [15, 23, 42]) {
+  const maxLength = Math.max(12, Math.floor(width / (size * 0.56)));
+  const lines = wrapPdfLine(text, maxLength);
+  lines.forEach((lineText, index) => {
+    drawText(commands, lineText, x, y - index * leading, size, fillRgb);
+  });
+  return lines.length * leading;
+}
+
 function drawRect(commands, x, y, width, height, fillRgb, strokeRgb = null, lineWidth = 1) {
   if (fillRgb) commands.push(`${pdfColor(fillRgb)} rg`);
   if (strokeRgb) commands.push(`${pdfColor(strokeRgb)} RG`);
@@ -577,15 +598,19 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
     const leftX = page.margin;
     const rightX = page.width - page.margin;
     const headerTop = page.height - 54;
+    const headerRightColumnLeft = page.margin + (page.width - page.margin * 2) * 0.6;
+    const headerRightColumnWidth = rightX - headerRightColumnLeft;
 
     drawText(pageCommands, rightTitle, leftX, headerTop, 16, accent);
     if (subtitle) {
       drawText(pageCommands, subtitle, leftX, headerTop - 16, 9, muted);
     }
 
-    drawRightAlignedText(pageCommands, companyLines[0] || "Your Company", rightX, headerTop, 16, ink);
-    companyLines.slice(1).forEach((lineText, index) => {
-      drawRightAlignedText(pageCommands, lineText, rightX, headerTop - 16 - index * 12, 8.5, muted);
+    let companyY = headerTop;
+    companyY -= drawWrappedLeftAlignedText(pageCommands, companyLines[0] || "Your Company", headerRightColumnLeft, companyY, headerRightColumnWidth, 16, 16, ink);
+    companyLines.slice(1).forEach((lineText) => {
+      companyY -= 2;
+      companyY -= drawWrappedLeftAlignedText(pageCommands, lineText, headerRightColumnLeft, companyY, headerRightColumnWidth, 8.5, 11, muted);
     });
 
     pageCommands.push(`${pdfColor(accent)} RG`);
@@ -688,42 +713,45 @@ function buildPdfDocument(estimate, { documentType = "estimate" } = {}) {
 
   const tableX = page.margin;
   const tableWidth = availableWidth;
-  const descriptionWidth = 255;
-  const rateWidth = 90;
-  const quantityWidth = 70;
-  const totalWidth = tableWidth - descriptionWidth - rateWidth - quantityWidth;
+  const costCodeWidth = tableWidth * 0.2;
+  const descriptionWidth = tableWidth * 0.6;
+  const totalWidth = tableWidth * 0.2;
   const headerHeight = 24;
 
   const renderTableHeader = () => {
     commands.push(`${pdfColor(line)} RG`);
     commands.push("0.8 w");
-    commands.push(`${tableX} ${y - headerHeight} m ${tableX + tableWidth} ${y - headerHeight} l S`);
-    drawText(commands, "Description", tableX + 4, y - 16, 9, ink);
-    drawRightAlignedText(commands, "Rate", tableX + descriptionWidth + rateWidth - 8, y - 16, 9, ink);
-    drawRightAlignedText(commands, "Quantity", tableX + descriptionWidth + rateWidth + quantityWidth - 8, y - 16, 9, ink);
-    drawRightAlignedText(commands, "Total", tableX + tableWidth - 8, y - 16, 9, ink);
+    commands.push(`${tableX} ${y.toFixed(2)} m ${tableX + tableWidth} ${y.toFixed(2)} l S`);
+    commands.push(`${tableX} ${(y - headerHeight).toFixed(2)} m ${tableX + tableWidth} ${(y - headerHeight).toFixed(2)} l S`);
+    drawText(commands, "Cost Code", tableX + 10, y - 16, 9, ink);
+    drawText(commands, "Description", tableX + costCodeWidth + 10, y - 16, 9, ink);
+    drawRightAlignedText(commands, "Total", tableX + tableWidth - 10, y - 16, 9, ink);
     y -= headerHeight;
   };
 
   renderTableHeader();
 
   rows.forEach((row) => {
-    const costCodeText = String(row.code || row.label || "-").trim() || "-";
-    const scopeText = String(row.description || row.detail || row.label || row.code || "-").trim() || "-";
-    const scopeLines = wrapPdfLine(scopeText, 74);
-    const rowHeight = 20;
-    const scopeHeight = Math.max(20, scopeLines.length * 10 + 6);
-    addNewPageIfNeeded(rowHeight + scopeHeight + 8, footerReserve, renderTableHeader);
-    drawText(commands, costCodeText, tableX + 4, y - 13, 8.5, ink);
-    drawRightAlignedText(commands, formatPdfCurrency(row.rate || row.totalPrice || 0), tableX + descriptionWidth + rateWidth - 8, y - 13, 8.5, ink);
-    drawRightAlignedText(commands, String(row.quantity || 1), tableX + descriptionWidth + rateWidth + quantityWidth - 8, y - 13, 8.5, ink);
-    drawRightAlignedText(commands, formatPdfCurrency(row.totalPrice || 0), tableX + tableWidth - 8, y - 13, 8.5, ink);
-    y -= rowHeight;
-    scopeLines.forEach((lineText, index) => {
-      drawText(commands, lineText, tableX + 4, y - 7 - index * 10, 8, ink);
+    const normalizedCode = String(row.code || "").trim();
+    const normalizedLabel = String(row.label || "").trim();
+    const costCodeText =
+      normalizedCode && normalizedLabel && normalizedCode.toLowerCase() !== normalizedLabel.toLowerCase()
+        ? `${normalizedCode} - ${normalizedLabel}`
+        : normalizedLabel || normalizedCode || "-";
+    const descriptionText = String(row.description || row.detail || normalizedLabel || normalizedCode || "-").trim() || "-";
+    const costCodeLines = wrapPdfLine(costCodeText, Math.max(12, Math.floor((costCodeWidth - 20) / (8.3 * 0.56))));
+    const descriptionLines = wrapPdfLine(descriptionText, Math.max(12, Math.floor((descriptionWidth - 12) / (8.3 * 0.5))));
+    const rowHeight = Math.max(26, Math.max(costCodeLines.length, descriptionLines.length) * 10 + 10);
+    addNewPageIfNeeded(rowHeight + 8, footerReserve, renderTableHeader);
+    costCodeLines.forEach((lineText, index) => {
+      drawText(commands, lineText, tableX + 10, y - 15 - index * 9, 8.3, ink);
     });
-    commands.push(`${tableX} ${y - scopeHeight} m ${tableX + tableWidth} ${y - scopeHeight} l S`);
-    y -= scopeHeight;
+    descriptionLines.forEach((lineText, index) => {
+      drawText(commands, lineText, tableX + costCodeWidth + 10, y - 15 - index * 9, 8.3, ink);
+    });
+    drawRightAlignedText(commands, formatPdfCurrency(row.totalPrice || 0), tableX + tableWidth - 10, y - 15, 8.5, ink);
+    commands.push(`${tableX} ${(y - rowHeight).toFixed(2)} m ${tableX + tableWidth} ${(y - rowHeight).toFixed(2)} l S`);
+    y -= rowHeight;
   });
 
   y -= 16;
